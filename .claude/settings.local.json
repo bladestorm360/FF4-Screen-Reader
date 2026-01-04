@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./build_and_deploy.bat)",
+      "Bash(cat:*)",
+      "Bash(dir \"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy iv pr\\\\melonloader\\\\logs\")",
+      "Bash(.build_and_deploy.bat)",
+      "Bash(cmd /c \"cd /d D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader && build_and_deploy.bat\")",
+      "Bash(cmd /c \"cd /d D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader && build_and_deploy.bat 2>&1\")",
+      "Bash(cmd //c \"D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\\\\build_and_deploy.bat\")",
+      "Bash(cmd //c \"dir d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy iv pr\\\\melonloader\\\\logs\")",
+      "Bash(cmd //c \"dir \"\"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy iv pr\\\\melonloader\\\\logs\"\"\")",
+      "Bash(cmd //c \"cd /d D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader && build_and_deploy.bat\")",
+      "Bash(dir /s \"D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\")",
+      "Bash(dir:*)",
+      "Bash(cmd //c d:gamesdevunityffprff4ff4-screen-readerbuild_and_deploy.bat)",
+      "Bash(cmd /c \"d:\\\\games\\\\dev\\\\unity\\\\ffpr\\\\ff4\\\\ff4-screen-reader\\\\build_and_deploy.bat\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\\\\build_and_deploy.bat\")",
+      "Bash(powershell -Command \"& cmd /c ''D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\\\\build_and_deploy.bat''\")"
+    ],
+    "additionalDirectories": [
+      "d:\\games\\dev\\unity\\ffpr\\ff4",
+      "D:\\Games\\Dev\\Unity\\FFPR\\ff5\\ff5-screen-reader",
+      "D:\\Games\\steamlibrary\\steamapps\\common\\final fantasy iv pr"
+    ]
+  }
+}
