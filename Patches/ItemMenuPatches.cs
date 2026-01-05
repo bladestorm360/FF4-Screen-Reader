@@ -4,6 +4,7 @@ using MelonLoader;
 using Il2CppLast.UI.KeyInput;
 using Il2CppLast.UI;
 using Il2CppLast.Defaine;
+using Il2CppLast.Management;
 using FFIV_ScreenReader.Core;
 using UnityEngine;
 using static FFIV_ScreenReader.Utils.TextUtils;
@@ -341,6 +342,119 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in EquipmentInfoWindowController.SelectContent patch: {ex.Message}");
+            }
+        }
+    }
+
+    // Patch ItemUseController.SelectContent to announce character stats when selecting item targets
+    // Note: SelectContent is PRIVATE, so we must use string literal instead of nameof()
+    [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.ItemUseController), "SelectContent", new Type[] {
+        typeof(Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController>),
+        typeof(Il2CppLast.UI.Cursor)
+    })]
+    public static class ItemUseController_SelectContent_Patch
+    {
+        private static string lastAnnouncement = "";
+
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.UI.KeyInput.ItemUseController __instance, Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController> targetContents, Il2CppLast.UI.Cursor targetCursor)
+        {
+            try
+            {
+                if (__instance == null || targetCursor == null)
+                {
+                    return;
+                }
+
+                // Access the contentList field via reflection or try to iterate targetContents
+                var targetList = new Il2CppSystem.Collections.Generic.List<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController>(targetContents);
+                if (targetList == null || targetList.Count == 0)
+                {
+                    return;
+                }
+
+                int index = targetCursor.Index;
+                if (index < 0 || index >= targetList.Count)
+                {
+                    return;
+                }
+
+                var selectedController = targetList[index];
+                if (selectedController == null || selectedController.CurrentData == null)
+                {
+                    return;
+                }
+
+                var data = selectedController.CurrentData;
+                string characterName = data.Name;
+                if (string.IsNullOrEmpty(characterName))
+                {
+                    return;
+                }
+
+                string announcement = characterName;
+
+                try
+                {
+                    var parameter = data.Parameter;
+                    if (parameter != null)
+                    {
+                        int currentHP = parameter.CurrentHP;
+                        int maxHP = parameter.ConfirmedMaxHp();
+                        int currentMP = parameter.CurrentMP;
+                        int maxMP = parameter.ConfirmedMaxMp();
+
+                        announcement += $", HP {currentHP}/{maxHP}, MP {currentMP}/{maxMP}";
+
+                        var conditionList = parameter.ConfirmedConditionList();
+                        if (conditionList != null && conditionList.Count > 0)
+                        {
+                            var messageManager = MessageManager.Instance;
+                            if (messageManager != null)
+                            {
+                                var statusNames = new System.Collections.Generic.List<string>();
+
+                                foreach (var condition in conditionList)
+                                {
+                                    if (condition != null)
+                                    {
+                                        string conditionMesId = condition.MesIdName;
+                                        if (!string.IsNullOrEmpty(conditionMesId) && conditionMesId != "None")
+                                        {
+                                            string localizedConditionName = messageManager.GetMessage(conditionMesId);
+                                            if (!string.IsNullOrEmpty(localizedConditionName))
+                                            {
+                                                statusNames.Add(localizedConditionName);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (statusNames.Count > 0)
+                                {
+                                    announcement += $", {string.Join(", ", statusNames)}";
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"Error reading HP/MP for {characterName}: {ex.Message}");
+                }
+
+                if (announcement == lastAnnouncement)
+                {
+                    return;
+                }
+                lastAnnouncement = announcement;
+
+                MelonLogger.Msg($"[Item Target] {announcement}");
+                FFIV_ScreenReaderMod.SpeakText(announcement);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ItemUseController.SelectContent patch: {ex.Message}");
             }
         }
     }

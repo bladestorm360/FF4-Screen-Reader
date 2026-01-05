@@ -3,6 +3,8 @@ using UnityEngine.EventSystems;
 using Il2Cpp;
 using MelonLoader;
 using FFIV_ScreenReader.Utils;
+using FFIV_ScreenReader.Menus;
+using FFIV_ScreenReader.Patches;
 using ConfigActualDetailsControllerBase_KeyInput = Il2CppLast.UI.KeyInput.ConfigActualDetailsControllerBase;
 
 namespace FFIV_ScreenReader.Core
@@ -36,6 +38,12 @@ namespace FFIV_ScreenReader.Core
             {
                 // Player is typing text - skip all hotkey processing
                 return;
+            }
+
+            // Handle status screen navigation (highest priority when active)
+            if (HandleStatusInput())
+            {
+                return; // Consumed by status screen
             }
 
             // Handle field input (entity navigation)
@@ -73,6 +81,64 @@ namespace FFIV_ScreenReader.Core
                 MelonLoader.MelonLogger.Warning($"Error checking input field state: {ex.Message}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Handles input for status screen stat navigation.
+        /// Returns true if input was consumed, false otherwise.
+        /// </summary>
+        private bool HandleStatusInput()
+        {
+            // Only active when status navigation is enabled
+            var tracker = StatusNavigationTracker.Instance;
+            if (!tracker.IsNavigationActive)
+            {
+                return false;
+            }
+
+            // Up Arrow - Previous stat
+            if (Input.GetKeyDown(KeyCode.UpArrow))
+            {
+                StatusNavigationReader.NavigatePrevious();
+                return true;
+            }
+
+            // Down Arrow - Next stat
+            if (Input.GetKeyDown(KeyCode.DownArrow))
+            {
+                StatusNavigationReader.NavigateNext();
+                return true;
+            }
+
+            // Page Up - Jump to previous group
+            if (Input.GetKeyDown(KeyCode.PageUp))
+            {
+                StatusNavigationReader.JumpToPreviousGroup();
+                return true;
+            }
+
+            // Page Down - Jump to next group
+            if (Input.GetKeyDown(KeyCode.PageDown))
+            {
+                StatusNavigationReader.JumpToNextGroup();
+                return true;
+            }
+
+            // Home - Jump to first stat
+            if (Input.GetKeyDown(KeyCode.Home))
+            {
+                StatusNavigationReader.JumpToTop();
+                return true;
+            }
+
+            // End - Jump to last stat
+            if (Input.GetKeyDown(KeyCode.End))
+            {
+                StatusNavigationReader.JumpToBottom();
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

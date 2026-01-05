@@ -368,11 +368,145 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
+                var parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("item_target_select"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
                 // Skip ALL battle navigation (battle controller patches handle everything in battle)
                 var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
                 if (enemyEntities != null && enemyEntities.Length > 0)
                 {
                     return; // We're in battle - let controller patches handle it
+                }
+
+                // Skip if this is battle target selection
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    string parentName = parent.name.ToLower();
+                    if (parentName.Contains("battle_target") ||
+                        parentName.Contains("battletarget") ||
+                        parentName.Contains("battle_command") ||
+                        parentName.Contains("battlecommand") ||
+                        parentName.Contains("battle_item") ||
+                        parentName.Contains("battleitem") ||
+                        parentName.Contains("battle_ability") ||
+                        parentName.Contains("battleability") ||
+                        parentName.Contains("battle_infomation") ||
+                        parentName.Contains("battleinfomation") ||
+                        parentName.Contains("battle_menu") ||
+                        parentName.Contains("battlemenu"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is title menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("title_command") || parent.name.Contains("TitleMenu"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is config menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("config") || parent.name.Contains("Config"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is item menu navigation (handled by ItemListController.SelectContent patch)
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("list_window"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is equipment menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("equip_select"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is equipment slot navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("equip_info_content") || parent.name.Contains("EquipmentInfo"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is shop navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("shop") || parent.name.Contains("Shop"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is party setting menu
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("party") || parent.name.Contains("Party"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is status details screen
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("status") || parent.name.Contains("Status"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is ability menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    string parentName = parent.name.ToLower();
+                    if (parentName.Contains("ability"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
                 }
 
                 // Use managed coroutine system
@@ -405,11 +539,145 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
+                var parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("item_target_select"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
                 // Skip ALL battle navigation (battle controller patches handle everything in battle)
                 var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
                 if (enemyEntities != null && enemyEntities.Length > 0)
                 {
                     return; // We're in battle - let controller patches handle it
+                }
+
+                // Skip if this is battle target selection
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    string parentName = parent.name.ToLower();
+                    if (parentName.Contains("battle_target") ||
+                        parentName.Contains("battletarget") ||
+                        parentName.Contains("battle_command") ||
+                        parentName.Contains("battlecommand") ||
+                        parentName.Contains("battle_item") ||
+                        parentName.Contains("battleitem") ||
+                        parentName.Contains("battle_ability") ||
+                        parentName.Contains("battleability") ||
+                        parentName.Contains("battle_infomation") ||
+                        parentName.Contains("battleinfomation") ||
+                        parentName.Contains("battle_menu") ||
+                        parentName.Contains("battlemenu"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is title menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("title_command") || parent.name.Contains("TitleMenu"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is config menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("config") || parent.name.Contains("Config"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is item menu navigation (handled by ItemListController.SelectContent patch)
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("list_window"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is equipment menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("equip_select"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is equipment slot navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("equip_info_content") || parent.name.Contains("EquipmentInfo"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is shop navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("shop") || parent.name.Contains("Shop"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is party setting menu
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("party") || parent.name.Contains("Party"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is status details screen
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    if (parent.name.Contains("status") || parent.name.Contains("Status"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
+                }
+
+                // Skip if this is ability menu navigation
+                parent = __instance.transform.parent;
+                while (parent != null)
+                {
+                    string parentName = parent.name.ToLower();
+                    if (parentName.Contains("ability"))
+                    {
+                        return;
+                    }
+                    parent = parent.parent;
                 }
 
                 // Use managed coroutine system

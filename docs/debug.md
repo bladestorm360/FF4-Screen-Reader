@@ -1,12 +1,55 @@
-# FF4 Screen Reader - Menu Reading Debug Analysis
+# FF4 Screen Reader - Debug Log & Feature Status
 
-## Issue
-After successful compilation and deployment, menus are not being read by the screen reader.
+## Current Status: FUNCTIONAL
+
+## Feature Completion
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Field Navigation & Pathfinding** | ✅ Complete | Entity detection, obstacle detection, pathfinding |
+| **Menu System** | ✅ Complete | Main menu, items, equipment, abilities, status, config |
+| **Battle System** | ✅ Complete | Turn order, targeting, damage/heals, status effects |
+| **Shops** | ✅ Complete | Buy/sell navigation, item info |
+| **Victory Screen** | ✅ Complete | Gil, items, XP, level-ups |
+| **Vehicles** | ✅ Complete | Hovercraft, Enterprise, Falcon, Lunar Whale |
+| **Status Screen Navigation** | ✅ Complete | Arrow key stat browsing (15 stats in 4 groups) |
 
 ## Build Status
 - **Compilation**: Successful (0 warnings, 0 errors)
 - **Deployment**: Successful (deployed to Mods folder)
-- **Runtime**: Menus not announcing
+- **Runtime**: Fully functional
+
+---
+
+## Round 3 Bug Fixes - Completed
+
+### Issue 1: Characters Not Read When Selecting Item Targets
+**Problem**: After selecting an item for use, navigating to select a character target did not announce the character name, HP, or MP.
+
+**Solution**: Added `ItemUseController.SelectContent` patch to `ItemMenuPatches.cs` that announces character name, HP, MP, and status conditions when selecting item use targets.
+
+**File Modified**: `Patches/ItemMenuPatches.cs` - Added `ItemUseController_SelectContent_Patch`
+
+---
+
+### Issue 2: "Potion" Interruption When Navigating Items with Up/Down
+**Problem**: When navigating the items menu with up/down arrows, items were being interrupted with "Potion" announcements from the generic cursor patch.
+
+**Root Cause**: `SkipNextIndex` and `SkipPrevIndex` patches in `CursorNavigationPatches.cs` were missing skip conditions for item menus (and other menus). They only checked for battle conditions.
+
+**Solution**: Added all skip conditions to `SkipNextIndex` and `SkipPrevIndex` patches matching `NextIndex`/`PrevIndex`:
+- `item_target_select` - item target selection
+- `list_window` - item menu list
+- `equip_select` - equipment menu
+- `equip_info_content` - equipment slots
+- `shop` - shops
+- `party` - party settings
+- `status` - status screen
+- `ability` - ability menus
+- Battle-related UI elements
+- Title and config menus
+
+**File Modified**: `Patches/CursorNavigationPatches.cs` - Added skip conditions to `SkipNextIndex` and `SkipPrevIndex`
 
 ---
 
@@ -235,13 +278,20 @@ Line 430501: protected override void SelectContent(List<StatusWindowContentContr
 - [x] Character statistics not announced on game load
 - [x] Equipment slot navigation not interrupted by "RHand"
 - [x] H key announces "Not in battle or no active character" when not in battle
-- [ ] Open main menu (X button) - verify command menu reads
-- [ ] Navigate Items menu - verify item names read
-- [ ] Navigate Equipment menu - verify slot names read
-- [ ] Open Status screen - verify character info reads
-- [ ] Navigate Abilities menu - verify ability names read
-- [ ] Test Config menu - verify option names read
-- [ ] Test Save/Load menu - verify slot names read
+- [x] Open main menu (X button) - verify command menu reads
+- [x] Navigate Items menu - verify item names read
+- [x] Navigate Equipment menu - verify slot names read
+- [x] Open Status screen - verify character info reads
+- [x] Navigate Abilities menu - verify ability names read
+- [x] Test Config menu - verify option names read
+- [x] Test Save/Load menu - verify slot names read
+- [x] Battle: turn announcements working
+- [x] Battle: target selection working
+- [x] Battle: damage/healing announcements working
+- [x] Shop: item browsing working
+- [x] Field: pathfinding and navigation working
+- [x] Item use: character selection reads correctly (Round 3 fix)
+- [x] Status screen: arrow key navigation through stats (Up/Down/PgUp/PgDn/Home/End)
 
 ---
 

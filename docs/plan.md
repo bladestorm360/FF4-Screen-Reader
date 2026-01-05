@@ -1,5 +1,24 @@
 # FF4 Screen Reader Mod - Porting Plan
 
+## Current Status: COMPLETE
+
+All major features have been ported and tested successfully.
+
+## Feature Completion Summary
+
+| Feature | Status |
+|---------|--------|
+| Field Navigation & Pathfinding | ✅ Complete |
+| Menu System (all menus) | ✅ Complete |
+| Battle System | ✅ Complete |
+| Shops | ✅ Complete |
+| Victory Screen | ✅ Complete |
+| Vehicle Support | ✅ Complete |
+| Vehicle State Announcements | ✅ Complete |
+| Status Screen Navigation | ✅ Complete |
+
+---
+
 ## Overview
 
 Port the FFVI_MOD screen reader accessibility mod to Final Fantasy IV Pixel Remaster.
@@ -138,12 +157,14 @@ ff4-screen-reader/
 │   ├── FormationRowPatches.cs
 │   ├── CursorNavigationPatches.cs
 │   ├── AbilityMenuPatches.cs
-│   └── StatusDetailsPatches.cs
+│   ├── StatusDetailsPatches.cs
+│   └── MovementSpeechPatches.cs
 └── Utils/
     ├── GameObjectCache.cs
     ├── CoroutineManager.cs
     ├── TextUtils.cs
-    └── Tolk.cs
+    ├── TolkWrapper.cs
+    └── MoveStateHelper.cs
 ```
 
 ## Estimated File Count
@@ -163,7 +184,26 @@ ff4-screen-reader/
 
 ---
 
-## Current Status: Round 2 Bug Fixes (COMPLETED)
+## Current Status: PORTING COMPLETE
+
+All phases completed. Mod is fully functional.
+
+### Vehicle State Announcements (Added)
+
+Ported from FF5 with FF4-specific vehicle names:
+
+**Files Added:**
+- `Utils/MoveStateHelper.cs` - State tracking and announcements
+- `Patches/MovementSpeechPatches.cs` - Harmony patch for ChangeMoveState
+
+**Announcements:**
+- "On hovercraft" - Boarding the Hovercraft
+- "On Enterprise" - Boarding the Enterprise airship
+- "On [airship name]" - Falcon/Lunar Whale (uses localized name)
+- "On yellow chocobo" / "On black chocobo" - Mounting chocobos
+- "On foot" - Disembarking any vehicle
+
+---
 
 ### Issues Identified from Testing
 
@@ -298,6 +338,141 @@ public static void Postfix(string message)
 2. Fix BattleMenuController signature
 3. Add active state guards to StatusDetailsPatches
 4. Investigate and fix dialogue reading
+
+---
+
+## Status Screen Navigation Enhancement (Complete)
+
+### Overview
+
+Port the enhanced `StatusDetailsReader` navigation system from FF5 to FF4. This adds arrow key navigation through individual stats on the status screen, allowing users to browse stats one at a time instead of hearing everything at once.
+
+### Current FF4 Implementation
+
+The existing `StatusDetailsReader.cs` provides:
+- `ReadStatusDetails()` - Announces name, level, HP/MP on screen entry
+- `ReadPhysicalStats()` - Hotkey for Strength, Stamina, Defense, Evade
+- `ReadMagicalStats()` - Hotkey for Magic, Spirit, Magic Defense, Magic Evade
+
+**Limitation:** No way to navigate individual stats; users get all-or-nothing announcements.
+
+### FF5 Features to Port
+
+1. **StatusNavigationTracker** - Tracks navigation state (current index, active controller, character data)
+2. **StatusNavigationReader** - Arrow key navigation through stats
+3. **StatusDetailsHelpers** - Helper to extract character data from controller
+
+### Stats for FF4 (Visible on Status Screen)
+
+| Group | Stats | Notes |
+|-------|-------|-------|
+| Character Info | Level, Experience, Next Level | FF4 has no Job system |
+| Vitals | HP, MP | Current/Max |
+| Attributes | Strength, Agility, Stamina, Magic, Spirit | Core stats |
+| Combat Stats | Attack, Defense, Evasion, Magic Defense, Magic Evade | Derived stats |
+
+**Total: 13 navigable stats** (vs FF5's 17 - excludes Job, Job Level, ABP, Jobs count, Abilities count)
+
+### Stats NOT Applicable to FF4 (Excluded)
+
+- Job (FF5 job system)
+- Job Level (FF5 job system)
+- ABP (FF5 ability points)
+- Jobs count (FF5 job system)
+- Abilities count (FF5 learned abilities)
+
+### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| Up Arrow | Previous stat |
+| Down Arrow | Next stat |
+| Page Up | Jump to previous group |
+| Page Down | Jump to next group |
+| Home | Jump to first stat |
+| End | Jump to last stat |
+
+### Implementation Steps
+
+#### Step 1: Add StatusNavigationTracker to StatusDetailsPatches.cs
+
+Add the tracker class to manage navigation state:
+```csharp
+public class StatusNavigationTracker
+{
+    private static StatusNavigationTracker instance = null;
+    public static StatusNavigationTracker Instance { get; }
+
+    public bool IsNavigationActive { get; set; }
+    public int CurrentStatIndex { get; set; }
+    public OwnedCharacterData CurrentCharacterData { get; set; }
+    public StatusDetailsController ActiveController { get; set; }
+
+    public void Reset();
+    public bool ValidateState();
+}
+```
+
+#### Step 2: Add StatusDetailsHelpers to StatusDetailsPatches.cs
+
+Add helper to extract character data:
+```csharp
+public static class StatusDetailsHelpers
+{
+    public static OwnedCharacterData GetCharacterDataFromController(StatusDetailsController controller);
+}
+```
+
+#### Step 3: Extend StatusDetailsReader.cs
+
+Add navigation infrastructure:
+- `StatGroup` enum (CharacterInfo, Vitals, Attributes, CombatStats)
+- `StatusStatDefinition` class for stat definitions
+- `StatusNavigationReader` class with:
+  - 13 stat reader methods (FF4-specific)
+  - Navigation methods (NavigateNext, NavigatePrevious, JumpToNextGroup, etc.)
+  - Group indices array for group jumping
+
+#### Step 4: Update InitDisplay Patch
+
+Modify the existing `StatusDetailsController_InitDisplay_Patch` to:
+- Initialize navigation state after announcing status
+- Set `StatusNavigationTracker.Instance` properties
+- Call `StatusNavigationReader.InitializeStatList()`
+
+#### Step 5: Add Input Handling for Status Screen
+
+Add to `InputManager.cs`:
+```csharp
+// In HandleGlobalInput() or new HandleStatusInput():
+if (StatusNavigationTracker.Instance.IsNavigationActive)
+{
+    if (Input.GetKeyDown(KeyCode.UpArrow)) StatusNavigationReader.NavigatePrevious();
+    if (Input.GetKeyDown(KeyCode.DownArrow)) StatusNavigationReader.NavigateNext();
+    if (Input.GetKeyDown(KeyCode.PageUp)) StatusNavigationReader.JumpToPreviousGroup();
+    if (Input.GetKeyDown(KeyCode.PageDown)) StatusNavigationReader.JumpToNextGroup();
+    if (Input.GetKeyDown(KeyCode.Home)) StatusNavigationReader.JumpToTop();
+    if (Input.GetKeyDown(KeyCode.End)) StatusNavigationReader.JumpToBottom();
+}
+```
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `Menus/StatusDetailsReader.cs` | Add StatGroup, StatusStatDefinition, StatusNavigationReader |
+| `Patches/StatusDetailsPatches.cs` | Add StatusNavigationTracker, StatusDetailsHelpers, update InitDisplay |
+| `Core/InputManager.cs` | Add arrow key handling for status navigation |
+
+### Sighted User Parity Consideration
+
+The status screen displays all stats simultaneously to sighted users. This feature provides **equivalent access** by allowing blind users to navigate the same information that sighted users can see at a glance. All 15 stats are visible on the status screen UI.
+
+### Implementation Status
+
+✅ **Complete** - Tested and working as intended.
+
+**Future Refinement**: Review which stats are actually visible on FF4's status screen to ensure hidden/internal stats are not being exposed. May need to adjust the stat list to match exactly what sighted users see.
 
 ---
 

@@ -66,6 +66,107 @@ namespace FFIV_ScreenReader.Patches
     }
 
     /// <summary>
+    /// Tracks navigation state within the status screen for arrow key navigation.
+    /// Singleton pattern for global access from InputManager.
+    /// </summary>
+    public class StatusNavigationTracker
+    {
+        private static StatusNavigationTracker instance = null;
+        public static StatusNavigationTracker Instance
+        {
+            get
+            {
+                if (instance == null)
+                {
+                    instance = new StatusNavigationTracker();
+                }
+                return instance;
+            }
+        }
+
+        public bool IsNavigationActive { get; set; }
+        public int CurrentStatIndex { get; set; }
+        public OwnedCharacterData CurrentCharacterData { get; set; }
+        public StatusDetailsController ActiveController { get; set; }
+
+        private StatusNavigationTracker()
+        {
+            Reset();
+        }
+
+        public void Reset()
+        {
+            IsNavigationActive = false;
+            CurrentStatIndex = 0;
+            CurrentCharacterData = null;
+            ActiveController = null;
+        }
+
+        public bool ValidateState()
+        {
+            return IsNavigationActive &&
+                   CurrentCharacterData != null &&
+                   ActiveController != null &&
+                   ActiveController.gameObject != null &&
+                   ActiveController.gameObject.activeInHierarchy;
+        }
+    }
+
+    /// <summary>
+    /// Helper methods for status screen patches.
+    /// </summary>
+    public static class StatusDetailsHelpers
+    {
+        /// <summary>
+        /// Extract character data from the StatusDetailsController.
+        /// </summary>
+        public static OwnedCharacterData GetCharacterDataFromController(StatusDetailsController controller)
+        {
+            try
+            {
+                var statusController = controller?.statusController;
+                if (statusController != null)
+                {
+                    // Try direct access first
+                    try
+                    {
+                        var targetData = statusController.targetData;
+                        if (targetData != null)
+                        {
+                            MelonLogger.Msg("[Status] Successfully accessed targetData directly");
+                            return targetData;
+                        }
+                    }
+                    catch
+                    {
+                        // Direct access failed, try Traverse
+                    }
+
+                    // Try Traverse if field is private
+                    try
+                    {
+                        var traversed = Traverse.Create(statusController).Field("targetData").GetValue<OwnedCharacterData>();
+                        if (traversed != null)
+                        {
+                            MelonLogger.Msg("[Status] Successfully accessed targetData via Traverse");
+                            return traversed;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Warning($"[Status] Traverse access failed: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error accessing character data: {ex.Message}");
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Controller-based patches for the character status menu.
     /// Announces character names when navigating the selection list and status details when viewing.
     /// Provides hotkeys for detailed stat announcements ([=physical, ]=magical).
@@ -229,6 +330,36 @@ namespace FFIV_ScreenReader.Patches
 
                 MelonLogger.Msg($"[Status Details] {statusText}");
                 FFIV_ScreenReaderMod.SpeakText(statusText);
+
+                // Initialize navigation state for arrow key browsing
+                try
+                {
+                    var characterData = StatusDetailsHelpers.GetCharacterDataFromController(controller);
+                    if (characterData != null)
+                    {
+                        var tracker = StatusNavigationTracker.Instance;
+                        tracker.IsNavigationActive = true;
+                        tracker.CurrentStatIndex = 0;  // Start at top
+                        tracker.ActiveController = controller;
+                        tracker.CurrentCharacterData = characterData;
+
+                        // Also set for existing stat reading methods (hotkeys)
+                        StatusDetailsReader.SetCurrentCharacterData(characterData);
+
+                        // Initialize the stat list
+                        StatusNavigationReader.InitializeStatList();
+
+                        MelonLogger.Msg("[Status] Navigation initialized - use Up/Down arrows to browse stats");
+                    }
+                    else
+                    {
+                        MelonLogger.Warning("[Status] Could not get character data for navigation");
+                    }
+                }
+                catch (Exception navEx)
+                {
+                    MelonLogger.Warning($"Error initializing navigation: {navEx.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -254,8 +385,13 @@ namespace FFIV_ScreenReader.Patches
                 // Clear character data when leaving status screen
                 StatusDetailsReader.ClearCurrentCharacterData();
 
+                // Reset navigation state
+                StatusNavigationTracker.Instance.Reset();
+
                 // Reset the status menu tracker
                 StatusMenuTracker.Reset();
+
+                MelonLogger.Msg("[Status] Menu exited, state cleared");
             }
             catch (Exception ex)
             {
