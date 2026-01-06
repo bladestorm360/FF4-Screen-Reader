@@ -13,6 +13,7 @@
 | **Victory Screen** | ✅ Complete | Gil, items, XP, level-ups |
 | **Vehicles** | ✅ Complete | Hovercraft, Enterprise, Falcon, Lunar Whale |
 | **Status Screen Navigation** | ✅ Complete | Arrow key stat browsing (15 stats in 4 groups) |
+| **Wall Bump Detection** | ✅ Complete | Audio feedback when walking into walls |
 
 ## Build Status
 - **Compilation**: Successful (0 warnings, 0 errors)
@@ -50,6 +51,42 @@
 - Title and config menus
 
 **File Modified**: `Patches/CursorNavigationPatches.cs` - Added skip conditions to `SkipNextIndex` and `SkipPrevIndex`
+
+---
+
+## Vehicle State Announcements Fix - Completed
+
+### Issue Description
+Vehicle state announcements (boarding/disembarking Falcon, Hovercraft, etc.) were not triggering despite having the `MoveStateHelper` and `MovementSpeechPatches` classes implemented.
+
+### Root Cause
+`MoveStateMonitor.StartStateMonitoring()` was defined but **never called**. The proactive monitoring coroutine that checks move state every 0.5 seconds was never started.
+
+### Solution
+Added calls to start/stop monitoring in `FFIV_ScreenReaderMod.cs`:
+- `MoveStateMonitor.StartStateMonitoring()` called when `FieldPlayerController` is found during scene loading
+- `MoveStateMonitor.StopStateMonitoring()` called when scene has no field player and on mod deinitialization
+
+**Files Modified**:
+- `Core/FFIV_ScreenReaderMod.cs` - Added StartStateMonitoring/StopStateMonitoring calls in OnSceneLoaded and OnDeinitializeMelon
+
+---
+
+## Wall Bump Detection - Completed
+
+### Feature Description
+Plays an audio feedback sound when the player walks into a wall or obstacle, matching FF5's implementation.
+
+### Implementation
+Ported from FF5's `MovementSoundPatches.cs` with the following approach:
+- Patches `FieldPlayerKeyController.OnTouchPadCallback` with a prefix
+- Captures player position before movement input is processed
+- Waits one frame via coroutine for Unity to process movement
+- Compares position after movement - if distance < 0.1f units, player hit a wall
+- Plays sound effect ID 4 via `AudioManager.PlaySe()`
+- 200ms cooldown prevents sound spam when holding direction against a wall
+
+**File Created**: `Patches/WallBumpPatches.cs`
 
 ---
 
@@ -292,6 +329,8 @@ Line 430501: protected override void SelectContent(List<StatusWindowContentContr
 - [x] Field: pathfinding and navigation working
 - [x] Item use: character selection reads correctly (Round 3 fix)
 - [x] Status screen: arrow key navigation through stats (Up/Down/PgUp/PgDn/Home/End)
+- [x] Wall bump detection: audio feedback when walking into walls
+- [x] Vehicle state announcements: boarding/disembarking vehicles announced
 
 ---
 

@@ -222,16 +222,31 @@ SubmarineController.IsWaitSurface  // About to surface
 SubmarineController.ElapsedRatio   // Transition progress (0-1)
 ```
 
-## Bash Commands (Windows - CMD only, not PowerShell)
-```cmd
-# Read logs (use type, not cat)
-type "d:\games\steamlibrary\steamapps\common\final fantasy iv pr\melonloader\logs\Latest.log"
+## Log Files & Debugging
 
-# Build and deploy
-.\ff4\ff4-screen-reader\build_and_deploy.bat
+**Log directory:**
+```
+D:\Games\steamlibrary\steamapps\common\final fantasy iv pr\MelonLoader\Logs\
 ```
 
-**NOTE:** Use CMD-compatible commands only (type, dir, etc.), not bash/PowerShell commands (cat, ls, tail, etc.)
+**Finding the most recent log:**
+```
+Glob pattern="*.log" path="D:\Games\steamlibrary\steamapps\common\final fantasy iv pr\MelonLoader\Logs"
+```
+Glob results are sorted by modification time - pick the most recent timestamped file (e.g., `26-1-6_5-44-33.log`). This is more reliable than trusting a file named "Latest.log".
+
+**Reading logs:**
+Use the Read tool directly with the full path. Terminal commands (cmd, PowerShell) have issues with spaces and special characters in paths.
+
+**Build and deploy:**
+```
+powershell -Command "& cmd /c 'D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader\build_and_deploy.bat'"
+```
+
+**Terminal limitations:**
+- CMD and PowerShell commands often fail due to path escaping issues
+- Prefer using Read/Glob tools for file access over terminal commands
+- The `cmd //c` syntax does NOT work reliably
 
 ## Full Plan Reference
 See `docs\ff4plan.md` for comprehensive porting plan with all phases.

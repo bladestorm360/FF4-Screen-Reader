@@ -6,7 +6,9 @@ Adds NVDA output, pathfinding, sound queues and other accessibility aides to Fin
 
 ## Known Issues
 
-## There is an issue with Namingway where it only reads the first item.
+There is an issue with Namingway where it only reads the first item.
+Teleporting on the world map from a landible vehicle will leave the vehicle where it was left, meaning one will have to teleport back to that area to enter the vehicle again.
+Pathfinding    does not work through automatic movement events. If having trouble navigating a dungeon, look for events that move the character automatically and then check the possible destinations from there.
 
 ## Install
 
@@ -41,4 +43,3 @@ When on a character's status screen:
 up and down arrows read through statistics.
 Shift plus arrows: jumps between groups, character info, vitals, statistics, combat statistics, progression.
 control plus arrows: jump to beginning or end of statistics screen.
-

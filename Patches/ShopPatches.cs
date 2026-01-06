@@ -17,6 +17,8 @@ namespace FFIV_ScreenReader.Patches
         public static ShopInfoController ActiveInfoController { get; set; }
         public static string LastItemDescription { get; set; }
         public static string LastItemMpCost { get; set; }
+        public static string LastItemName { get; set; }
+        public static string LastItemPrice { get; set; }
 
         /// <summary>
         /// Validates that shop menu is actually active and visible.
@@ -30,14 +32,21 @@ namespace FFIV_ScreenReader.Patches
                     !ActiveInfoController.gameObject.activeInHierarchy)
                 {
                     // Controller is no longer active, clear state
-                    IsShopMenuActive = false;
-                    ActiveInfoController = null;
-                    LastItemDescription = null;
-                    LastItemMpCost = null;
+                    Reset();
                     return false;
                 }
             }
             return IsShopMenuActive;
+        }
+
+        public static void Reset()
+        {
+            IsShopMenuActive = false;
+            ActiveInfoController = null;
+            LastItemDescription = null;
+            LastItemMpCost = null;
+            LastItemName = null;
+            LastItemPrice = null;
         }
     }
 
@@ -56,18 +65,7 @@ namespace FFIV_ScreenReader.Patches
                     return; // Silently fail if not active
                 }
 
-                // Double-check with activeInHierarchy
-                if (ShopMenuTracker.ActiveInfoController == null ||
-                    ShopMenuTracker.ActiveInfoController.gameObject == null ||
-                    !ShopMenuTracker.ActiveInfoController.gameObject.activeInHierarchy)
-                {
-                    // Menu is not visible, clear state
-                    ShopMenuTracker.IsShopMenuActive = false;
-                    ShopMenuTracker.ActiveInfoController = null;
-                    return;
-                }
-
-                // Build announcement from stored data
+                // Build announcement from stored data - description only for I key
                 string announcement = ShopMenuTracker.LastItemDescription;
 
                 if (!string.IsNullOrEmpty(ShopMenuTracker.LastItemMpCost))
@@ -77,8 +75,12 @@ namespace FFIV_ScreenReader.Patches
 
                 if (!string.IsNullOrEmpty(announcement))
                 {
-                    MelonLogger.Msg($"[Shop Details] {announcement}");
+                    MelonLogger.Msg($"[Shop Details - I Key] {announcement}");
                     FFIV_ScreenReaderMod.SpeakText(announcement);
+                }
+                else
+                {
+                    MelonLogger.Msg("[Shop Details - I Key] No description available");
                 }
             }
             catch (Exception ex)
@@ -94,13 +96,16 @@ namespace FFIV_ScreenReader.Patches
     /// Working:
     /// - Shop command menu (Buy/Sell/Equipment/Back)
     /// - Item lists for buying/selling (item name + price)
-    /// - Item descriptions (description + MP cost)
-    /// - Quantity selection (quantity + total price)
     /// - 'I' key support for re-reading item descriptions
+    /// - Quantity selection (quantity + total price)
     /// </summary>
     [HarmonyPatch]
     public static class ShopPatches
     {
+        private static string lastAnnouncedItem = "";
+        private static DateTime lastItemAnnouncedTime = DateTime.MinValue;
+        private static readonly TimeSpan ItemAnnounceCooldown = TimeSpan.FromMilliseconds(100);
+
         /// <summary>
         /// Announces shop command menu options (Buy, Sell, Equipment, Back).
         /// </summary>
@@ -123,51 +128,16 @@ namespace FFIV_ScreenReader.Patches
 
                 CoroutineManager.StartManaged(DelayedAnnounceShopCommand(commandText));
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 MelonLogger.Error($"Error in AfterShopCommandSetCursor: {ex.Message}");
             }
         }
 
-        private static string lastAnnouncedItem = "";
-
         /// <summary>
-        /// Announces individual items in shop buy/sell lists with name and price.
-        /// </summary>
-        [HarmonyPatch(typeof(ShopListItemContentController), nameof(ShopListItemContentController.SetFocus))]
-        [HarmonyPostfix]
-        private static void AfterShopItemSetFocus(ShopListItemContentController __instance, bool isFocus)
-        {
-            try
-            {
-                if (!isFocus || __instance == null)
-                    return;
-
-                // Mark shop as active when items are being focused
-                ShopMenuTracker.IsShopMenuActive = true;
-
-                // Get item name from iconTextView
-                string itemName = __instance.iconTextView?.nameText?.text;
-                if (string.IsNullOrEmpty(itemName))
-                    return;
-
-                // Get price from shopListItemContentView
-                string price = __instance.shopListItemContentView?.priceText?.text;
-                string announcement = string.IsNullOrEmpty(price) ? itemName : $"{itemName}, {price}";
-
-                // Store for later description announcement
-                lastAnnouncedItem = itemName;
-
-                CoroutineManager.StartManaged(DelayedAnnounceShopItem(announcement));
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error($"Error in AfterShopItemSetFocus: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Announces item descriptions when they update in the info panel.
+        /// Announces item name + price AND stores description when SetDescription is called.
+        /// SetDescription is called each time an item is selected in the shop.
+        /// We find the currently selected item by searching the shop's product list.
         /// </summary>
         [HarmonyPatch(typeof(ShopInfoController), nameof(ShopInfoController.SetDescription))]
         [HarmonyPostfix]
@@ -175,25 +145,72 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (string.IsNullOrEmpty(value))
-                    return;
-
                 // Store the controller and description for 'I' key access
                 ShopMenuTracker.ActiveInfoController = __instance;
+                ShopMenuTracker.IsShopMenuActive = true;
                 ShopMenuTracker.LastItemDescription = value;
 
                 // Also get MP cost if available
                 string mpCost = __instance.itemInfoController?.shopItemInfoView?.mpText?.text;
                 ShopMenuTracker.LastItemMpCost = mpCost;
 
-                // Build the announcement
-                string announcement = value;
-                if (!string.IsNullOrEmpty(mpCost))
+                // Try to find the currently selected item by searching for active ShopListMainContentController
+                string itemName = null;
+                string price = null;
+
+                var shopListController = UnityEngine.Object.FindObjectOfType<ShopListMainContentController>();
+                if (shopListController != null)
                 {
-                    announcement = $"{value}. {mpCost}";
+                    // In IL2CPP, private fields are exposed directly through the interop
+                    try
+                    {
+                        var cursor = shopListController.selectCursor;
+                        var productList = shopListController.productContentList;
+
+                        if (cursor != null && productList != null)
+                        {
+                            int index = cursor.Index;
+                            if (index >= 0 && index < productList.Count)
+                            {
+                                var item = productList[index];
+                                if (item != null)
+                                {
+                                    itemName = item.iconTextView?.nameText?.text;
+                                    price = item.shopListItemContentView?.priceText?.text;
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception fieldEx)
+                    {
+                        MelonLogger.Warning($"[Shop] Field access failed: {fieldEx.Message}");
+                    }
                 }
 
-                CoroutineManager.StartManaged(DelayedAnnounceDescription(announcement));
+                // Store for later
+                ShopMenuTracker.LastItemName = itemName;
+                ShopMenuTracker.LastItemPrice = price;
+
+                // Build announcement - item name + price first, description available via I key
+                if (!string.IsNullOrEmpty(itemName))
+                {
+                    string announcement = string.IsNullOrEmpty(price) ? itemName : $"{itemName}, {price}";
+
+                    // Deduplicate
+                    if (itemName != lastAnnouncedItem || (DateTime.Now - lastItemAnnouncedTime) >= ItemAnnounceCooldown)
+                    {
+                        lastAnnouncedItem = itemName;
+                        lastItemAnnouncedTime = DateTime.Now;
+
+                        MelonLogger.Msg($"[Shop Item] {announcement}");
+                        CoroutineManager.StartManaged(DelayedAnnounceShopItem(announcement));
+                    }
+                }
+                else
+                {
+                    // Fallback: just log description was stored
+                    MelonLogger.Msg($"[Shop Description Stored] {value}");
+                }
             }
             catch (Exception ex)
             {
@@ -256,13 +273,6 @@ namespace FFIV_ScreenReader.Patches
             yield return null; // Wait one frame for UI to update
             MelonLogger.Msg($"[Shop Item] {itemText}");
             FFIV_ScreenReaderMod.SpeakText($"{itemText}");
-        }
-
-        private static IEnumerator DelayedAnnounceDescription(string descriptionText)
-        {
-            yield return null; // Wait one frame for UI to update
-            MelonLogger.Msg($"[Shop Description] {descriptionText}");
-            FFIV_ScreenReaderMod.SpeakText($"{descriptionText}");
         }
 
         private static IEnumerator DelayedAnnounceQuantity(string quantityText)

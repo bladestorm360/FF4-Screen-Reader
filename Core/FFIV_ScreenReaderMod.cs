@@ -1,6 +1,7 @@
 using MelonLoader;
 using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Field;
+using FFIV_ScreenReader.Patches;
 using UnityEngine;
 using Il2Cpp;
 using Il2CppLast.Map;
@@ -90,6 +91,9 @@ namespace FFIV_ScreenReader.Core
             // Unsubscribe from scene load events
             UnityEngine.SceneManagement.SceneManager.sceneLoaded -= (UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode>)OnSceneLoaded;
 
+            // Stop vehicle state monitoring
+            MoveStateMonitor.StopStateMonitoring();
+
             CoroutineManager.CleanupAll();
             tolk?.Unload();
         }
@@ -110,10 +114,17 @@ namespace FFIV_ScreenReader.Core
                 {
                     Utils.GameObjectCache.Register(playerController);
                     LoggerInstance.Msg($"[ComponentCache] Cached FieldPlayerController: {playerController.gameObject?.name}");
+
+                    // Start vehicle state monitoring for world map contexts
+                    MoveStateMonitor.StartStateMonitoring();
+                    LoggerInstance.Msg("[MoveState] Started vehicle state monitoring");
                 }
                 else
                 {
                     LoggerInstance.Msg("[ComponentCache] No FieldPlayerController found in scene");
+
+                    // Stop monitoring if no field player (e.g., in menu scenes)
+                    MoveStateMonitor.StopStateMonitoring();
                 }
 
                 // Try to find and cache FieldMap

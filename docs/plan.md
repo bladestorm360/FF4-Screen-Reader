@@ -16,6 +16,8 @@ All major features have been ported and tested successfully.
 | Vehicle Support | ✅ Complete |
 | Vehicle State Announcements | ✅ Complete |
 | Status Screen Navigation | ✅ Complete |
+| Wall Bump Detection | ✅ Complete |
+| Vehicle Landing Announcements | ✅ Complete |
 
 ---
 
@@ -158,7 +160,8 @@ ff4-screen-reader/
 │   ├── CursorNavigationPatches.cs
 │   ├── AbilityMenuPatches.cs
 │   ├── StatusDetailsPatches.cs
-│   └── MovementSpeechPatches.cs
+│   ├── MovementSpeechPatches.cs
+│   └── WallBumpPatches.cs
 └── Utils/
     ├── GameObjectCache.cs
     ├── CoroutineManager.cs
@@ -476,6 +479,131 @@ The status screen displays all stats simultaneously to sighted users. This featu
 
 ---
 
+## Vehicle Landing Zone Announcements (Complete)
+
+### Overview
+
+Add announcements when a player in a vehicle enters a zone where they can land/dismount. This helps blind players know when they can safely exit their vehicle without guessing or trial-and-error.
+
+### Behavior
+
+| Event | Announcement |
+|-------|--------------|
+| Enter landable zone | "Can land" |
+| Leave landable zone | (silent) |
+| Successfully land | Already handled by "On foot" announcement |
+
+- **Non-interrupting**: Won't cut off other important announcements
+- **No vehicle type declared**: Simple "Can land" for all vehicles
+- **Only when in vehicle**: Silent when walking/on foot
+
+### Technical Approach
+
+The game already handles terrain checking internally. When the player moves over terrain where landing is possible, the game calls `MapUIManager.SwitchLandable(bool landable)` to show/hide the landing UI guide. We patch this method to announce state changes.
+
+**Key Classes:**
+- `MapUIManager.SwitchLandable(bool landable)` - Called when landing state changes
+- `LandingGuideController.SwitchLandable(bool landable)` - The UI component
+- `TransportationController.CheckLandingList(int transportationId, int attribute)` - Terrain check
+- `TransportationInfo.LandingList` - Array of valid landing terrain attributes
+
+### Implementation
+
+#### File: `Patches/VehicleLandingPatches.cs` (New)
+
+```csharp
+using System;
+using HarmonyLib;
+using MelonLoader;
+using Il2CppLast.Map;
+using FFIV_ScreenReader.Utils;
+
+namespace FFIV_ScreenReader.Patches
+{
+    /// <summary>
+    /// Announces when player enters a zone where vehicle can land.
+    /// </summary>
+    [HarmonyPatch(typeof(MapUIManager), nameof(MapUIManager.SwitchLandable))]
+    public static class MapUIManager_SwitchLandable_Patch
+    {
+        private static bool lastLandableState = false;
+
+        [HarmonyPostfix]
+        public static void Postfix(bool landable)
+        {
+            try
+            {
+                // Only announce when in a vehicle
+                if (!MoveStateHelper.IsInVehicle())
+                    return;
+
+                // Only announce when entering landable zone (false -> true)
+                if (landable && !lastLandableState)
+                {
+                    Core.FFIV_ScreenReaderMod.SpeakText("Can land", interrupt: false);
+                }
+
+                lastLandableState = landable;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[Landing] Error in SwitchLandable patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reset state when leaving vehicle or changing maps
+        /// </summary>
+        public static void ResetState()
+        {
+            lastLandableState = false;
+        }
+    }
+}
+```
+
+#### File: `Utils/MoveStateHelper.cs` (Add method)
+
+```csharp
+/// <summary>
+/// Check if currently in any vehicle (ship, chocobo, airship, etc.)
+/// </summary>
+public static bool IsInVehicle()
+{
+    int state = GetCurrentMoveState();
+    return state == MOVE_STATE_SHIP ||
+           state == MOVE_STATE_AIRSHIP ||
+           state == MOVE_STATE_LOWFLYING ||
+           state == MOVE_STATE_CHOCOBO;
+}
+```
+
+### Files to Create/Modify
+
+| File | Action |
+|------|--------|
+| `Patches/VehicleLandingPatches.cs` | Create new file |
+| `Utils/MoveStateHelper.cs` | Add `IsInVehicle()` method |
+
+### Testing Checklist
+
+- [ ] Board hovercraft, travel over water - no announcement
+- [ ] Travel over land - "Can land" announced once
+- [ ] Continue over land - no repeated announcements
+- [ ] Return to water - silent
+- [ ] Return to land - "Can land" announced again
+- [ ] Land successfully - "On foot" announced (existing)
+- [ ] Repeat for Enterprise, Falcon, Lunar Whale, Black Chocobo
+
+### Why This Approach
+
+1. **Minimal code**: Single patch point, ~30 lines
+2. **No polling**: Game tells us when state changes
+3. **Reliable**: Uses same logic as visual landing guide
+4. **Works for all vehicles**: No vehicle-specific handling needed
+
+---
+
 ## Approval Required
 
-Please review this plan and approve before proceeding with the fixes.
+Please review this plan and approve before proceeding with implementation.

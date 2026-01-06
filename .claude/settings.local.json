@@ -16,7 +16,16 @@
       "Bash(cmd //c d:gamesdevunityffprff4ff4-screen-readerbuild_and_deploy.bat)",
       "Bash(cmd /c \"d:\\\\games\\\\dev\\\\unity\\\\ffpr\\\\ff4\\\\ff4-screen-reader\\\\build_and_deploy.bat\")",
       "Bash(powershell -ExecutionPolicy Bypass -File \"D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\\\\build_and_deploy.bat\")",
-      "Bash(powershell -Command \"& cmd /c ''D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\\\\build_and_deploy.bat''\")"
+      "Bash(powershell -Command \"& cmd /c ''D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\FF4\\\\ff4-screen-reader\\\\build_and_deploy.bat''\")",
+      "Bash(powershell -Command \"Get-Content ''D:\\\\Games\\\\SteamLibrary\\\\steamapps\\\\common\\\\FINAL FANTASY IV PR\\\\MelonLoader\\\\Logs\\\\Latest.log'' | Select-String -Pattern ''Shop|ShopList|SetFocus|SetDescription'' | Select-Object -First 50\")",
+      "Bash(powershell -Command \"Get-Content ''D:\\\\Games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy iv pr\\\\MelonLoader\\\\Logs\\\\Latest.log'' | Select-String -Pattern ''Shop|SetFocus|SetDescription|Harmony'' | Select-Object -First 80\")",
+      "Bash(powershell -Command \"Get-Content ''D:\\\\Games\\\\steamlibrary\\\\steamapps\\\\common\\\\FINAL FANTASY IV PR\\\\MelonLoader\\\\Logs\\\\Latest.log'' | Select-String -Pattern ''Shop|SetFocus|Harmony|FAILED|Exception|Error'' | Select-Object -First 100\")",
+      "Bash(cmd /c type \"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy IV pr\\\\MelonLoader\\\\logs\\\\Latest.log\")",
+      "Bash(findstr:*)",
+      "Bash(cmd /c dir \"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy IV pr\\\\MelonLoader\\\\logs\")",
+      "Bash(cmd /c \"dir \"\"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy IV pr\\\\MelonLoader\\\\Logs\"\"\")",
+      "Bash(find:*)",
+      "Bash(powershell -Command \"& cmd /c ''D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\ff5\\\\ff5-screen-reader\\\\build_and_deploy.bat''\")"
     ],
     "additionalDirectories": [
       "d:\\games\\dev\\unity\\ffpr\\ff4",
