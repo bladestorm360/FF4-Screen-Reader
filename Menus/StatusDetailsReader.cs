@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Il2CppLast.Data.User;
+using Il2CppLast.Defaine;
+using Il2CppLast.UI.KeyInput;
+using Il2CppSerial.FF4.UI.KeyInput;
 using MelonLoader;
+using UnityEngine;
 using UnityEngine.UI;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Patches;
@@ -230,16 +234,164 @@ namespace FFIV_ScreenReader.Menus
 
     /// <summary>
     /// Handles navigation through status screen stats using arrow keys.
-    /// FF4-specific implementation with 13 stats (no Job system).
+    /// FF4-specific implementation with 17 stats matching visual display.
     /// </summary>
     public static class StatusNavigationReader
     {
         private static List<StatusStatDefinition> statList = null;
-        // Group start indices: CharacterInfo=0, Vitals=3, Attributes=5, CombatStats=10
-        private static readonly int[] GroupStartIndices = new int[] { 0, 3, 5, 10 };
+        // Group start indices: CharacterInfo=0, Vitals=4, Attributes=6, CombatStats=11
+        private static readonly int[] GroupStartIndices = new int[] { 0, 4, 6, 11 };
+
+        // ParameterType enum values for UI reading
+        private const int PARAMETER_TYPE_ATTACK = 10;
+        private const int PARAMETER_TYPE_DEFENSE = 11;
+        private const int PARAMETER_TYPE_ABILITY_DEFENSE = 12;
+
+        // Memory offsets for UI reading
+        private const int OFFSET_PARAM_TYPE = 0x18;
+        private const int OFFSET_PARAM_VIEW = 0x20;
+        private const int OFFSET_MULTIPLIED_VALUE_TEXT = 0x28;
+        private const int OFFSET_DOMINANT_ARM_TEXT = 0x98;
 
         /// <summary>
-        /// Initialize the stat list with all 13 visible stats in UI order.
+        /// Try to read a count value from the UI for a specific ParameterType.
+        /// Returns -1 if unable to read from UI.
+        /// </summary>
+        private static int TryReadCountFromUI(int parameterType)
+        {
+            try
+            {
+                // Find all ParameterContentController objects in scene
+                var controllers = UnityEngine.Object.FindObjectsOfType<Il2CppLast.UI.KeyInput.ParameterContentController>();
+                if (controllers == null || controllers.Length == 0)
+                    return -1;
+
+                foreach (var controller in controllers)
+                {
+                    if (controller == null) continue;
+
+                    // Check if this is the parameter we're looking for
+                    IntPtr controllerPtr = controller.Pointer;
+                    if (controllerPtr == IntPtr.Zero) continue;
+
+                    int paramType;
+                    unsafe
+                    {
+                        paramType = *(int*)((byte*)controllerPtr + OFFSET_PARAM_TYPE);
+                    }
+
+                    if (paramType != parameterType)
+                        continue;
+
+                    // Found the parameter - read the view at offset 0x20
+                    IntPtr viewPtr;
+                    unsafe
+                    {
+                        viewPtr = *(IntPtr*)((byte*)controllerPtr + OFFSET_PARAM_VIEW);
+                    }
+                    if (viewPtr == IntPtr.Zero)
+                        return -1;
+
+                    // Read multipliedValueText at offset 0x28
+                    IntPtr textPtr;
+                    unsafe
+                    {
+                        textPtr = *(IntPtr*)((byte*)viewPtr + OFFSET_MULTIPLIED_VALUE_TEXT);
+                    }
+                    if (textPtr == IntPtr.Zero)
+                        return -1;
+
+                    // Cast to Text component and read value
+                    var textComponent = new UnityEngine.UI.Text(textPtr);
+                    if (textComponent == null)
+                        return -1;
+
+                    string textValue = textComponent.text;
+                    if (string.IsNullOrEmpty(textValue))
+                        return -1;
+
+                    // Parse the count from the text
+                    if (int.TryParse(textValue.Trim(), out int count))
+                    {
+                        return count;
+                    }
+
+                    return -1;
+                }
+
+                return -1;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error reading count from UI for type {parameterType}: {ex.Message}");
+                return -1;
+            }
+        }
+
+        /// <summary>
+        /// Try to read handedness text from the AbilityCharaStatusView UI.
+        /// Returns null if unable to read.
+        /// </summary>
+        private static string TryReadHandednessFromUI()
+        {
+            try
+            {
+                // Find AbilityCharaStatusView in scene
+                var views = UnityEngine.Object.FindObjectsOfType<AbilityCharaStatusView>();
+                if (views == null || views.Length == 0)
+                    return null;
+
+                foreach (var view in views)
+                {
+                    if (view == null || view.gameObject == null || !view.gameObject.activeInHierarchy)
+                        continue;
+
+                    // Try direct property access first
+                    try
+                    {
+                        var dominantText = view.DominantArmText;
+                        if (dominantText != null && !string.IsNullOrWhiteSpace(dominantText.text))
+                        {
+                            return dominantText.text.Trim();
+                        }
+                    }
+                    catch
+                    {
+                        // Fall back to pointer reading
+                    }
+
+                    // Pointer-based reading as fallback
+                    IntPtr viewPtr = view.Pointer;
+                    if (viewPtr == IntPtr.Zero)
+                        continue;
+
+                    IntPtr textPtr;
+                    unsafe
+                    {
+                        textPtr = *(IntPtr*)((byte*)viewPtr + OFFSET_DOMINANT_ARM_TEXT);
+                    }
+                    if (textPtr == IntPtr.Zero)
+                        continue;
+
+                    var textComponent = new UnityEngine.UI.Text(textPtr);
+                    if (textComponent != null && !string.IsNullOrWhiteSpace(textComponent.text))
+                    {
+                        return textComponent.text.Trim();
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error reading handedness from UI: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Initialize the stat list with all 17 visible stats in UI order.
+        /// Matches the visual layout of FF4's status screen.
         /// </summary>
         public static void InitializeStatList()
         {
@@ -247,28 +399,30 @@ namespace FFIV_ScreenReader.Menus
 
             statList = new List<StatusStatDefinition>();
 
-            // Character Info Group (indices 0-2)
+            // Character Info Group (indices 0-3)
             statList.Add(new StatusStatDefinition("Level", StatGroup.CharacterInfo, ReadLevel));
+            statList.Add(new StatusStatDefinition("Handed", StatGroup.CharacterInfo, ReadHanded));
             statList.Add(new StatusStatDefinition("Experience", StatGroup.CharacterInfo, ReadExperience));
             statList.Add(new StatusStatDefinition("Next Level", StatGroup.CharacterInfo, ReadNextLevel));
 
-            // Vitals Group (indices 3-4)
+            // Vitals Group (indices 4-5)
             statList.Add(new StatusStatDefinition("HP", StatGroup.Vitals, ReadHP));
             statList.Add(new StatusStatDefinition("MP", StatGroup.Vitals, ReadMP));
 
-            // Attributes Group (indices 5-9)
+            // Attributes Group (indices 6-10)
             statList.Add(new StatusStatDefinition("Strength", StatGroup.Attributes, ReadStrength));
             statList.Add(new StatusStatDefinition("Agility", StatGroup.Attributes, ReadAgility));
             statList.Add(new StatusStatDefinition("Stamina", StatGroup.Attributes, ReadStamina));
-            statList.Add(new StatusStatDefinition("Magic", StatGroup.Attributes, ReadMagic));
+            statList.Add(new StatusStatDefinition("Intellect", StatGroup.Attributes, ReadIntellect));
             statList.Add(new StatusStatDefinition("Spirit", StatGroup.Attributes, ReadSpirit));
 
-            // Combat Stats Group (indices 10-14)
+            // Combat Stats Group (indices 11-16)
             statList.Add(new StatusStatDefinition("Attack", StatGroup.CombatStats, ReadAttack));
+            statList.Add(new StatusStatDefinition("Accuracy", StatGroup.CombatStats, ReadAccuracy));
             statList.Add(new StatusStatDefinition("Defense", StatGroup.CombatStats, ReadDefense));
             statList.Add(new StatusStatDefinition("Evasion", StatGroup.CombatStats, ReadEvasion));
             statList.Add(new StatusStatDefinition("Magic Defense", StatGroup.CombatStats, ReadMagicDefense));
-            statList.Add(new StatusStatDefinition("Magic Evade", StatGroup.CombatStats, ReadMagicEvade));
+            statList.Add(new StatusStatDefinition("Magic Evasion", StatGroup.CombatStats, ReadMagicEvasion));
         }
 
         /// <summary>
@@ -489,6 +643,35 @@ namespace FFIV_ScreenReader.Menus
             }
         }
 
+        private static string ReadHanded(OwnedCharacterData data)
+        {
+            try
+            {
+                // Try to read from UI first (most accurate - shows localized text)
+                string uiText = TryReadHandednessFromUI();
+                if (!string.IsNullOrWhiteSpace(uiText))
+                {
+                    return uiText;
+                }
+
+                // Fallback to data API
+                if (data == null) return "N/A";
+                var dominantType = data.GetEquipDominantArmType();
+                return dominantType switch
+                {
+                    Il2CppLast.Defaine.EquipDominantType.RightHanded => "Right-handed",
+                    Il2CppLast.Defaine.EquipDominantType.LeftHanded => "Left-handed",
+                    Il2CppLast.Defaine.EquipDominantType.Ambidextrous => "Ambidextrous",
+                    _ => "N/A"
+                };
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error reading handedness: {ex.Message}");
+                return "N/A";
+            }
+        }
+
         // Vitals readers
         private static string ReadHP(OwnedCharacterData data)
         {
@@ -565,17 +748,17 @@ namespace FFIV_ScreenReader.Menus
             }
         }
 
-        private static string ReadMagic(OwnedCharacterData data)
+        private static string ReadIntellect(OwnedCharacterData data)
         {
             try
             {
-                if (data?.parameter == null) return "Magic: N/A";
-                return $"Magic: {data.parameter.ConfirmedMagic()}";
+                if (data?.parameter == null) return "Intellect: N/A";
+                return $"Intellect: {data.parameter.ConfirmedIntelligence()}";
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"Error reading Magic: {ex.Message}");
-                return "Magic: N/A";
+                MelonLogger.Warning($"Error reading Intellect: {ex.Message}");
+                return "Intellect: N/A";
             }
         }
 
@@ -599,7 +782,19 @@ namespace FFIV_ScreenReader.Menus
             try
             {
                 if (data?.parameter == null) return "Attack: N/A";
-                return $"Attack: {data.parameter.ConfirmedAttack()}";
+
+                int attackPower = data.parameter.ConfirmedAttack();
+
+                // Try to read attack count from UI
+                int attackCount = TryReadCountFromUI(PARAMETER_TYPE_ATTACK);
+
+                if (attackCount > 0)
+                {
+                    return $"Attack: {attackCount}x {attackPower}";
+                }
+
+                // Fallback to power only if count unavailable
+                return $"Attack: {attackPower}";
             }
             catch (Exception ex)
             {
@@ -608,12 +803,39 @@ namespace FFIV_ScreenReader.Menus
             }
         }
 
+        private static string ReadAccuracy(OwnedCharacterData data)
+        {
+            try
+            {
+                if (data?.parameter == null) return "Accuracy: N/A";
+                int accuracy = data.parameter.ConfirmedAccuracyRate(false);
+                return $"Accuracy: {accuracy}%";
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error reading Accuracy: {ex.Message}");
+                return "Accuracy: N/A";
+            }
+        }
+
         private static string ReadDefense(OwnedCharacterData data)
         {
             try
             {
                 if (data?.parameter == null) return "Defense: N/A";
-                return $"Defense: {data.parameter.ConfirmedDefense()}";
+
+                int defensePower = data.parameter.ConfirmedDefense();
+
+                // Try to read defense count from UI
+                int defenseCount = TryReadCountFromUI(PARAMETER_TYPE_DEFENSE);
+
+                if (defenseCount > 0)
+                {
+                    return $"Defense: {defenseCount}x {defensePower}";
+                }
+
+                // Fallback to power only if count unavailable
+                return $"Defense: {defensePower}";
             }
             catch (Exception ex)
             {
@@ -627,7 +849,8 @@ namespace FFIV_ScreenReader.Menus
             try
             {
                 if (data?.parameter == null) return "Evasion: N/A";
-                return $"Evasion: {data.parameter.ConfirmedDefenseCount()}";
+                int evasion = data.parameter.ConfirmedEvasionRate(false);
+                return $"Evasion: {evasion}%";
             }
             catch (Exception ex)
             {
@@ -641,7 +864,19 @@ namespace FFIV_ScreenReader.Menus
             try
             {
                 if (data?.parameter == null) return "Magic Defense: N/A";
-                return $"Magic Defense: {data.parameter.ConfirmedAbilityDefense()}";
+
+                int magicDefensePower = data.parameter.ConfirmedAbilityDefense();
+
+                // Try to read magic defense count from UI
+                int magicDefenseCount = TryReadCountFromUI(PARAMETER_TYPE_ABILITY_DEFENSE);
+
+                if (magicDefenseCount > 0)
+                {
+                    return $"Magic Defense: {magicDefenseCount}x {magicDefensePower}";
+                }
+
+                // Fallback to power only if count unavailable
+                return $"Magic Defense: {magicDefensePower}";
             }
             catch (Exception ex)
             {
@@ -650,17 +885,18 @@ namespace FFIV_ScreenReader.Menus
             }
         }
 
-        private static string ReadMagicEvade(OwnedCharacterData data)
+        private static string ReadMagicEvasion(OwnedCharacterData data)
         {
             try
             {
-                if (data?.parameter == null) return "Magic Evade: N/A";
-                return $"Magic Evade: {data.parameter.ConfirmedAbilityEvasionRate()}";
+                if (data?.parameter == null) return "Magic Evasion: N/A";
+                int magicEvasion = data.parameter.ConfirmedAbilityEvasionRate(false);
+                return $"Magic Evasion: {magicEvasion}%";
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"Error reading Magic Evade: {ex.Message}");
-                return "Magic Evade: N/A";
+                MelonLogger.Warning($"Error reading Magic Evasion: {ex.Message}");
+                return "Magic Evasion: N/A";
             }
         }
     }

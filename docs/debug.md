@@ -1,370 +1,168 @@
-# FF4 Screen Reader - Debug Log & Feature Status
+# FF4 Screen Reader - Debug Log
 
-## Current Status: FUNCTIONAL
+## Status: FUNCTIONAL
+
+**Build:** Successful (0 warnings, 0 errors)
+**Deployment:** Successful
+**Runtime:** Fully functional
 
 ## Feature Completion
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Field Navigation & Pathfinding** | ✅ Complete | Entity detection, obstacle detection, pathfinding |
-| **Menu System** | ✅ Complete | Main menu, items, equipment, abilities, status, config |
-| **Battle System** | ✅ Complete | Turn order, targeting, damage/heals, status effects |
-| **Shops** | ✅ Complete | Buy/sell navigation, item info |
-| **Victory Screen** | ✅ Complete | Gil, items, XP, level-ups |
-| **Vehicles** | ✅ Complete | Hovercraft, Enterprise, Falcon, Lunar Whale |
-| **Status Screen Navigation** | ✅ Complete | Arrow key stat browsing (15 stats in 4 groups) |
-| **Wall Bump Detection** | ✅ Complete | Audio feedback when walking into walls |
-
-## Build Status
-- **Compilation**: Successful (0 warnings, 0 errors)
-- **Deployment**: Successful (deployed to Mods folder)
-- **Runtime**: Fully functional
-
----
-
-## Round 3 Bug Fixes - Completed
-
-### Issue 1: Characters Not Read When Selecting Item Targets
-**Problem**: After selecting an item for use, navigating to select a character target did not announce the character name, HP, or MP.
-
-**Solution**: Added `ItemUseController.SelectContent` patch to `ItemMenuPatches.cs` that announces character name, HP, MP, and status conditions when selecting item use targets.
-
-**File Modified**: `Patches/ItemMenuPatches.cs` - Added `ItemUseController_SelectContent_Patch`
+| Feature | Status |
+|---------|--------|
+| Field Navigation & Pathfinding | ✅ |
+| Menu System | ✅ |
+| Battle System | ✅ |
+| Shops | ✅ |
+| Victory Screen | ✅ |
+| Vehicles | ✅ |
+| Status Screen Navigation | ✅ |
+| Wall Bump Detection | ✅ |
+| Story Event Text (LineFade) | ✅ |
+| Per-Page Dialogue Reading | ✅ |
+| Map Name Deduplication | ✅ |
+| Moon Pathfinding | ✅ |
+| Popup/Confirmation Dialogs | ✅ |
+| Save/Load Confirmation Popups | ✅ |
+| Save Slot Navigation | ✅ |
+| Title Screen "Press any button" | ✅ |
 
 ---
 
-### Issue 2: "Potion" Interruption When Navigating Items with Up/Down
-**Problem**: When navigating the items menu with up/down arrows, items were being interrupted with "Potion" announcements from the generic cursor patch.
+## Bug Fixes
 
-**Root Cause**: `SkipNextIndex` and `SkipPrevIndex` patches in `CursorNavigationPatches.cs` were missing skip conditions for item menus (and other menus). They only checked for battle conditions.
+### Map Name Duplication
+**Problem:** "Entering Mysidia. Mysidia." / Location spoken when opening menu
+**Solution:** Content-based deduplication - SystemMessage skipped if text contained in recent FadeMessage
+**Files:** `MessagePatches.cs`, `FFIV_ScreenReaderMod.cs`
 
-**Solution**: Added all skip conditions to `SkipNextIndex` and `SkipPrevIndex` patches matching `NextIndex`/`PrevIndex`:
-- `item_target_select` - item target selection
-- `list_window` - item menu list
-- `equip_select` - equipment menu
-- `equip_info_content` - equipment slots
-- `shop` - shops
-- `party` - party settings
-- `status` - status screen
-- `ability` - ability menus
-- Battle-related UI elements
-- Title and config menus
+### Stale messageLineIndex
+**Problem:** Multi-line dialogue skipped, speaker changes missed
+**Cause:** Game's `messageLineIndex` doesn't reset on new `SetContent`
+**Solution:** Track own `nextAnnouncementIndex`, reset on `StoreContent`
+**File:** `MessagePatches.cs`
 
-**File Modified**: `Patches/CursorNavigationPatches.cs` - Added skip conditions to `SkipNextIndex` and `SkipPrevIndex`
+### Item Target Selection
+**Problem:** Character name/HP/MP not announced when selecting item use targets
+**Solution:** Added `ItemUseController.SelectContent` patch
+**File:** `ItemMenuPatches.cs`
 
----
+### "Potion" Interruption
+**Problem:** Items interrupted by generic cursor patch announcing "Potion"
+**Solution:** Added skip conditions to `SkipNextIndex`/`SkipPrevIndex` for all menu contexts
+**File:** `CursorNavigationPatches.cs`
 
-## Vehicle State Announcements Fix - Completed
+### Vehicle Announcements
+**Problem:** Boarding/disembarking vehicles not reliably announced
+**Cause:** `FieldPlayer.GetOff()` not called by game in many scenarios; `ChangeMoveState` unreliable
+**Solution:** Hook `FieldController.ChangeTransportation(int transportationId, ...)` as primary detection:
+- Fires for ALL transportation changes (most reliable)
+- Track previous transportationId to detect transitions
+- Only announce "on foot" when transitioning to TRANSPORT_PLAYER (1)
+- Skip intermediate states (TRANSPORT_CONTENT, TRANSPORT_SYMBOL) used during cinematics
+- Interior maps (non-world) automatically set state to on-foot via `OnMapTransition()`
+- Vehicle state announcements use `interrupt: false` to not interrupt location announcements
+**Files:** `MovementSpeechPatches.cs`, `MoveStateHelper.cs`, `FFIV_ScreenReaderMod.cs`
 
-### Issue Description
-Vehicle state announcements (boarding/disembarking Falcon, Hovercraft, etc.) were not triggering despite having the `MoveStateHelper` and `MovementSpeechPatches` classes implemented.
+### Location as Speaker
+**Problem:** "Castle Baron – 1F" announced as speaker name
+**Solution:** Filter speaker names containing "–" or "-"
+**File:** `MessagePatches.cs`
 
-### Root Cause
-`MoveStateMonitor.StartStateMonitoring()` was defined but **never called**. The proactive monitoring coroutine that checks move state every 0.5 seconds was never started.
+### Stats on Game Load
+**Problem:** Character vitals announced during scene preload
+**Solution:** Check `MenuManager.Instance.IsOpen` before reading
+**File:** `CharacterSelectionReader.cs`
 
-### Solution
-Added calls to start/stop monitoring in `FFIV_ScreenReaderMod.cs`:
-- `MoveStateMonitor.StartStateMonitoring()` called when `FieldPlayerController` is found during scene loading
-- `MoveStateMonitor.StopStateMonitoring()` called when scene has no field player and on mod deinitialization
+### Equipment Slot Interruption
+**Problem:** Slot announcement interrupted by "RHand"
+**Solution:** Skip fallback strategies when `IsInEquipmentSlotContext()`
+**File:** `MenuTextDiscovery.cs`
 
-**Files Modified**:
-- `Core/FFIV_ScreenReaderMod.cs` - Added StartStateMonitoring/StopStateMonitoring calls in OnSceneLoaded and OnDeinitializeMelon
+### H Key Outside Battle
+**Problem:** Silent when pressing H outside battle
+**Solution:** Removed `IsInBattle()` gate, let method announce "Not in battle"
+**File:** `InputManager.cs`
 
----
+### Moon Pathfinding
+**Problem:** Paths found to unreachable destinations across one-way ledges
+**Solution:** Reverse-path validation for MapId=3 - if dest→player fails, reject
+**File:** `FieldNavigationHelper.cs`
 
-## Wall Bump Detection - Completed
+### Popup Dialogs Not Reading
+**Problem:** Confirmation popups (save/load, return to title, etc.) not announced
+**Solution:** Ported popup handling from FF3:
+- `PopupPatches.cs` - Hooks base `Popup.Open()`/`Close()` for CommonPopup, GameOverSelectPopup, InfomationPopup
+- `SaveLoadPatches.cs` - Hooks `SetPopupActive(bool)` on LoadGameWindowController, LoadWindowController, SaveWindowController and `SetEnablePopup(bool)` on InterruptionWindowController
+- Title screen "Press any button" via SplashController.InitializeTitle + TitleWindowController.SetEnableStartObject
+- CursorNavigationPatches checks `PopupState.ShouldSuppress()` for button navigation
+**Files:** `PopupPatches.cs`, `SaveLoadPatches.cs`, `CursorNavigationPatches.cs`, `FFIV_ScreenReaderMod.cs`
 
-### Feature Description
-Plays an audio feedback sound when the player walks into a wall or obstacle, matching FF5's implementation.
+### Save Slot Navigation
+**Problem:** Save slots only reading "Moon" (location) instead of full slot info
+**Solution:** Added `SaveListController.SelectContent` patch in `SaveLoadPatches.cs`:
+- Reads `SaveContentView` fields via memory offsets (slotName, date/time, location, character, level, playtime)
+- Format matches visual display: "File 2, 01/17/2026 8:10, Moon, Edge Level 45, Time 13:06"
+- Empty slots: "File 3, Empty"
+- `SaveLoadMenuState.IsActive` suppresses `MenuTextDiscovery` when in save/load menu
+- State cleared on scene change (backing out to title/main menu)
+**File:** `SaveLoadPatches.cs`
 
-### Implementation
-Ported from FF5's `MovementSoundPatches.cs` with the following approach:
-- Patches `FieldPlayerKeyController.OnTouchPadCallback` with a prefix
-- Captures player position before movement input is processed
-- Waits one frame via coroutine for Unity to process movement
-- Compares position after movement - if distance < 0.1f units, player hit a wall
-- Plays sound effect ID 4 via `AudioManager.PlaySe()`
-- 200ms cooldown prevents sound spam when holding direction against a wall
+### "Empty" Announced on Splash Screen
+**Problem:** "Empty" spoken when title screen loads (before user opens Load Game)
+**Cause:** `SaveListController.SelectContent` called during initialization when window not visible
+**Solution:** Added visibility checks - only announce if `controller.gameObject.activeInHierarchy` and `cursor.gameObject.activeInHierarchy`
+**File:** `SaveLoadPatches.cs`
 
-**File Created**: `Patches/WallBumpPatches.cs`
-
----
-
-## Round 2 Bug Fixes - Completed
-
-### Issue 1: Map Name Spoken When Opening Main Menu
-**Problem**: Location names like "Castle Baron – 1F" were being passed to the speaker patch and announced as if they were character names.
-
-**Solution**: Added filter in `MessagePatches.cs` to skip speaker names containing location separators:
-```csharp
-// Filter out location names that get passed as speaker names
-// Location names typically contain "–" (en-dash) separator like "Castle Baron – 1F"
-if (cleanSpeaker.Contains("–") || cleanSpeaker.Contains("-"))
-{
-    MelonLogger.Msg($"[Speaker - Filtered location] {cleanSpeaker}");
-    return;
-}
-```
-
-**File Modified**: `Patches/MessagePatches.cs` - `MessageWindowView_SetSpeker_Patch`
-
----
-
-### Issue 2: Character Statistics Spoken on Game Load
-**Problem**: Character vitals (name, HP, MP) were being announced during game initialization when menu scenes were preloaded, even though the user hadn't opened any menu.
-
-**Root Cause**: `StatusWindowController.SelectContent` is called during scene preload, which triggered `CharacterSelectionReader`. The `StatusMenuTracker` approach wasn't working because it couldn't distinguish between preload and actual menu opening.
-
-**Solution**: Added `MenuManager.Instance.IsOpen` check to `CharacterSelectionReader.TryReadCharacterSelection()`, matching FF5's approach:
-```csharp
-// Safety check: Only read character data if we're in a menu or battle
-// This prevents false positives during scene load when menu scenes are preloaded
-var sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
-bool isBattleScene = sceneName != null && sceneName.Contains("Battle");
-bool isMenuOpen = false;
-
-try
-{
-    var menuManager = MenuManager.Instance;
-    if (menuManager != null)
-    {
-        isMenuOpen = menuManager.IsOpen;
-    }
-}
-catch (Exception ex)
-{
-    MelonLogger.Warning($"Could not check MenuManager.IsOpen: {ex.Message}");
-}
-
-if (!isBattleScene && !isMenuOpen)
-{
-    MelonLogger.Msg("CharacterSelectionReader: Menu not open and not in battle - skipping character data read to prevent false positives during scene load");
-    return null;
-}
-```
-
-**Files Modified**:
-- `Menus/CharacterSelectionReader.cs` - Added MenuManager.IsOpen check at start of TryReadCharacterSelection()
-- `Menus/MenuTextDiscovery.cs` - Removed redundant StatusMenuTracker.ShouldAnnounce() wrapper
+### Entity Scan Timing Issues
+**Problem:** Entity cache scan used arbitrary 0.5s delay after scene/map load
+**Cause:** `DelayedInitialScan()` and `DelayedMapTransitionScan()` used hardcoded timers that could fail on slower PCs
+**Solution:** Hook `MainGame.set_FieldReady(bool value)` - the game's internal signal that entities are instantiated:
+- Removed timer-based coroutines entirely
+- `set_FieldReady(true)` triggers `EntityCache.ForceScan()` automatically
+- Entities available immediately when user presses `[`/`]` keys
+- 5-second periodic rescan continues for cache maintenance
+**Files:** `MovementSpeechPatches.cs`, `FFIV_ScreenReaderMod.cs`
 
 ---
 
-### Issue 3: Equipment Slots Menu Interrupted by "RHand"
-**Problem**: When navigating equipment slots, the dedicated patch would announce the slot correctly, but then fallback strategies in MenuTextDiscovery would also run and announce "RHand" or similar partial text.
+## Compilation Fixes
 
-**Solution**: Added `IsInEquipmentSlotContext()` check at the start of `TryAllStrategies()` in MenuTextDiscovery to skip all fallback strategies when in equipment slot navigation:
-```csharp
-// CRITICAL: Check if we're in equipment slot context - if so, skip ALL strategies
-// The EquipmentInfoWindowController.SelectContent patch handles this menu
-if (IsInEquipmentSlotContext(cursor.transform))
-{
-    MelonLogger.Msg("In equipment slot context - skipping all fallback strategies");
-    return null;
-}
-```
-
-**File Modified**: `Menus/MenuTextDiscovery.cs` - Added IsInEquipmentSlotContext() method and check
-
----
-
-### Issue 4: H Key Not Announcing "Not in Battle"
-**Problem**: When pressing H outside of battle, nothing was announced. FF5 announces "Not in battle or no active character".
-
-**Root Cause**: InputManager.cs had an `IsInBattle()` gate that silently ignored H key presses when not in battle, even though `AnnounceCurrentCharacterStatus()` already had the "Not in battle or no active character" message.
-
-**Solution**: Removed the IsInBattle() gate from InputManager.cs:
-```csharp
-// Before:
-if (Input.GetKeyDown(KeyCode.H))
-{
-    if (IsInBattle())
-    {
-        mod.AnnounceCurrentCharacterStatus();
-    }
-    // Silently ignore if not in battle
-}
-
-// After:
-if (Input.GetKeyDown(KeyCode.H))
-{
-    mod.AnnounceCurrentCharacterStatus();
-}
-```
-
-**File Modified**: `Core/InputManager.cs` - Removed IsInBattle() check for H key
-
----
-
-## Analysis Summary
-
-### dump.cs Search Results
-
-Searched `D:\Games\Dev\Unity\FFPR\FF4\dump.cs` (~493K lines) for menu-related classes and methods.
-
-#### Key Menu Classes Found in FF4
-
-| Class | Namespace | Line | Purpose |
-|-------|-----------|------|---------|
-| `MainMenuController` | `Last.UI.KeyInput` | 445067 | Main menu navigation (keyboard/controller) |
-| `MainMenuController` | `Last.UI.Touch` | 413505 | Main menu navigation (touch) |
-| `CommandMenuController` | `Last.UI` | 391454 | Command menu (Items, Magic, Equip, etc.) |
-| `CommandMenuController` | `Last.UI.Touch` | 413169 | Touch version |
-| `StatusWindowController` | `Last.UI.KeyInput` | 430447 | Character status screen |
-| `StatusWindowController` | `Last.UI.Touch` | 396956 | Touch version |
-| `ItemWindowController` | `Last.UI.KeyInput` | 453628 | Item menu |
-| `ItemWindowController` | `Last.UI.Touch` | 419222 | Touch version |
-| `ItemListController` | `Last.UI.KeyInput` | 451948 | Item list navigation |
-| `StatusWindowControllerBase` | `Serial.Template.UI` | 284083 | Abstract base for status windows |
-| `StatusWindowControllerBase` | `Serial.Template.UI.KeyInput` | 287354 | KeyInput version |
-
-#### SelectContent Methods Found
-
-```
-Line 452040: private void SelectContent(IEnumerable<ItemListContentData>, int, Cursor, CustomScrollView.WithinRangeType)
-             - Location: Last.UI.KeyInput.ItemListController
-
-Line 280259: public void SelectContent(int index)
-             - Location: AbilityCommandController
-
-Line 280568: public void SelectContent(int index)
-             - Location: AbilityContentListController
-
-Line 396052: protected void SelectContent(int index)
-             - Location: PartySettingMenuBaseController
-
-Line 430501: protected override void SelectContent(List<StatusWindowContentControllerBase>, int, Cursor)
-             - Location: Last.UI.KeyInput.StatusWindowController
-```
-
----
-
-## Current Patches Analysis
-
-### Working Patches (Verified)
-
-| File | Target | Method | Status |
-|------|--------|--------|--------|
-| `CursorNavigationPatches.cs` | `Il2CppLast.UI.Cursor` | `NextIndex`, `PrevIndex` | Working |
-| `TitleMenuPatches.cs` | Title menu | Various | Working |
-| `PartySettingPatches.cs` | `PartySettingMenuBaseController` | `SelectContent` | Working |
-| `MessagePatches.cs` | Dialogue/Messages | Various | Working |
-| `StatusDetailsPatches.cs` | Status screen | InitDisplay, ExitDisplay | Working |
-
-### Patches with Bug Fixes Applied
-
-| File | Target | Fix Applied |
-|------|--------|-------------|
-| `MessagePatches.cs` | `MessageWindowView.SetSpeker` | Location name filter |
-| `MenuTextDiscovery.cs` | `TryAllStrategies` | Equipment slot context check |
-| `CharacterSelectionReader.cs` | `TryReadCharacterSelection` | MenuManager.IsOpen check |
-| `InputManager.cs` | H key handler | Removed IsInBattle gate |
-
----
-
-## Changes Made During Port
-
-### Compilation Fixes Applied
-
-1. **StatusDetailsReader.cs** (line ~21)
-   - Added missing `ReadStatusDetails` method
-   - Changed `param.Level` to `param.ConfirmedLevel()` (property vs method)
-
-2. **PartySettingPatches.cs**
-   - Changed `FirstSlotSelect` → `SlotSelect`
-   - Changed `FirstMemberSelect` → `MemberSelect`
-   - Changed `OnlySlotSelect` → `SlotSelect`
-   - (FF4 has different State enum values than FF6)
-
-3. **EntityFactory.cs**
-   - Removed `MapConstants.ObjectType.MapRange`
-   - Removed `MapConstants.ObjectType.ChangeAnimationKeyArea`
-   - Removed `MapConstants.ObjectType.SwitchEvent`
-   - Removed `MapConstants.ObjectType.RandomEvent`
-   - (These ObjectType values don't exist in FF4)
-
-4. **NavigableEntity.cs**
-   - Removed non-existent ObjectType references
-
-5. **BattleMessagePatches.cs**
-   - Removed `SetSpeaker` patch (method doesn't exist in FF4)
-   - Removed `SetCommandText` patch (method doesn't exist in FF4)
-
-6. **AbilityMenuPatches.cs**
-   - Added `Il2CppSerial.FF4.UI.KeyInput` namespace
-   - Removed `AbilityChangeController` patches (doesn't exist)
-
-7. **BattleCommandPatches.cs**
-   - Added `Il2CppSerial.FF0.UI.KeyInput` namespace
-
-8. **StatusDetailsPatches.cs**
-   - Added `Il2CppSerial.Template.UI.KeyInput` namespace
-
-### Round 2 Bug Fixes Applied
-
-1. **MessagePatches.cs** - Speaker filter for location names
-2. **CharacterSelectionReader.cs** - MenuManager.IsOpen check
-3. **MenuTextDiscovery.cs** - Removed StatusMenuTracker wrapper, added equipment slot context check
-4. **InputManager.cs** - Removed IsInBattle gate for H key
-
----
-
-## Testing Checklist
-
-- [x] Launch game, check MelonLoader logs for patch errors
-- [x] Map name no longer announced when opening main menu
-- [x] Character statistics not announced on game load
-- [x] Equipment slot navigation not interrupted by "RHand"
-- [x] H key announces "Not in battle or no active character" when not in battle
-- [x] Open main menu (X button) - verify command menu reads
-- [x] Navigate Items menu - verify item names read
-- [x] Navigate Equipment menu - verify slot names read
-- [x] Open Status screen - verify character info reads
-- [x] Navigate Abilities menu - verify ability names read
-- [x] Test Config menu - verify option names read
-- [x] Test Save/Load menu - verify slot names read
-- [x] Battle: turn announcements working
-- [x] Battle: target selection working
-- [x] Battle: damage/healing announcements working
-- [x] Shop: item browsing working
-- [x] Field: pathfinding and navigation working
-- [x] Item use: character selection reads correctly (Round 3 fix)
-- [x] Status screen: arrow key navigation through stats (Up/Down/PgUp/PgDn/Home/End)
-- [x] Wall bump detection: audio feedback when walking into walls
-- [x] Vehicle state announcements: boarding/disembarking vehicles announced
-
----
-
-## Files Modified in Round 2
-
-| File | Changes |
-|------|---------|
-| `Patches/MessagePatches.cs` | Added location name filter to speaker patch |
-| `Menus/CharacterSelectionReader.cs` | Added MenuManager.IsOpen check |
-| `Menus/MenuTextDiscovery.cs` | Removed StatusMenuTracker wrapper, added IsInEquipmentSlotContext() |
-| `Core/InputManager.cs` | Removed IsInBattle() gate for H key |
-
----
-
-## Reference: Key Namespaces
-
-```
-Il2CppLast.UI                    - Base UI classes
-Il2CppLast.UI.KeyInput           - Keyboard/controller UI
-Il2CppLast.UI.Touch              - Touch UI
-Il2CppLast.Management            - Game management (MenuManager, etc.)
-Il2CppSerial.FF4.UI.KeyInput     - FF4-specific keyboard UI
-Il2CppSerial.Template.UI         - Template/shared UI
-Il2CppSerial.Template.UI.KeyInput - Template keyboard UI
-```
+| File | Change |
+|------|--------|
+| `StatusDetailsReader.cs` | `param.Level` → `param.ConfirmedLevel()` |
+| `PartySettingPatches.cs` | `FirstSlotSelect` → `SlotSelect`, etc. |
+| `EntityFactory.cs` | Removed non-existent ObjectTypes |
+| `BattleMessagePatches.cs` | Removed `SetSpeaker`, `SetCommandText` patches |
+| `AbilityMenuPatches.cs` | Added FF4 namespace, removed `AbilityChangeController` |
 
 ---
 
 ## Debug Commands
 
-```bash
-# View latest log (use cmd-compatible commands)
-cmd //c "type d:\Games\SteamLibrary\steamapps\common\FINAL FANTASY IV PR\MelonLoader\Logs\Latest.log"
+**View latest log:**
+```
+Read file_path="D:\Games\steamlibrary\steamapps\common\final fantasy iv pr\MelonLoader\Logs\Latest.log"
+```
 
-# Build and deploy
-cmd //c "D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader\build_and_deploy.bat"
+**Find logs by timestamp:**
+```
+Glob pattern="*.log" path="D:\Games\steamlibrary\steamapps\common\final fantasy iv pr\MelonLoader\Logs"
+```
+
+**Build and deploy:**
+```
+powershell -Command "& cmd /c 'D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader\build_and_deploy.bat'"
+```
+
+---
+
+## Key Namespaces
+
+```
+Il2CppLast.UI                    - Base UI classes
+Il2CppLast.UI.KeyInput           - Keyboard/controller UI
+Il2CppLast.Management            - MenuManager, etc.
+Il2CppSerial.FF4.UI.KeyInput     - FF4-specific UI
+Il2CppSerial.Template.UI.KeyInput - Template UI
 ```

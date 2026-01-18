@@ -1,4 +1,5 @@
 using MelonLoader;
+using HarmonyLib;
 using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Patches;
@@ -84,6 +85,15 @@ namespace FFIV_ScreenReader.Core
 
             // Initialize input manager
             inputManager = new InputManager(this);
+
+            // Apply manual Harmony patches for popups, save/load dialogs, and vehicle state
+            var harmony = new HarmonyLib.Harmony("FFIV_ScreenReader.ManualPatches");
+            PopupPatches.ApplyPatches(harmony);
+            SaveLoadPatches.ApplyPatches(harmony);
+
+            // Set up callback for field ready event before applying patches
+            MovementSpeechPatches.OnFieldReady = OnFieldReadyCallback;
+            MovementSpeechPatches.ApplyPatches(harmony);
         }
 
         public override void OnDeinitializeMelon()
@@ -91,11 +101,26 @@ namespace FFIV_ScreenReader.Core
             // Unsubscribe from scene load events
             UnityEngine.SceneManagement.SceneManager.sceneLoaded -= (UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode>)OnSceneLoaded;
 
-            // Stop vehicle state monitoring
-            MoveStateMonitor.StopStateMonitoring();
-
             CoroutineManager.CleanupAll();
             tolk?.Unload();
+        }
+
+        /// <summary>
+        /// Called when the field is ready (via MainGame.set_FieldReady hook).
+        /// Triggers entity scan so entities are available immediately when user presses navigation keys.
+        /// </summary>
+        private void OnFieldReadyCallback()
+        {
+            try
+            {
+                LoggerInstance.Msg("[FieldReady] Triggering initial entity scan");
+                entityCache.ForceScan();
+                LoggerInstance.Msg($"[FieldReady] Entity scan complete, found {entityCache.Entities.Count} entities");
+            }
+            catch (System.Exception ex)
+            {
+                LoggerInstance.Warning($"[FieldReady] Error during entity scan: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -108,23 +133,25 @@ namespace FFIV_ScreenReader.Core
             {
                 LoggerInstance.Msg($"[ComponentCache] Scene loaded: {scene.name}");
 
+                // Clear speaker context on scene change to re-establish who is speaking
+                DialogueTracker.ClearLastAnnouncedSpeaker();
+
+                // Reset location message tracker to prevent stale FadeMessage from blocking new locations
+                LocationMessageTracker.Reset();
+
+                // Clear save/load menu state on scene change (user backed out to title or main menu)
+                SaveLoadPatches.ClearSaveLoadMenuState();
+
                 // Try to find and cache FieldPlayerController
                 var playerController = UnityEngine.Object.FindObjectOfType<Il2CppLast.Map.FieldPlayerController>();
                 if (playerController != null)
                 {
                     Utils.GameObjectCache.Register(playerController);
                     LoggerInstance.Msg($"[ComponentCache] Cached FieldPlayerController: {playerController.gameObject?.name}");
-
-                    // Start vehicle state monitoring for world map contexts
-                    MoveStateMonitor.StartStateMonitoring();
-                    LoggerInstance.Msg("[MoveState] Started vehicle state monitoring");
                 }
                 else
                 {
                     LoggerInstance.Msg("[ComponentCache] No FieldPlayerController found in scene");
-
-                    // Stop monitoring if no field player (e.g., in menu scenes)
-                    MoveStateMonitor.StopStateMonitoring();
                 }
 
                 // Try to find and cache FieldMap
@@ -133,9 +160,6 @@ namespace FFIV_ScreenReader.Core
                 {
                     Utils.GameObjectCache.Register(fieldMap);
                     LoggerInstance.Msg($"[ComponentCache] Cached FieldMap: {fieldMap.gameObject?.name}");
-
-                    // Delay entity scan to allow scene to fully initialize
-                    CoroutineManager.StartManaged(DelayedInitialScan());
                 }
                 else
                 {
@@ -148,35 +172,6 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
-        /// <summary>
-        /// Coroutine that delays entity scanning to allow scene to fully initialize.
-        /// </summary>
-        private System.Collections.IEnumerator DelayedInitialScan()
-        {
-            // Wait 0.5 seconds for scene to fully initialize and entities to spawn
-            yield return new UnityEngine.WaitForSeconds(0.5f);
-
-            // Scan for entities - EntityNavigator will be updated via OnEntityAdded events
-            // No need to call RebuildNavigationList() as the event handlers already filter and add entities
-            entityCache.ForceScan();
-
-            LoggerInstance.Msg("[ComponentCache] Delayed initial entity scan completed");
-        }
-
-        /// <summary>
-        /// Coroutine that delays entity scanning after map transition to allow entities to spawn.
-        /// </summary>
-        private System.Collections.IEnumerator DelayedMapTransitionScan()
-        {
-            // Wait 0.5 seconds for new map entities to spawn
-            yield return new UnityEngine.WaitForSeconds(0.5f);
-
-            // Scan for entities - EntityNavigator will be updated via OnEntityAdded/OnEntityRemoved events
-            // No need to call RebuildNavigationList() as the event handlers already filter and add entities
-            entityCache.ForceScan();
-
-            LoggerInstance.Msg("[ComponentCache] Delayed map transition entity scan completed");
-        }
 
         public override void OnUpdate()
         {
@@ -208,8 +203,10 @@ namespace FFIV_ScreenReader.Core
                         SpeakText($"Entering {mapName}", interrupt: false);
                         lastAnnouncedMapId = currentMapId;
 
-                        // Delay entity scan to allow new map to fully initialize
-                        CoroutineManager.StartManaged(DelayedMapTransitionScan());
+                        // Check if entering interior map - if so, switch to on-foot state
+                        // (e.g., entering Lunar Whale 2F interior while in airship)
+                        bool isWorldMap = IsCurrentMapWorldMap();
+                        Utils.MoveStateHelper.OnMapTransition(isWorldMap);
                     }
                     else if (lastAnnouncedMapId == -1)
                     {
@@ -222,6 +219,52 @@ namespace FFIV_ScreenReader.Core
             {
                 LoggerInstance.Warning($"Error detecting map transition: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Check if the current map is a world map (overworld, underworld, moon surface).
+        /// </summary>
+        private bool IsCurrentMapWorldMap()
+        {
+            try
+            {
+                var fieldMap = Utils.GameObjectCache.Get<Il2Cpp.FieldMap>();
+                if (fieldMap?.fieldController?.mapManager?.CurrentMapModel != null)
+                {
+                    return fieldMap.fieldController.mapManager.CurrentMapModel.IsAreaTypeWorld;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                LoggerInstance.Warning($"Error checking world map: {ex.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Checks if player is on an active field map.
+        /// Returns true if on valid map (ready for entity navigation), false otherwise.
+        /// Note: Entity scan is now triggered automatically via MainGame.set_FieldReady hook.
+        /// </summary>
+        private bool EnsureFieldContextAndScan()
+        {
+            // Check if FieldMap exists and is active
+            var fieldMap = Utils.GameObjectCache.Get<Il2Cpp.FieldMap>();
+            if (fieldMap == null || !fieldMap.gameObject.activeInHierarchy)
+            {
+                SpeakText("Not on map");
+                return false;
+            }
+
+            // Check if player controller exists
+            var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
+            if (playerController?.fieldPlayer == null)
+            {
+                SpeakText("Not on map");
+                return false;
+            }
+
+            return true;
         }
 
         internal void AnnounceCurrentEntity()
@@ -267,6 +310,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void CycleNext()
         {
+            // Ensure we're on a valid map and trigger scan if needed
+            if (!EnsureFieldContextAndScan())
+                return;
+
             if (entityNavigator.CycleNext())
             {
                 AnnounceEntityOnly();
@@ -287,6 +334,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void CyclePrevious()
         {
+            // Ensure we're on a valid map and trigger scan if needed
+            if (!EnsureFieldContextAndScan())
+                return;
+
             if (entityNavigator.CyclePrevious())
             {
                 AnnounceEntityOnly();
@@ -321,7 +372,7 @@ namespace FFIV_ScreenReader.Core
                 return;
             }
 
-            // CRITICAL: Touch controller uses localPosition, NOT position!
+            // Use localPosition for pathfinding (matches touch controller behavior)
             Vector3 playerPos = playerController.fieldPlayer.transform.localPosition;
             Vector3 targetPos = entity.GameEntity.transform.localPosition;
 
@@ -337,12 +388,17 @@ namespace FFIV_ScreenReader.Core
 
             // Announce entity info + path status + count at the end
             string countSuffix = $", {entityNavigator.CurrentIndex + 1} of {entityNavigator.EntityCount}";
-            string announcement = pathInfo.Success ? $"{formatted}{countSuffix}" : $"{formatted}, no path{countSuffix}";
+            string pathStatus = pathInfo.Success ? "" : ", no path";
+            string announcement = $"{formatted}{pathStatus}{countSuffix}";
             SpeakText(announcement);
         }
 
         internal void CycleNextCategory()
         {
+            // Ensure we're on a valid map and trigger scan if needed
+            if (!EnsureFieldContextAndScan())
+                return;
+
             // Cycle to next category
             int nextCategory = ((int)entityNavigator.CurrentCategory + 1) % CategoryCount;
             EntityCategory newCategory = (EntityCategory)nextCategory;
@@ -356,6 +412,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void CyclePreviousCategory()
         {
+            // Ensure we're on a valid map and trigger scan if needed
+            if (!EnsureFieldContextAndScan())
+                return;
+
             // Cycle to previous category
             int prevCategory = (int)entityNavigator.CurrentCategory - 1;
             if (prevCategory < 0)
@@ -372,6 +432,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void ResetToAllCategory()
         {
+            // Ensure we're on a valid map and trigger scan if needed
+            if (!EnsureFieldContextAndScan())
+                return;
+
             if (entityNavigator.CurrentCategory == EntityCategory.All)
             {
                 SpeakText("Already in All category");

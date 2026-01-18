@@ -114,11 +114,10 @@ namespace FFIV_ScreenReader.Menus
             menuText = TryReadBattleEnemyTarget(cursor);
             if (menuText != null) return menuText;
 
-            // Strategy 1: Save/Load slot information
-            menuText = SaveSlotReader.TryReadSaveSlot(cursor.transform, cursor.Index);
-            if (menuText != null) return menuText;
+            // Note: Save/Load slot information is now handled by SaveLoadPatches.cs
+            // which provides dedicated support for save/load confirmation popups
 
-            // Strategy 2: Character selection (formation, status, equipment, etc.)
+            // Strategy 1: Character selection (formation, status, equipment, etc.)
             // CharacterSelectionReader has its own MenuManager.IsOpen check to prevent
             // false positives during game initialization/scene preload
             menuText = CharacterSelectionReader.TryReadCharacterSelection(cursor.transform, cursor.Index);

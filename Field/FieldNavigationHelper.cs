@@ -5,6 +5,7 @@ using System.Text;
 using Il2Cpp;
 using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
+using MelonLoader;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Field
@@ -119,9 +120,15 @@ namespace FFIV_ScreenReader.Field
         }
 
         /// <summary>
-        /// Finds a path from player to target using the game's pathfinding system
+        /// Finds a path from player to target using the game's pathfinding system.
+        /// On the moon (MapId=3), validates with reverse-path check to detect one-way ledges.
         /// </summary>
-        public static PathInfo FindPathTo(Vector3 playerWorldPos, Vector3 targetWorldPos, IMapAccessor mapHandle, FieldPlayer player = null)
+        /// <param name="playerWorldPos">Player's world position</param>
+        /// <param name="targetWorldPos">Target's world position</param>
+        /// <param name="mapHandle">Map accessor for collision data</param>
+        /// <param name="player">Player entity (for layer info)</param>
+        /// <param name="destinationLayer">Unity layer of the destination entity (default 10 = GroundLayer)</param>
+        public static PathInfo FindPathTo(Vector3 playerWorldPos, Vector3 targetWorldPos, IMapAccessor mapHandle, FieldPlayer player = null, int destinationLayer = 10)
         {
             var pathInfo = new PathInfo { Success = false };
 
@@ -151,38 +158,94 @@ namespace FFIV_ScreenReader.Field
                     0
                 );
 
-                // Set Z from player layer
-                if (player != null)
+                // Calculate Z coordinates for pathfinding
+                // Most maps use layer-based Z: BottomLayer=9 -> Z=0, GroundLayer=10 -> Z=1, etc.
+                // Moon (MapId=3) is a special case - always use Z=0 for pathfinding
+                int playerLayer = player?.gameObject?.layer ?? 10;
+                int currentMapId = -1;
+                try
                 {
-                    float layerZ = player.gameObject.layer - 9;
-                    startCell.z = layerZ;
+                    currentMapId = Il2CppLast.Management.UserDataManager.Instance()?.CurrentMapId ?? -1;
+                }
+                catch { }
+
+                // Use layer-based Z resolution for all maps
+                int pathfindZ = playerLayer >= 9 ? playerLayer - 9 : 0;
+
+                // Store layer info in path result for debugging
+                pathInfo.PlayerZ = pathfindZ;
+                pathInfo.DestinationZ = pathfindZ;
+
+                // Set Z coordinates for pathfinding
+                startCell.z = pathfindZ;
+                destCell.z = pathfindZ;
+
+                // DEBUG: Log comprehensive position and state data
+                try
+                {
+                    var fieldMap = Utils.GameObjectCache.Get<FieldMap>();
+                    Vector3 playerLocalPos = player?.transform?.localPosition ?? Vector3.zero;
+                    Vector2 scrollOffset = Vector2.zero;
+                    bool isWorldMap = false;
+                    bool isMoonMap = (currentMapId == 3);
+
+                    if (fieldMap?.fieldController != null)
+                    {
+                        scrollOffset = fieldMap.fieldController.MapScrollOffset;
+                        try
+                        {
+                            var mapManager = Il2CppLast.Map.MapLoadProcessor.GetMapManager();
+                            if (mapManager?.CurrentMapModel != null)
+                            {
+                                isWorldMap = mapManager.CurrentMapModel.IsAreaTypeWorld;
+                            }
+                        }
+                        catch { }
+                    }
+
+                    MelonLogger.Msg("=== PATHFIND DEBUG ===");
+                    MelonLogger.Msg($"MapId={currentMapId}, IsWorldMap={isWorldMap}, IsMoon={isMoonMap}");
+                    MelonLogger.Msg($"MapSize: {mapWidth}x{mapHeight}");
+                    MelonLogger.Msg($"ScrollOffset: ({scrollOffset.x}, {scrollOffset.y})");
+                    MelonLogger.Msg($"Player WorldPos: ({playerWorldPos.x:F1}, {playerWorldPos.y:F1}, {playerWorldPos.z:F1})");
+                    MelonLogger.Msg($"Player LocalPos: ({playerLocalPos.x:F1}, {playerLocalPos.y:F1}, {playerLocalPos.z:F1})");
+                    MelonLogger.Msg($"Target WorldPos: ({targetWorldPos.x:F1}, {targetWorldPos.y:F1}, {targetWorldPos.z:F1})");
+                    MelonLogger.Msg($"StartCell: ({startCell.x}, {startCell.y}, {startCell.z})");
+                    MelonLogger.Msg($"DestCell: ({destCell.x}, {destCell.y}, {destCell.z})");
+                    MelonLogger.Msg($"PlayerLayer={playerLayer}, PathfindZ={pathfindZ}, IsOnCollision={player?.IsOnCollision}");
+
+                    // Try to get game's cell conversion for comparison
+                    try
+                    {
+                        Vector3 gameStartCell = fieldMap.fieldController.ConvertWorldPositionToCellPosition(playerWorldPos);
+                        Vector3 gameDestCell = fieldMap.fieldController.ConvertWorldPositionToCellPosition(targetWorldPos);
+                        MelonLogger.Msg($"Game StartCell: ({gameStartCell.x:F1}, {gameStartCell.y:F1}, {gameStartCell.z:F1})");
+                        MelonLogger.Msg($"Game DestCell: ({gameDestCell.x:F1}, {gameDestCell.y:F1}, {gameDestCell.z:F1})");
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Msg($"Game cell conversion failed: {ex.Message}");
+                    }
+                    MelonLogger.Msg("======================");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Msg($"Debug logging error: {ex.Message}");
                 }
 
-                // Use the REAL pathfinding method with player's collision state!
                 Il2CppSystem.Collections.Generic.List<Vector3> pathPoints = null;
 
                 if (player != null)
                 {
-                    bool playerCollisionState = player._IsOnCollision_k__BackingField;
+                    // Use player's actual collision state for pathfinding
+                    bool useCollision = player.IsOnCollision;
 
-                    // Touch controller searches layers 2,1,0 when collision enabled to find walkable layer
-                    // Try pathfinding with different destination layers until one succeeds
-                    for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
-                    {
-                        destCell.z = tryDestZ;
-                        pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, destCell, playerCollisionState);
+                    // Pathfind on the SAME layer (elevation check already passed above)
+                    pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, destCell, useCollision);
 
-                        if (pathPoints != null && pathPoints.Count > 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    // If direct path failed, try adjacent tiles
+                    // If direct path failed, try adjacent tiles (still on same layer)
                     if (pathPoints == null || pathPoints.Count == 0)
                     {
-                        // Try adjacent tiles (one cell = 16 units in world space)
-                        // Try all 8 directions: cardinals first, then diagonals
                         Vector3[] adjacentOffsets = new Vector3[] {
                             new Vector3(0, 16, 0),    // north
                             new Vector3(16, 0, 0),    // east
@@ -197,34 +260,18 @@ namespace FFIV_ScreenReader.Field
                         foreach (var offset in adjacentOffsets)
                         {
                             Vector3 adjacentTargetWorld = targetWorldPos + offset;
-
-                            // Convert to cell coordinates
                             Vector3 adjacentDestCell = new Vector3(
                                 Mathf.FloorToInt(mapWidth * 0.5f + adjacentTargetWorld.x * 0.0625f),
                                 Mathf.FloorToInt(mapHeight * 0.5f - adjacentTargetWorld.y * 0.0625f),
-                                0
+                                pathfindZ  // Use same Z as pathfinding
                             );
 
-                            // Try pathfinding with different layers
-                            for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
-                            {
-                                adjacentDestCell.z = tryDestZ;
-                                pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, adjacentDestCell, playerCollisionState);
+                            pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, adjacentDestCell, useCollision);
 
-                                if (pathPoints != null && pathPoints.Count > 0)
-                                {
-                                    break;
-                                }
-                            }
-
-                            // If we found a path, stop trying other adjacent tiles
                             if (pathPoints != null && pathPoints.Count > 0)
                                 break;
                         }
                     }
-
-                    // Don't fall back to collision=false - if we can't find a valid path, report failure
-                    // (collision=false would route through walls, which is misleading)
                 }
                 else
                 {
@@ -242,6 +289,28 @@ namespace FFIV_ScreenReader.Field
                 for (int i = 0; i < pathPoints.Count; i++)
                 {
                     pathInfo.WorldPath.Add(pathPoints[i]);
+                }
+
+                // Moon-specific reverse-path validation: detect one-way ledges
+                // If we can path A→B but NOT B→A, the path crosses a ledge we can't climb back up
+                if (currentMapId == 3 && player != null)
+                {
+                    MelonLogger.Msg($"[MoonPath] Testing reverse path from dest to player...");
+
+                    // Try pathfinding in reverse (from destination to player)
+                    bool useCollision = player.IsOnCollision;
+                    var reversePathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, destCell, startCell, useCollision);
+
+                    if (reversePathPoints == null || reversePathPoints.Count == 0)
+                    {
+                        MelonLogger.Msg($"[MoonPath] REJECTED: Reverse path failed - one-way ledge detected");
+                        pathInfo.ErrorMessage = "Path crosses one-way ledge";
+                        pathInfo.StepCount = 0;
+                        pathInfo.Description = "Path blocked by ledge";
+                        return pathInfo;
+                    }
+
+                    MelonLogger.Msg($"[MoonPath] Reverse path OK ({reversePathPoints.Count} points) - bidirectional path confirmed");
                 }
 
                 pathInfo.Success = true;
@@ -371,5 +440,21 @@ namespace FFIV_ScreenReader.Field
         public int StepCount { get; set; }
         public string Description { get; set; }
         public System.Collections.Generic.List<Vector3> WorldPath { get; set; }
+
+        /// <summary>
+        /// True if the destination is at a different elevation than the player.
+        /// This means there's no walkable path due to ledge/elevation barriers.
+        /// </summary>
+        public bool ElevationMismatch { get; set; }
+
+        /// <summary>
+        /// Player's pathfinding Z coordinate (layer - 9)
+        /// </summary>
+        public int PlayerZ { get; set; }
+
+        /// <summary>
+        /// Destination's pathfinding Z coordinate (layer - 9)
+        /// </summary>
+        public int DestinationZ { get; set; }
     }
 }

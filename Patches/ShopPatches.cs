@@ -103,8 +103,6 @@ namespace FFIV_ScreenReader.Patches
     public static class ShopPatches
     {
         private static string lastAnnouncedItem = "";
-        private static DateTime lastItemAnnouncedTime = DateTime.MinValue;
-        private static readonly TimeSpan ItemAnnounceCooldown = TimeSpan.FromMilliseconds(100);
 
         /// <summary>
         /// Announces shop command menu options (Buy, Sell, Equipment, Back).
@@ -196,12 +194,10 @@ namespace FFIV_ScreenReader.Patches
                 {
                     string announcement = string.IsNullOrEmpty(price) ? itemName : $"{itemName}, {price}";
 
-                    // Deduplicate
-                    if (itemName != lastAnnouncedItem || (DateTime.Now - lastItemAnnouncedTime) >= ItemAnnounceCooldown)
+                    // Deduplicate by content
+                    if (itemName != lastAnnouncedItem)
                     {
                         lastAnnouncedItem = itemName;
-                        lastItemAnnouncedTime = DateTime.Now;
-
                         MelonLogger.Msg($"[Shop Item] {announcement}");
                         CoroutineManager.StartManaged(DelayedAnnounceShopItem(announcement));
                     }

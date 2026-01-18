@@ -1,23 +1,32 @@
 # FF4 Screen Reader Mod - Porting Plan
 
-## Current Status: COMPLETE
+## Status: COMPLETE
 
-All major features have been ported and tested successfully.
+All features ported from FF6 mod and tested successfully.
 
-## Feature Completion Summary
+---
+
+## Feature Completion
 
 | Feature | Status |
 |---------|--------|
-| Field Navigation & Pathfinding | ✅ Complete |
-| Menu System (all menus) | ✅ Complete |
-| Battle System | ✅ Complete |
-| Shops | ✅ Complete |
-| Victory Screen | ✅ Complete |
-| Vehicle Support | ✅ Complete |
-| Vehicle State Announcements | ✅ Complete |
-| Status Screen Navigation | ✅ Complete |
-| Wall Bump Detection | ✅ Complete |
-| Vehicle Landing Announcements | ✅ Complete |
+| Field Navigation & Pathfinding | ✅ |
+| Menu System (all menus) | ✅ |
+| Battle System | ✅ |
+| Shops | ✅ |
+| Victory Screen | ✅ |
+| Vehicle Support | ✅ |
+| Vehicle State Announcements | ✅ |
+| Status Screen Navigation | ✅ |
+| Wall Bump Detection | ✅ |
+| Vehicle Landing Announcements | ✅ |
+| Story Event Text (LineFade) | ✅ |
+| Per-Page Dialogue Reading | ✅ |
+| Moon Pathfinding (One-Way Ledges) | ✅ |
+| Popup/Confirmation Dialogs | ✅ |
+| Save/Load Confirmation Popups | ✅ |
+| Save Slot Navigation | ✅ |
+| Title Screen "Press any button" | ✅ |
 
 ---
 
@@ -25,585 +34,137 @@ All major features have been ported and tested successfully.
 
 Port the FFVI_MOD screen reader accessibility mod to Final Fantasy IV Pixel Remaster.
 
-## Source
+- **Source:** `d:\games\dev\unity\ffpr\ff6\ff6ScreenReader\FFVI_MOD`
+- **Target:** `D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader`
 
-- **From:** `d:\games\dev\unity\ffpr\ff6\ff6ScreenReader\FFVI_MOD`
-- **To:** `D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader`
+## Exclusions (FF6-Specific)
 
-## Exclusions
+- Airship Navigation (`AirshipNavigationPatches.cs`, `AirshipNavigationReader.cs`)
+- Esper/Magicite system (in `StatusDetailsReader.cs`, `AbilityMenuPatches.cs`)
 
-The following will NOT be ported:
+## Files Ported
 
-### 1. Airship Navigation (FF6-specific)
-- `Patches/AirshipNavigationPatches.cs` - Entire file
-- `Utils/AirshipNavigationReader.cs` - Entire file
-- Airship-related methods in main mod file (AnnounceAirshipStatus, heading announcements)
+### Core Infrastructure
+| File | Modifications |
+|------|---------------|
+| `FFIV_ScreenReaderMod.cs` | Renamed from FFVI, removed airship methods |
+| `InputManager.cs` | Removed airship hotkey (H) |
+| `EntityCache.cs` | None |
+| `EntityNavigator.cs` | None |
+| `Filters/*.cs` | None |
 
-### 2. Esper/Magic Stone System (FF6-specific)
-- Magicite reading in `Menus/StatusDetailsReader.cs` (lines 118-126)
-- Any Esper management references in `Patches/AbilityMenuPatches.cs`
+### Menu Systems
+| File | Modifications |
+|------|---------------|
+| `StatusDetailsReader.cs` | Removed Magicite, added FF4 stats |
+| `CharacterSelectionReader.cs` | FF4 character names |
+| Others | None |
 
-## Files to Port
+### Battle & Patches
+| File | Modifications |
+|------|---------------|
+| `BattleCommandPatches.cs` | Removed FF6-specific commands |
+| Others | Minor namespace changes |
 
-### Priority 1: Core Infrastructure
-| File | Purpose | Modifications |
-|------|---------|---------------|
-| `Core/FFVI_ScreenReaderMod.cs` | Main entry point | Rename to FFIV_ScreenReaderMod, remove airship methods |
-| `Core/InputManager.cs` | Hotkey handling | Remove airship hotkey (H for airship status) |
-| `Core/EntityCache.cs` | Entity registry | No changes expected |
-| `Core/EntityNavigator.cs` | Navigation system | No changes expected |
-| `Core/Filters/*.cs` | All filter classes | No changes expected |
-
-### Priority 2: Menu Systems
-| File | Purpose | Modifications |
-|------|---------|---------------|
-| `Menus/StatusDetailsReader.cs` | Character status | Remove Magicite reading |
-| `Menus/CharacterSelectionReader.cs` | Character selection | May need FF4 character names |
-| `Menus/ConfigMenuReader.cs` | Config menu | No changes expected |
-| `Menus/TitleMenuReader.cs` | Title screen | No changes expected |
-| `Menus/SaveSlotReader.cs` | Save/load slots | No changes expected |
-| `Menus/MenuTextDiscovery.cs` | Menu text extraction | No changes expected |
-| `Menus/KeyboardGamepadReader.cs` | Input config | No changes expected |
-
-### Priority 3: Dialogue & Battle Messages
-| File | Purpose | Modifications |
-|------|---------|---------------|
-| `Patches/BattleMessagePatches.cs` | Battle announcements | May need FF4-specific adjustments |
-| `Patches/BattleCommandPatches.cs` | Battle menu commands | Remove FF6-specific commands (Tools, Blitz, etc.) |
-| `Patches/BattleResultPatches.cs` | Battle results | No changes expected |
-
-### Priority 4: Field Navigation
-| File | Purpose | Modifications |
-|------|---------|---------------|
-| `Field/EntityFactory.cs` | Entity creation | No changes expected |
-| `Field/NavigableEntity.cs` | Entity base class | No changes expected |
-| `Field/GroupEntity.cs` | Entity grouping | No changes expected |
-| `Field/FieldNavigationHelper.cs` | Pathfinding | No changes expected |
-| `Field/MapNameResolver.cs` | Map name lookup | No changes expected |
-
-### Priority 5: Other Patches
-| File | Purpose | Modifications |
-|------|---------|---------------|
-| `Patches/TitleMenuPatches.cs` | Title menu | No changes expected |
-| `Patches/ConfigMenuPatches.cs` | Config menu | No changes expected |
-| `Patches/ShopPatches.cs` | Shop dialogue | No changes expected |
-| `Patches/ItemMenuPatches.cs` | Item menu | No changes expected |
-| `Patches/PartySettingPatches.cs` | Party setup | No changes expected |
-| `Patches/FormationRowPatches.cs` | Formation | No changes expected |
-| `Patches/CursorNavigationPatches.cs` | Cursor movement | No changes expected |
-| `Patches/AbilityMenuPatches.cs` | Ability menu | Remove Esper references |
-| `Patches/StatusDetailsPatches.cs` | Status patches | No changes expected |
-
-### Priority 6: Utilities
-| File | Purpose | Modifications |
-|------|---------|---------------|
-| `Utils/GameObjectCache.cs` | Component caching | No changes expected |
-| `Utils/CoroutineManager.cs` | Coroutine management | No changes expected |
-| `Utils/TextUtils.cs` | Text utilities | No changes expected |
-| `Utils/Tolk.cs` | Screen reader wrapper | No changes expected |
-
-## Files NOT to Port
-- `Patches/AirshipNavigationPatches.cs`
-- `Utils/AirshipNavigationReader.cs`
-- `Utils/HierarchyDebug.cs` (debug only)
-
-## Naming Changes
-
-All references to:
-- `FFVI` → `FFIV`
-- `FFV` → `FFIV`
-- `Final Fantasy VI` → `Final Fantasy IV`
-
-## Directory Structure (Target)
-
-```
-ff4-screen-reader/
-├── FFIV_ScreenReader.csproj
-├── build_and_deploy.bat
-├── docs/
-│   └── plan.md
-├── Core/
-│   ├── FFIV_ScreenReaderMod.cs
-│   ├── EntityCache.cs
-│   ├── EntityNavigator.cs
-│   ├── InputManager.cs
-│   └── Filters/
-│       ├── IEntityFilter.cs
-│       ├── FilterContext.cs
-│       ├── CategoryFilter.cs
-│       ├── PathfindingFilter.cs
-│       └── MapExitGroupingStrategy.cs
-├── Field/
-│   ├── EntityFactory.cs
-│   ├── NavigableEntity.cs
-│   ├── GroupEntity.cs
-│   ├── FieldNavigationHelper.cs
-│   └── MapNameResolver.cs
-├── Menus/
-│   ├── StatusDetailsReader.cs
-│   ├── CharacterSelectionReader.cs
-│   ├── ConfigMenuReader.cs
-│   ├── TitleMenuReader.cs
-│   ├── SaveSlotReader.cs
-│   ├── MenuTextDiscovery.cs
-│   └── KeyboardGamepadReader.cs
-├── Patches/
-│   ├── BattleMessagePatches.cs
-│   ├── BattleCommandPatches.cs
-│   ├── BattleResultPatches.cs
-│   ├── TitleMenuPatches.cs
-│   ├── ConfigMenuPatches.cs
-│   ├── ShopPatches.cs
-│   ├── ItemMenuPatches.cs
-│   ├── PartySettingPatches.cs
-│   ├── FormationRowPatches.cs
-│   ├── CursorNavigationPatches.cs
-│   ├── AbilityMenuPatches.cs
-│   ├── StatusDetailsPatches.cs
-│   ├── MovementSpeechPatches.cs
-│   └── WallBumpPatches.cs
-└── Utils/
-    ├── GameObjectCache.cs
-    ├── CoroutineManager.cs
-    ├── TextUtils.cs
-    ├── TolkWrapper.cs
-    └── MoveStateHelper.cs
-```
-
-## Estimated File Count
-
-- **Total files to port:** ~45 files
-- **Files requiring modification:** ~6 files
-- **Files excluded:** 3 files
-
-## Implementation Order
-
-1. **Phase 1 - Core:** Main mod + input + entity system (5 files)
-2. **Phase 2 - Menus:** All menu readers (7 files)
-3. **Phase 3 - Battle:** Battle patches and messages (3 files)
-4. **Phase 4 - Navigation:** Field navigation system (5 files)
-5. **Phase 5 - Patches:** Remaining UI patches (9 files)
-6. **Phase 6 - Utils:** Utility classes (4 files)
+### Field Navigation
+| File | Modifications |
+|------|---------------|
+| `EntityFactory.cs` | Removed non-existent ObjectTypes |
+| `NavigableEntity.cs` | Removed non-existent ObjectTypes |
+| `FieldNavigationHelper.cs` | Added moon reverse-path validation |
+| Others | None |
 
 ---
 
-## Current Status: PORTING COMPLETE
+## Key Implementation Notes
 
-All phases completed. Mod is fully functional.
+### Vehicle State Announcements
+- **Primary Hook:** `FieldController.ChangeTransportation(int transportationId, ...)` - most reliable
+- **Supplementary:** `FieldPlayer.GetOn/GetOff` patches (for scenarios where they fire)
+- **Backup:** `FieldPlayer.ChangeMoveState` patch (catches edge cases)
+- `MoveStateHelper.cs` - State caching, `OnMapTransition()` for interior maps
+- `MovementSpeechPatches.cs` - All Harmony patches with duplicate prevention
+- Announces: Hovercraft, Enterprise, Falcon, Lunar Whale, Chocobos, "On foot"
+- Interior maps (e.g., Lunar Whale 2F) automatically set to on-foot state
+- Skips intermediate states (TRANSPORT_CONTENT) during cinematics
+- Uses `interrupt: false` to not interrupt location announcements
 
-### Vehicle State Announcements (Added)
+### Status Screen Navigation (17 stats, 4 groups)
+| Group | Stats |
+|-------|-------|
+| CharacterInfo | Level, Handed, Experience, Next Level |
+| Vitals | HP, MP |
+| Attributes | Strength, Agility, Stamina, Intellect, Spirit |
+| CombatStats | Attack, Accuracy, Defense, Evasion, Magic Defense, Magic Evasion |
 
-Ported from FF5 with FF4-specific vehicle names:
+**Controls:** Up/Down (navigate), PgUp/PgDn (jump groups), Home/End
 
-**Files Added:**
-- `Utils/MoveStateHelper.cs` - State tracking and announcements
-- `Patches/MovementSpeechPatches.cs` - Harmony patch for ChangeMoveState
+**UI Hook Approach:** Count multipliers (9x, 6x) read from `ParameterContentController` UI components, not data API.
 
-**Announcements:**
-- "On hovercraft" - Boarding the Hovercraft
-- "On Enterprise" - Boarding the Enterprise airship
-- "On [airship name]" - Falcon/Lunar Whale (uses localized name)
-- "On yellow chocobo" / "On black chocobo" - Mounting chocobos
-- "On foot" - Disembarking any vehicle
+### Vehicle Landing Announcements
+- Patches `MapUIManager.SwitchLandable(bool)`
+- Announces "Can land" when entering landable zone while in vehicle
 
----
+### Map Name Deduplication
+- Content-based matching: if SystemMessage text is contained in recent FadeMessage, skip it
+- Prevents "Entering Mysidia. Mysidia." duplicates
+- Short location-like strings (1-4 words) suppressed when no FadeMessage fired
 
-### Issues Identified from Testing
+### Per-Page Dialogue Reading
+- `DialogueTracker` stores messages from `SetContent`
+- `PlayingInit` hook announces one page at a time
+- Format: "Speaker: Text" (speaker only on change)
+- Speaker tracking resets on scene transitions and LineFade events
 
-#### Issue 1: Map Name Spoken Twice
-**Symptom:** "Castle Baron 1F" then "Castle Baron" on map entry.
-**Cause:** Multiple sources announcing map names (FadeMessageManager + other patches).
-**Fix:** Add global deduplication for location/map messages with time-based throttling (1.5s).
+### Moon Pathfinding (One-Way Ledges)
+- Moon surface (MapId=3) has disconnected regions separated by ledges
+- **Solution:** After finding forward path, test reverse path (dest→player)
+- If reverse fails, path crosses one-way ledge → reject
 
-#### Issue 2: Battle Messages Not Announced
-**Symptom:** Missing announcements for:
-- Character's turn (e.g., "Cecil's turn")
-- Enemy attacks (e.g., "Floating Eyeball attacks", "Goblin uses Goblin Punch")
-**Cause:** Missing `ParameterActFunctionManagment.CreateActFunction` patch.
-**Fix:** Port FF5's battle action patches:
-- `GlobalBattleMessageTracker` - Deduplication for battle messages
-- `ParameterActFunctionManagment.CreateActFunction` - Announces actor + action
-- Helper methods: `GetActorName()`, `GetActionName()`
+### Entity Scan Timing
+- **Hook:** `MainGame.set_FieldReady(bool value)` - game's internal signal that field is ready
+- When `value == true`, triggers `EntityCache.ForceScan()` automatically
+- Entities available immediately when user presses navigation keys
+- 5-second periodic rescan continues for cache maintenance
 
-#### Issue 3: Character Statistics on Initial Game Load
-**Symptom:** Stats announced when game first loads, not when user opens menu.
-**Cause:** `StatusDetailsPatches` fires on initialization, not just user navigation.
-**Fix:** Port FF5's `StatusMenuTracker` with `IsUserOpened` flag to distinguish user actions from initialization.
-
-#### Issue 4: Equipment Slots Menu Interrupted by "RHand"
-**Symptom:** Equipment slot + item starts speaking, then interrupted by "RHand".
-**Cause:** Multiple patches firing - slot patch and separate parts patch.
-**Fix:** Port FF5's `EquipmentInfoWindowController.SelectContent` patch that reads both slot name + equipped item together with deduplication.
-
-#### Issue 5: "New Game" Spoken on Title Menu Return
-**Symptom:** "New Game" always announced when exiting submenus to title, regardless of cursor position.
-**Cause:** Title menu patch uses string-based duplicate detection, which resets when leaving/returning.
-**Fix:** Port FF5's approach - use `commandId` (enum) for duplicate detection instead of string.
-
-### Implementation Plan
-
-#### Phase 1: Battle Messages (BattleMessagePatches.cs)
-1. Add `GlobalBattleMessageTracker` class with time-based deduplication (1.5s)
-2. Add `ParameterActFunctionManagment.CreateActFunction` patch for actor+action
-3. Helper methods to get actor name (player/enemy) and action name (ability/command)
-4. Natural language formatting: "Cecil attacks", "Goblin uses Goblin Punch"
-
-#### Phase 2: Status Menu Spam Fix (StatusDetailsPatches.cs)
-1. Add `StatusMenuTracker` with `IsUserOpened` flag
-2. Guard `InitDisplay` patch to check `IsUserOpened` before announcing
-3. Set flag when user explicitly navigates to status screen
-
-#### Phase 3: Equipment Slots (New EquipmentMenuPatches.cs)
-1. Port `EquipmentInfoWindowController.SelectContent` patch from FF5
-2. Read slot name from `partText`, item from `Data.Name`
-3. Add time-based deduplication (0.1s throttle)
-4. Strip icon markup from text
-
-#### Phase 4: Title Menu Fix (TitleMenuPatches.cs)
-1. Change duplicate detection from string to `TitleCommandId` enum
-2. Track `lastAnnouncedCommand` as enum value
-
-#### Phase 5: Map Name Deduplication (MessagePatches.cs)
-1. Add static tracker for last location message + timestamp
-2. Add 1.5s deduplication window to `FadeMessageManager_Play_Patch`
-3. Prevent same location being announced from multiple sources
+### Save Slot Navigation
+- Patches `SaveListController.SelectContent` to announce slot info when navigating
+- Reads `SaveContentView` fields via memory offsets:
+  | Field | Offset | Purpose |
+  |-------|--------|---------|
+  | slotNameText | 0x28 | "File", "Autosave", "Quick Save" |
+  | slotNumText | 0x38 | Slot number |
+  | timeStampDate | 0xD0 | Save date |
+  | timeStampTime | 0xD8 | Save time |
+  | areaNameText | 0x58 | Location |
+  | charaNameText | 0x40 | Lead character |
+  | levelText | 0x50 | Level |
+  | hourText | 0x70 | Play time hours |
+  | minuteText | 0x80 | Play time minutes |
+  | emptyText | 0x88 | "Empty" |
+- Format: "File 2, 01/17/2026 8:10, Moon, Edge Level 45, Time 13:06"
+- `SaveLoadMenuState.IsActive` suppresses `MenuTextDiscovery`
+- Visibility check prevents announcement during title screen initialization
 
 ---
 
-## Previous Status: Round 1 Bug Fixes (Completed)
-
-### Build Status
-- **Compilation:** ✅ Successful
-- **Deployment:** ✅ Working (Tolk.dll + NVDAControllerClient64.dll deployed)
-- **Title Menu:** ✅ Working (menu items announced)
-- **In-Game Menus:** ⚠️ Partially working (see issues below)
-
-### Issues Identified
-
-#### Issue 1: Dialogue Not Being Read
-**Symptom:** In-game dialogue/message windows are not announced.
-**Cause:** Missing or broken MessageWindow patches.
-**Fix:** Verify `MessageWindowController` patches exist and target correct FF4 methods.
-
-#### Issue 2: Character Stats Read on Map Load (Spam)
-**Symptom:** Character statistics are announced when loading maps, not just in menus.
-**Cause:** `StatusDetailsPatches.cs` lacks active state checks - patches fire during initialization.
-**Fix:** Add checks to ensure patches only fire when:
-- The status menu is actually visible and active
-- User explicitly requests info (H key in battle)
-
-#### Issue 3: Failed Harmony Patches (from logs)
-
-| Patch | Error | Fix |
-|-------|-------|-----|
-| `BattleMenuController.SetCommadnMessage` | Parameter "isLeft" not found | Remove `isLeft` parameter from postfix signature |
-| `StatusDetailsController.SetNextPlayer` | Method not found in FF4 | Remove patch (FF6-specific method) |
-| `StatusDetailsController.SetPrevPlayer` | Method not found in FF4 | Remove patch (FF6-specific method) |
-| `StatusDetailsController.SetParameter` | Method not found in FF4 | Remove patch (FF6-specific method) |
-
-### Proposed Fixes
-
-#### Fix 1: Dialogue Patches
-- Search dump.cs for `MessageWindow` classes and `ShowMessage` methods
-- Add patches for FF4's dialogue system (likely `MessageWindowController`)
-
-#### Fix 2: Active State Guards
-Add to all menu patches:
-```csharp
-// Skip if menu not visible/active
-if (__instance.gameObject == null || !__instance.gameObject.activeInHierarchy)
-    return;
-
-// Skip if this is initialization (check for valid cursor/selection)
-if (targetCursor == null || !targetCursor.gameObject.activeInHierarchy)
-    return;
-```
-
-#### Fix 3: Remove Non-Existent Methods
-In `StatusDetailsPatches.cs`, remove these patches entirely:
-- `StatusDetailsController_SetNextPlayer_Patch`
-- `StatusDetailsController_SetPrevPlayer_Patch`
-- `StatusDetailsController_SetParameter_Patch`
-
-#### Fix 4: Fix BattleMenuController Signature
-In battle patches, change:
-```csharp
-// WRONG - FF6 signature
-public static void Postfix(string message, bool isLeft)
-
-// CORRECT - FF4 signature
-public static void Postfix(string message)
-```
-
-### Implementation Order
-
-1. Remove broken patches (SetNextPlayer, SetPrevPlayer, SetParameter)
-2. Fix BattleMenuController signature
-3. Add active state guards to StatusDetailsPatches
-4. Investigate and fix dialogue reading
-
----
-
-## Status Screen Navigation Enhancement (Complete)
-
-### Overview
-
-Port the enhanced `StatusDetailsReader` navigation system from FF5 to FF4. This adds arrow key navigation through individual stats on the status screen, allowing users to browse stats one at a time instead of hearing everything at once.
-
-### Current FF4 Implementation
-
-The existing `StatusDetailsReader.cs` provides:
-- `ReadStatusDetails()` - Announces name, level, HP/MP on screen entry
-- `ReadPhysicalStats()` - Hotkey for Strength, Stamina, Defense, Evade
-- `ReadMagicalStats()` - Hotkey for Magic, Spirit, Magic Defense, Magic Evade
-
-**Limitation:** No way to navigate individual stats; users get all-or-nothing announcements.
-
-### FF5 Features to Port
-
-1. **StatusNavigationTracker** - Tracks navigation state (current index, active controller, character data)
-2. **StatusNavigationReader** - Arrow key navigation through stats
-3. **StatusDetailsHelpers** - Helper to extract character data from controller
-
-### Stats for FF4 (Visible on Status Screen)
-
-| Group | Stats | Notes |
-|-------|-------|-------|
-| Character Info | Level, Experience, Next Level | FF4 has no Job system |
-| Vitals | HP, MP | Current/Max |
-| Attributes | Strength, Agility, Stamina, Magic, Spirit | Core stats |
-| Combat Stats | Attack, Defense, Evasion, Magic Defense, Magic Evade | Derived stats |
-
-**Total: 13 navigable stats** (vs FF5's 17 - excludes Job, Job Level, ABP, Jobs count, Abilities count)
-
-### Stats NOT Applicable to FF4 (Excluded)
-
-- Job (FF5 job system)
-- Job Level (FF5 job system)
-- ABP (FF5 ability points)
-- Jobs count (FF5 job system)
-- Abilities count (FF5 learned abilities)
-
-### Keyboard Controls
-
-| Key | Action |
-|-----|--------|
-| Up Arrow | Previous stat |
-| Down Arrow | Next stat |
-| Page Up | Jump to previous group |
-| Page Down | Jump to next group |
-| Home | Jump to first stat |
-| End | Jump to last stat |
-
-### Implementation Steps
-
-#### Step 1: Add StatusNavigationTracker to StatusDetailsPatches.cs
-
-Add the tracker class to manage navigation state:
-```csharp
-public class StatusNavigationTracker
-{
-    private static StatusNavigationTracker instance = null;
-    public static StatusNavigationTracker Instance { get; }
-
-    public bool IsNavigationActive { get; set; }
-    public int CurrentStatIndex { get; set; }
-    public OwnedCharacterData CurrentCharacterData { get; set; }
-    public StatusDetailsController ActiveController { get; set; }
-
-    public void Reset();
-    public bool ValidateState();
-}
-```
-
-#### Step 2: Add StatusDetailsHelpers to StatusDetailsPatches.cs
-
-Add helper to extract character data:
-```csharp
-public static class StatusDetailsHelpers
-{
-    public static OwnedCharacterData GetCharacterDataFromController(StatusDetailsController controller);
-}
-```
-
-#### Step 3: Extend StatusDetailsReader.cs
-
-Add navigation infrastructure:
-- `StatGroup` enum (CharacterInfo, Vitals, Attributes, CombatStats)
-- `StatusStatDefinition` class for stat definitions
-- `StatusNavigationReader` class with:
-  - 13 stat reader methods (FF4-specific)
-  - Navigation methods (NavigateNext, NavigatePrevious, JumpToNextGroup, etc.)
-  - Group indices array for group jumping
-
-#### Step 4: Update InitDisplay Patch
-
-Modify the existing `StatusDetailsController_InitDisplay_Patch` to:
-- Initialize navigation state after announcing status
-- Set `StatusNavigationTracker.Instance` properties
-- Call `StatusNavigationReader.InitializeStatList()`
-
-#### Step 5: Add Input Handling for Status Screen
-
-Add to `InputManager.cs`:
-```csharp
-// In HandleGlobalInput() or new HandleStatusInput():
-if (StatusNavigationTracker.Instance.IsNavigationActive)
-{
-    if (Input.GetKeyDown(KeyCode.UpArrow)) StatusNavigationReader.NavigatePrevious();
-    if (Input.GetKeyDown(KeyCode.DownArrow)) StatusNavigationReader.NavigateNext();
-    if (Input.GetKeyDown(KeyCode.PageUp)) StatusNavigationReader.JumpToPreviousGroup();
-    if (Input.GetKeyDown(KeyCode.PageDown)) StatusNavigationReader.JumpToNextGroup();
-    if (Input.GetKeyDown(KeyCode.Home)) StatusNavigationReader.JumpToTop();
-    if (Input.GetKeyDown(KeyCode.End)) StatusNavigationReader.JumpToBottom();
-}
-```
-
-### Files to Modify
-
-| File | Changes |
-|------|---------|
-| `Menus/StatusDetailsReader.cs` | Add StatGroup, StatusStatDefinition, StatusNavigationReader |
-| `Patches/StatusDetailsPatches.cs` | Add StatusNavigationTracker, StatusDetailsHelpers, update InitDisplay |
-| `Core/InputManager.cs` | Add arrow key handling for status navigation |
-
-### Sighted User Parity Consideration
-
-The status screen displays all stats simultaneously to sighted users. This feature provides **equivalent access** by allowing blind users to navigate the same information that sighted users can see at a glance. All 15 stats are visible on the status screen UI.
-
-### Implementation Status
-
-✅ **Complete** - Tested and working as intended.
-
-**Future Refinement**: Review which stats are actually visible on FF4's status screen to ensure hidden/internal stats are not being exposed. May need to adjust the stat list to match exactly what sighted users see.
-
----
-
-## Vehicle Landing Zone Announcements (Complete)
-
-### Overview
-
-Add announcements when a player in a vehicle enters a zone where they can land/dismount. This helps blind players know when they can safely exit their vehicle without guessing or trial-and-error.
-
-### Behavior
-
-| Event | Announcement |
-|-------|--------------|
-| Enter landable zone | "Can land" |
-| Leave landable zone | (silent) |
-| Successfully land | Already handled by "On foot" announcement |
-
-- **Non-interrupting**: Won't cut off other important announcements
-- **No vehicle type declared**: Simple "Can land" for all vehicles
-- **Only when in vehicle**: Silent when walking/on foot
-
-### Technical Approach
-
-The game already handles terrain checking internally. When the player moves over terrain where landing is possible, the game calls `MapUIManager.SwitchLandable(bool landable)` to show/hide the landing UI guide. We patch this method to announce state changes.
-
-**Key Classes:**
-- `MapUIManager.SwitchLandable(bool landable)` - Called when landing state changes
-- `LandingGuideController.SwitchLandable(bool landable)` - The UI component
-- `TransportationController.CheckLandingList(int transportationId, int attribute)` - Terrain check
-- `TransportationInfo.LandingList` - Array of valid landing terrain attributes
-
-### Implementation
-
-#### File: `Patches/VehicleLandingPatches.cs` (New)
-
-```csharp
-using System;
-using HarmonyLib;
-using MelonLoader;
-using Il2CppLast.Map;
-using FFIV_ScreenReader.Utils;
-
-namespace FFIV_ScreenReader.Patches
-{
-    /// <summary>
-    /// Announces when player enters a zone where vehicle can land.
-    /// </summary>
-    [HarmonyPatch(typeof(MapUIManager), nameof(MapUIManager.SwitchLandable))]
-    public static class MapUIManager_SwitchLandable_Patch
-    {
-        private static bool lastLandableState = false;
-
-        [HarmonyPostfix]
-        public static void Postfix(bool landable)
-        {
-            try
-            {
-                // Only announce when in a vehicle
-                if (!MoveStateHelper.IsInVehicle())
-                    return;
-
-                // Only announce when entering landable zone (false -> true)
-                if (landable && !lastLandableState)
-                {
-                    Core.FFIV_ScreenReaderMod.SpeakText("Can land", interrupt: false);
-                }
-
-                lastLandableState = landable;
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error($"[Landing] Error in SwitchLandable patch: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Reset state when leaving vehicle or changing maps
-        /// </summary>
-        public static void ResetState()
-        {
-            lastLandableState = false;
-        }
-    }
-}
-```
-
-#### File: `Utils/MoveStateHelper.cs` (Add method)
-
-```csharp
-/// <summary>
-/// Check if currently in any vehicle (ship, chocobo, airship, etc.)
-/// </summary>
-public static bool IsInVehicle()
-{
-    int state = GetCurrentMoveState();
-    return state == MOVE_STATE_SHIP ||
-           state == MOVE_STATE_AIRSHIP ||
-           state == MOVE_STATE_LOWFLYING ||
-           state == MOVE_STATE_CHOCOBO;
-}
-```
-
-### Files to Create/Modify
-
-| File | Action |
-|------|--------|
-| `Patches/VehicleLandingPatches.cs` | Create new file |
-| `Utils/MoveStateHelper.cs` | Add `IsInVehicle()` method |
-
-### Testing Checklist
-
-- [ ] Board hovercraft, travel over water - no announcement
-- [ ] Travel over land - "Can land" announced once
-- [ ] Continue over land - no repeated announcements
-- [ ] Return to water - silent
-- [ ] Return to land - "Can land" announced again
-- [ ] Land successfully - "On foot" announced (existing)
-- [ ] Repeat for Enterprise, Falcon, Lunar Whale, Black Chocobo
-
-### Why This Approach
-
-1. **Minimal code**: Single patch point, ~30 lines
-2. **No polling**: Game tells us when state changes
-3. **Reliable**: Uses same logic as visual landing guide
-4. **Works for all vehicles**: No vehicle-specific handling needed
-
----
-
-## Approval Required
-
-Please review this plan and approve before proceeding with implementation.
+## Bug Fixes Applied
+
+| Issue | Solution |
+|-------|----------|
+| Map name spoken twice | Content-based deduplication in `LocationMessageTracker` |
+| Battle messages missing | Added `CreateActFunction` patch, `GlobalBattleMessageTracker` |
+| Stats announced on load | Added `MenuManager.IsOpen` check |
+| Equipment slots interrupted | Added `IsInEquipmentSlotContext()` check |
+| Title menu "New Game" on return | Use `commandId` enum for dedup |
+| Stale messageLineIndex | Track own `nextAnnouncementIndex` |
+| Item targets not read | Added `ItemUseController.SelectContent` patch |
+| "Potion" interruption | Added skip conditions to `SkipNextIndex`/`SkipPrevIndex` |
+| Vehicle announcements not firing | Hook `FieldController.ChangeTransportation` + interior map detection |
+| Moon exits unreachable | Reverse-path validation for MapId=3 |
+| Popup dialogs not reading | Added `PopupPatches.cs` with base Popup.Open()/Close() hooks |
+| Save/Load confirmations silent | Added `SaveLoadPatches.cs` with SetPopupActive(bool) hooks |
+| Title "Press any button" missing | SplashController.InitializeTitle + TitleWindowController.SetEnableStartObject |
+| Save slots only reading location | Added `SaveListController.SelectContent` patch with full slot info |
+| "Empty" on splash screen load | Added visibility checks (`activeInHierarchy`) before announcing |
+| Entity scan timing on map load | Hook `MainGame.set_FieldReady` to trigger scan when field is ready |

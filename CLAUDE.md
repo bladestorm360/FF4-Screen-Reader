@@ -6,12 +6,21 @@ Screen-reader/accessibility mod for FF4 Pixel Remaster. MelonLoader + Harmony pa
 ## Features
 - Menu/cursor navigation, character vitals (HP/MP), stats
 - World navigation/pathfinding with obstacle detection
+- Moon pathfinding with one-way ledge detection (reverse-path validation)
 - Battle: turn order, targeting, damage/heals, status effects
 - Victory screen: gil, items, XP, level-ups with stat growth
 - Multiple vehicle support (Hovercraft, Enterprise, Falcon, Lunar Whale)
 
 ## TODO
 - **Multi-phase Victory Screen**: Current implementation announces all victory info in a single message. Future enhancement should break this into phases (gil/items first, then per-character XP/level-ups) for better pacing and user control.
+
+## Documentation
+When updating documentation, update these files:
+- `CLAUDE.md` - Developer instructions and reference (this file)
+- `docs/debug.md` - Debug log, feature status, bug fixes
+- `docs/plan.md` - Porting plan, implementation details
+
+**CRITICAL: NEVER edit `readme.md`** - This is user-maintained documentation. Do not modify it under any circumstances.
 
 ## Directory Structure
 ```
@@ -52,6 +61,31 @@ powershell -Command "& cmd /c 'D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader\bui
 - **Prefix all game classes** with `Il2Cpp`
 - No duplicates - reference existing code
 
+## CRITICAL RULES - DO NOT VIOLATE
+
+### Rule 1: No Polling or Per-Frame Approaches
+**NEVER use polling, per-frame checks, or Update() loops to detect state changes.** This includes:
+- Checking values every frame to detect changes
+- Using `MelonLoader.MelonEvents.OnUpdate` to monitor state
+- Coroutines that loop continuously checking conditions
+- Any approach that runs repeatedly waiting for something to happen
+
+**Why**: Polling wastes CPU cycles, creates race conditions, and produces unreliable timing. There is ALWAYS a precise hook point where the game's internal logic changes state.
+
+**Instead**: Find the exact Harmony hook that fires when the state changes (method calls, property setters, event handlers). Hook that single point.
+
+### Rule 2: No Timer-Based Approaches (Unless Using Game's Internal Timing)
+**NEVER use arbitrary delays, fixed timers, or estimated wait times.** This includes:
+- `yield return new WaitForSeconds(X)`
+- Coroutines that wait a fixed duration before acting
+- Any hardcoded delay values based on guessing animation/transition timing
+
+**Exception**: You MAY use timing if it directly follows the game's internal timing systems (e.g., reading the game's own delay values, subscribing to the game's animation completion callbacks).
+
+**Why**: Timer-based solutions drift, break at different frame rates, and produce mismatched output. The game already has precise timing internally—use it.
+
+**Instead**: Find hooks that fire at the exact moment (e.g., when `targetIndex` changes, when a line's text is set, when fade-in completes, when an animation callback fires). If text appears line-by-line, find the hook for each line appearance—do NOT estimate timing.
+
 ## Using dump.cs for Class Discovery
 The file `D:\Games\Dev\Unity\FFPR\FF4\dump.cs` contains Il2Cpp class definitions (~18MB, 493K lines).
 - **NEVER load the entire file** - use Grep tool to search for specific classes
@@ -76,6 +110,7 @@ The file `D:\Games\Dev\Unity\FFPR\FF4\dump.cs` contains Il2Cpp class definitions
 - **Submarine/Diving**: SubmarineController for underwater sections
 - **Magnetic Cave**: Metal equipment restrictions
 - **Moon Areas**: Lunar Subterrane navigation
+- **Moon Pathfinding**: Moon surface (MapId=3) has one-way ledges separating regions. Pathfinding uses reverse-path validation to detect impassable ledge crossings.
 
 ## Key Game Namespaces
 

@@ -6,7 +6,6 @@ using Il2CppLast.UI;
 using Il2CppLast.Defaine;
 using Il2CppLast.Management;
 using FFIV_ScreenReader.Core;
-using UnityEngine;
 using static FFIV_ScreenReader.Utils.TextUtils;
 
 namespace FFIV_ScreenReader.Patches
@@ -18,21 +17,16 @@ namespace FFIV_ScreenReader.Patches
     public static class EquipmentMenuTracker
     {
         private static string lastAnnouncement = "";
-        private static float lastAnnouncementTime = 0f;
-        private const float THROTTLE_SECONDS = 0.15f;
 
         public static bool ShouldAnnounce(string message)
         {
             if (string.IsNullOrWhiteSpace(message))
                 return false;
 
-            float currentTime = Time.time;
-
-            // Allow if message is different or enough time has passed
-            if (message != lastAnnouncement || (currentTime - lastAnnouncementTime) >= THROTTLE_SECONDS)
+            // Content-based deduplication
+            if (message != lastAnnouncement)
             {
                 lastAnnouncement = message;
-                lastAnnouncementTime = currentTime;
                 return true;
             }
 
@@ -42,7 +36,6 @@ namespace FFIV_ScreenReader.Patches
         public static void Reset()
         {
             lastAnnouncement = "";
-            lastAnnouncementTime = 0f;
         }
     }
 
@@ -253,7 +246,6 @@ namespace FFIV_ScreenReader.Patches
     // Patch EquipmentInfoWindowController.SelectContent to announce equipment slots when navigating
     // This is the screen where you see R. Hand, L. Hand, Head, Body, etc. after selecting a character
     // Note: SelectContent is PRIVATE, so we must use string literal instead of nameof()
-    // Uses time-based deduplication to prevent "RHand" interrupting the slot+item announcement
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.EquipmentInfoWindowController), "SelectContent", new Type[] {
         typeof(Il2CppLast.UI.Cursor)
     })]

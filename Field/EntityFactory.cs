@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using Il2Cpp;
 using Il2CppLast.Entity.Field;
+using Il2CppLast.Management;
 using Il2CppLast.Map;
+using MelonLoader;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Field
@@ -48,6 +50,19 @@ namespace FFIV_ScreenReader.Field
             // Create appropriate entity type based on ObjectType
             NavigableEntity entity = CreateEntityByType(fieldEntity, objectType);
 
+            // Capture the entity's Unity layer for elevation-aware pathfinding
+            if (entity != null)
+            {
+                try
+                {
+                    entity.Layer = fieldEntity.gameObject.layer;
+                }
+                catch
+                {
+                    entity.Layer = 10; // Default to GroundLayer if we can't read it
+                }
+            }
+
             return entity;
         }
 
@@ -60,6 +75,10 @@ namespace FFIV_ScreenReader.Field
         {
             var results = new List<NavigableEntity>();
 
+            // DEBUG: Log entity scan header
+            MelonLogger.Msg("=== ENTITY SCAN START ===");
+            MelonLogger.Msg($"Player scan position: ({playerPos.x:F1}, {playerPos.y:F1}, {playerPos.z:F1})");
+
             foreach (var fieldEntity in fieldEntities)
             {
                 var entity = CreateFromFieldEntity(fieldEntity, playerPos);
@@ -69,6 +88,7 @@ namespace FFIV_ScreenReader.Field
                 }
             }
 
+            MelonLogger.Msg($"=== ENTITY SCAN END ({results.Count} entities) ===");
             return results;
         }
 
@@ -110,6 +130,37 @@ namespace FFIV_ScreenReader.Field
                     return new NPCEntity { GameEntity = fieldEntity };
 
                 case Il2Cpp.MapConstants.ObjectType.GotoMap:
+                    // Filter out same-map teleports (internal transitions)
+                    var gotoMapProp = fieldEntity.Property?.TryCast<PropertyGotoMap>();
+                    if (gotoMapProp != null)
+                    {
+                        int destMapId = gotoMapProp.MapId;
+                        int currentMapId = GetCurrentMapId();
+
+                        // DEBUG: Log GotoMap entity positions and layer
+                        try
+                        {
+                            Vector3 worldPos = fieldEntity.transform.position;
+                            Vector3 localPos = fieldEntity.transform.localPosition;
+                            int entityLayer = fieldEntity.gameObject.layer;
+                            int pathfindingZ = entityLayer >= 9 ? entityLayer - 9 : 0;
+                            string entityName = fieldEntity.Property?.Name ?? "Unknown";
+                            MelonLogger.Msg($"[GotoMap] {entityName} -> MapId {destMapId}");
+                            MelonLogger.Msg($"  WorldPos: ({worldPos.x:F1}, {worldPos.y:F1}, {worldPos.z:F1})");
+                            MelonLogger.Msg($"  LocalPos: ({localPos.x:F1}, {localPos.y:F1}, {localPos.z:F1})");
+                            MelonLogger.Msg($"  Layer: {entityLayer} (PathfindZ={pathfindingZ})");
+                            if (worldPos != localPos)
+                            {
+                                Vector3 diff = worldPos - localPos;
+                                MelonLogger.Msg($"  DIFF: ({diff.x:F1}, {diff.y:F1}, {diff.z:F1})");
+                            }
+                        }
+                        catch { }
+
+                        // Skip if destination is current map (same-map teleport)
+                        if (destMapId == currentMapId && currentMapId != -1)
+                            return null;
+                    }
                     return new MapExitEntity { GameEntity = fieldEntity };
 
                 case Il2Cpp.MapConstants.ObjectType.SavePoint:
@@ -123,6 +174,23 @@ namespace FFIV_ScreenReader.Field
                 case Il2Cpp.MapConstants.ObjectType.TransportationEventAction:
                 default:
                     return new EventEntity { GameEntity = fieldEntity };
+            }
+        }
+
+        /// <summary>
+        /// Gets the current map ID from UserDataManager.
+        /// </summary>
+        /// <returns>Current map ID, or -1 if unable to determine</returns>
+        private static int GetCurrentMapId()
+        {
+            try
+            {
+                var userDataManager = UserDataManager.Instance();
+                return userDataManager?.CurrentMapId ?? -1;
+            }
+            catch
+            {
+                return -1;
             }
         }
 

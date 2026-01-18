@@ -6,9 +6,11 @@ using MelonLoader;
 namespace FFIV_ScreenReader.Utils
 {
     /// <summary>
-    /// Helper class for tracking and announcing player movement state changes.
-    /// Handles vehicle boarding/disembarking announcements for FF4's vehicles:
+    /// Helper class for tracking player movement state.
+    /// Handles vehicle boarding/disembarking state for FF4's vehicles:
     /// Hovercraft, Enterprise, Falcon, Lunar Whale, Chocobo
+    ///
+    /// State is updated directly by GetOn/GetOff patches - no polling or timeouts.
     /// </summary>
     public static class MoveStateHelper
     {
@@ -34,282 +36,225 @@ namespace FFIV_ScreenReader.Utils
         public const int TRANSPORT_YELLOW_CHOCOBO = 9;
         public const int TRANSPORT_BLACK_CHOCOBO = 10;
 
-        // Cached state tracking (workaround for unreliable moveState field)
+        // Cached state tracking (set by GetOn/GetOff patches)
         private static int cachedMoveState = MOVE_STATE_WALK;
-        private static bool useCachedState = false;
+        private static int cachedTransportType = TRANSPORT_NONE;
         private static int lastAnnouncedState = -1;
-        private static float lastVehicleStateSeenTime = 0f;
-        private const float VEHICLE_STATE_TIMEOUT_SECONDS = 1.0f;
 
         /// <summary>
-        /// Update the cached move state (called from MovementSpeechPatches when state changes)
-        /// This is the "reliable" update path from ChangeMoveState event
+        /// Set vehicle state when boarding (called from GetOn patch).
         /// </summary>
-        public static void UpdateCachedMoveState(int newState)
+        /// <param name="transportationType">The TransportationType ID</param>
+        public static void SetVehicleState(int transportationType)
         {
-            int previousState = cachedMoveState;
-            cachedMoveState = newState;
-            useCachedState = true;
-
-            // If this is a vehicle state, update the timestamp
-            if (IsVehicleState(newState))
-            {
-                lastVehicleStateSeenTime = UnityEngine.Time.time;
-            }
-
-            // Announce state changes that weren't already announced
-            if (newState != lastAnnouncedState)
-            {
-                AnnounceStateChange(previousState, newState);
-            }
+            cachedTransportType = transportationType;
+            cachedMoveState = TransportTypeToMoveState(transportationType);
+            lastAnnouncedState = cachedMoveState; // Prevent duplicate from ChangeMoveState patch
         }
 
         /// <summary>
-        /// Check if a state is a vehicle state (ship, chocobo, airship)
+        /// Set on foot state when disembarking (called from GetOff patch).
         /// </summary>
-        private static bool IsVehicleState(int state)
+        public static void SetOnFoot()
+        {
+            cachedTransportType = TRANSPORT_NONE;
+            cachedMoveState = MOVE_STATE_WALK;
+            lastAnnouncedState = MOVE_STATE_WALK; // Prevent duplicate from ChangeMoveState patch
+        }
+
+        /// <summary>
+        /// Reset state tracking (call on map transitions).
+        /// </summary>
+        public static void ResetState()
+        {
+            cachedMoveState = MOVE_STATE_WALK;
+            cachedTransportType = TRANSPORT_NONE;
+            lastAnnouncedState = -1;
+        }
+
+        /// <summary>
+        /// Called when transitioning to a new map.
+        /// Interior maps (non-world maps) should always be on-foot state.
+        /// </summary>
+        /// <param name="isWorldMap">True if the new map is a world map (overworld, underworld, moon)</param>
+        /// <returns>True if state changed and announcement was made</returns>
+        public static bool OnMapTransition(bool isWorldMap)
+        {
+            // If entering a non-world map (interior/dungeon) and currently in vehicle state,
+            // transition to on-foot (you're walking inside the ship/building)
+            if (!isWorldMap && IsVehicleState(cachedMoveState))
+            {
+                cachedMoveState = MOVE_STATE_WALK;
+                cachedTransportType = TRANSPORT_NONE;
+                lastAnnouncedState = MOVE_STATE_WALK;
+
+                // Sync the patches tracking to on-foot as well
+                FFIV_ScreenReader.Patches.MovementSpeechPatches.SyncToOnFoot();
+
+                FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText("On foot", interrupt: false);
+                MelonLoader.MelonLogger.Msg($"[MoveState] Entered interior map - now on foot");
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Check if a state is a vehicle state (ship, chocobo, airship, low flying).
+        /// </summary>
+        public static bool IsVehicleState(int state)
         {
             return state == MOVE_STATE_SHIP || state == MOVE_STATE_CHOCOBO ||
                    state == MOVE_STATE_AIRSHIP || state == MOVE_STATE_LOWFLYING;
         }
 
         /// <summary>
-        /// Announce movement state changes with FF4-specific vehicle names
-        /// Public so coroutine can call it from MovementSpeechPatches
+        /// Announce movement state changes (called from ChangeMoveState patch).
+        /// Handles transitions between vehicle and on-foot states.
         /// </summary>
         public static void AnnounceStateChange(int previousState, int newState)
         {
+            // Skip if same as last announced state (prevents duplicates from GetOn/GetOff + ChangeMoveState)
+            if (newState == lastAnnouncedState)
+                return;
+
             string announcement = null;
 
+            // Transitioning TO a vehicle state
             if (newState == MOVE_STATE_SHIP)
             {
-                // In FF4, "Ship" is the Hovercraft
                 announcement = "On hovercraft";
+                cachedMoveState = MOVE_STATE_SHIP;
             }
             else if (newState == MOVE_STATE_CHOCOBO)
             {
-                // Try to get more specific chocobo type
-                string chocoboType = GetCurrentChocoboType();
-                announcement = chocoboType != null ? $"On {chocoboType}" : "On chocobo";
+                announcement = "On chocobo";
+                cachedMoveState = MOVE_STATE_CHOCOBO;
             }
             else if (newState == MOVE_STATE_AIRSHIP || newState == MOVE_STATE_LOWFLYING)
             {
-                // Try to get specific airship name
-                string airshipName = GetCurrentAirshipName();
-                announcement = airshipName != null ? $"On {airshipName}" : "On airship";
+                announcement = "On airship";
+                cachedMoveState = newState;
             }
-            else if ((previousState == MOVE_STATE_SHIP || previousState == MOVE_STATE_CHOCOBO ||
-                      previousState == MOVE_STATE_AIRSHIP || previousState == MOVE_STATE_LOWFLYING) &&
+            // Transitioning FROM vehicle TO on-foot
+            else if (IsVehicleState(previousState) &&
                      (newState == MOVE_STATE_WALK || newState == MOVE_STATE_DUSH))
             {
                 announcement = "On foot";
+                cachedMoveState = newState;
+                cachedTransportType = TRANSPORT_NONE;
+            }
+            else
+            {
+                // Just update cached state without announcement
+                cachedMoveState = newState;
             }
 
             if (announcement != null)
             {
                 lastAnnouncedState = newState;
-                Core.FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
+                FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
+                MelonLoader.MelonLogger.Msg($"[MoveState] State change: {GetMoveStateName(previousState)} -> {GetMoveStateName(newState)}");
             }
         }
 
         /// <summary>
-        /// Try to determine the specific airship type from TransportationController
-        /// FF4 has: Enterprise (regular plane), Falcon, Lunar Whale
+        /// Convert TransportationType to MoveState.
         /// </summary>
-        private static string GetCurrentAirshipName()
+        private static int TransportTypeToMoveState(int transportationType)
         {
-            try
+            switch (transportationType)
             {
-                var fieldMap = GameObjectCache.Get<FieldMap>();
-                if (fieldMap?.fieldController?.transportation?.CurrentTransportation != null)
-                {
-                    var transport = fieldMap.fieldController.transportation.CurrentTransportation;
-                    int type = transport.Type;
-
-                    switch (type)
-                    {
-                        case TRANSPORT_PLANE:
-                            return "Enterprise";
-                        case TRANSPORT_SPECIAL_PLANE:
-                            // Could be Falcon or Lunar Whale - check messageId if available
-                            if (!string.IsNullOrEmpty(transport.MessageId))
-                            {
-                                var msg = Il2CppLast.Management.MessageManager.Instance?.GetMessage(transport.MessageId);
-                                if (!string.IsNullOrEmpty(msg))
-                                    return msg;
-                            }
-                            return "airship";
-                        case TRANSPORT_LOWFLYING:
-                            return "black chocobo"; // Low flying is typically black chocobo in FF4
-                        default:
-                            return null;
-                    }
-                }
+                case TRANSPORT_SHIP:
+                    return MOVE_STATE_SHIP;
+                case TRANSPORT_PLANE:
+                case TRANSPORT_SPECIAL_PLANE:
+                    return MOVE_STATE_AIRSHIP;
+                case TRANSPORT_LOWFLYING:
+                    return MOVE_STATE_LOWFLYING;
+                case TRANSPORT_YELLOW_CHOCOBO:
+                case TRANSPORT_BLACK_CHOCOBO:
+                    return MOVE_STATE_CHOCOBO;
+                default:
+                    return MOVE_STATE_WALK;
             }
-            catch (System.Exception ex)
-            {
-                MelonLogger.Warning($"[MoveState] Error getting airship name: {ex.Message}");
-            }
-            return null;
         }
 
         /// <summary>
-        /// Try to determine the specific chocobo type
-        /// FF4 has: Yellow Chocobo, Black Chocobo
-        /// </summary>
-        private static string GetCurrentChocoboType()
-        {
-            try
-            {
-                var fieldMap = GameObjectCache.Get<FieldMap>();
-                if (fieldMap?.fieldController?.transportation?.CurrentTransportation != null)
-                {
-                    int type = fieldMap.fieldController.transportation.CurrentTransportation.Type;
-
-                    switch (type)
-                    {
-                        case TRANSPORT_YELLOW_CHOCOBO:
-                            return "yellow chocobo";
-                        case TRANSPORT_BLACK_CHOCOBO:
-                            return "black chocobo";
-                        default:
-                            return null;
-                    }
-                }
-            }
-            catch (System.Exception ex)
-            {
-                MelonLogger.Warning($"[MoveState] Error getting chocobo type: {ex.Message}");
-            }
-            return null;
-        }
-
-        /// <summary>
-        /// Get current MoveState from FieldPlayer
+        /// Get current MoveState (returns cached state set by GetOn/GetOff).
         /// </summary>
         public static int GetCurrentMoveState()
         {
-            var controller = GameObjectCache.Get<FieldPlayerController>();
-            if (controller?.fieldPlayer == null)
-                return useCachedState ? cachedMoveState : MOVE_STATE_WALK;
-
-            // Read actual state from game
-            int actualState = (int)controller.fieldPlayer.moveState;
-            float currentTime = UnityEngine.Time.time;
-
-            // BUG WORKAROUND: moveState field unreliably reverts to Walking even when on vehicles
-            // Vehicle states (ship, chocobo, airship) are "sticky" - once detected, we don't revert
-            // to Walking unless ChangeMoveState explicitly fires OR we timeout
-
-            // If actual state shows a vehicle, update timestamp
-            if (IsVehicleState(actualState))
-            {
-                lastVehicleStateSeenTime = currentTime;
-
-                // If this is a new vehicle state, cache it (coroutine will announce)
-                if (actualState != cachedMoveState)
-                {
-                    cachedMoveState = actualState;
-                    useCachedState = true;
-                }
-            }
-
-            // If we have a cached vehicle state but actual shows Walking
-            if (useCachedState && IsVehicleState(cachedMoveState) && actualState == MOVE_STATE_WALK)
-            {
-                // Check if we've timed out (haven't seen vehicle state in actual for too long)
-                float timeSinceLastSeen = currentTime - lastVehicleStateSeenTime;
-                if (timeSinceLastSeen > VEHICLE_STATE_TIMEOUT_SECONDS)
-                {
-                    // Timeout: assume player disembarked without ChangeMoveState firing
-                    cachedMoveState = actualState;
-                    return actualState;
-                }
-
-                // Still within timeout: trust cached vehicle state
-                return cachedMoveState;
-            }
-
-            // For non-vehicle states when not cached as vehicle, update cache normally
-            if (!IsVehicleState(actualState) && actualState != cachedMoveState && !IsVehicleState(cachedMoveState))
-            {
-                cachedMoveState = actualState;
-            }
-
-            return useCachedState && IsVehicleState(cachedMoveState) ? cachedMoveState : actualState;
+            return cachedMoveState;
         }
 
         /// <summary>
-        /// Check if currently controlling hovercraft
+        /// Get current TransportationType.
+        /// </summary>
+        public static int GetCurrentTransportType()
+        {
+            return cachedTransportType;
+        }
+
+        /// <summary>
+        /// Check if currently controlling hovercraft.
         /// </summary>
         public static bool IsControllingHovercraft()
         {
-            return GetCurrentMoveState() == MOVE_STATE_SHIP;
+            return cachedMoveState == MOVE_STATE_SHIP;
         }
 
         /// <summary>
-        /// Check if currently on foot (walking or dashing)
+        /// Check if currently on foot (walking or dashing).
         /// </summary>
         public static bool IsOnFoot()
         {
-            int state = GetCurrentMoveState();
-            return state == MOVE_STATE_WALK || state == MOVE_STATE_DUSH;
+            return cachedMoveState == MOVE_STATE_WALK || cachedMoveState == MOVE_STATE_DUSH;
         }
 
         /// <summary>
-        /// Check if currently riding chocobo
+        /// Check if currently riding chocobo.
         /// </summary>
         public static bool IsRidingChocobo()
         {
-            return GetCurrentMoveState() == MOVE_STATE_CHOCOBO;
+            return cachedMoveState == MOVE_STATE_CHOCOBO;
         }
 
         /// <summary>
-        /// Check if currently controlling airship
+        /// Check if currently controlling airship.
         /// </summary>
         public static bool IsControllingAirship()
         {
-            return GetCurrentMoveState() == MOVE_STATE_AIRSHIP;
+            return cachedMoveState == MOVE_STATE_AIRSHIP;
         }
 
         /// <summary>
-        /// Get pathfinding scope multiplier based on current MoveState
+        /// Get pathfinding scope multiplier based on current MoveState.
         /// </summary>
         public static float GetPathfindingMultiplier()
         {
-            int moveState = GetCurrentMoveState();
-            float multiplier;
-
-            switch (moveState)
+            switch (cachedMoveState)
             {
                 case MOVE_STATE_WALK:
                 case MOVE_STATE_DUSH:
-                    multiplier = 1.0f;  // Baseline (on foot)
-                    break;
+                    return 1.0f;  // Baseline (on foot)
 
                 case MOVE_STATE_SHIP:
-                    multiplier = 2.5f;  // 2.5x scope for hovercraft
-                    break;
+                    return 2.5f;  // 2.5x scope for hovercraft
 
                 case MOVE_STATE_CHOCOBO:
-                    multiplier = 1.5f;  // Moderate increase for chocobo
-                    break;
+                    return 1.5f;  // Moderate increase for chocobo
 
                 case MOVE_STATE_AIRSHIP:
                 case MOVE_STATE_LOWFLYING:
-                    multiplier = 1.0f;  // Airship uses different navigation system
-                    break;
+                    return 1.0f;  // Airship uses different navigation system
 
                 default:
-                    multiplier = 1.0f;  // Default to baseline
-                    break;
+                    return 1.0f;  // Default to baseline
             }
-
-            return multiplier;
         }
 
         /// <summary>
-        /// Get human-readable name for MoveState
+        /// Get human-readable name for MoveState.
         /// </summary>
         public static string GetMoveStateName(int moveState)
         {

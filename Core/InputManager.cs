@@ -303,6 +303,32 @@ namespace FFIV_ScreenReader.Core
                     Patches.TimerHelper.AnnounceActiveTimers();
                 }
             }
+
+            // Hotkey: V to announce current vehicle/movement state (diagnostic)
+            if (Input.GetKeyDown(KeyCode.V))
+            {
+                AnnounceVehicleState();
+            }
+        }
+
+        /// <summary>
+        /// Announces the current vehicle/movement state.
+        /// </summary>
+        private void AnnounceVehicleState()
+        {
+            try
+            {
+                int moveState = MoveStateHelper.GetCurrentMoveState();
+                string stateName = MoveStateHelper.GetMoveStateName(moveState);
+
+                MelonLogger.Msg($"[Vehicle State] MoveState={moveState} ({stateName})");
+                FFIV_ScreenReaderMod.SpeakText(stateName, interrupt: true);
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Error($"[Vehicle State] Error: {ex.Message}");
+                FFIV_ScreenReaderMod.SpeakText("Unable to detect vehicle state", interrupt: true);
+            }
         }
 
         /// <summary>

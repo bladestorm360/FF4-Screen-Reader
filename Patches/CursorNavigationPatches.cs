@@ -26,6 +26,19 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // Check if popup is active - if so, read button instead of menu text
+                if (PopupState.ShouldSuppress() || SaveLoadMenuState.ShouldSuppress())
+                {
+                    PopupPatches.ReadCurrentButton(__instance);
+                    return;
+                }
+
+                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
+                if (SaveLoadMenuState.IsActive)
+                {
+                    return;
+                }
+
                 // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
                 var parent = __instance.transform.parent;
                 while (parent != null)
@@ -193,6 +206,19 @@ namespace FFIV_ScreenReader.Patches
             {
                 // Safety checks before starting coroutine
                 if (__instance == null || __instance.gameObject == null || __instance.transform == null)
+                {
+                    return;
+                }
+
+                // Check if popup is active - if so, read button instead of menu text
+                if (PopupState.ShouldSuppress() || SaveLoadMenuState.ShouldSuppress())
+                {
+                    PopupPatches.ReadCurrentButton(__instance);
+                    return;
+                }
+
+                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
+                if (SaveLoadMenuState.IsActive)
                 {
                     return;
                 }
@@ -368,6 +394,19 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // Check if popup is active - if so, read button instead of menu text
+                if (PopupState.ShouldSuppress() || SaveLoadMenuState.ShouldSuppress())
+                {
+                    PopupPatches.ReadCurrentButton(__instance);
+                    return;
+                }
+
+                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
+                if (SaveLoadMenuState.IsActive)
+                {
+                    return;
+                }
+
                 // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
                 var parent = __instance.transform.parent;
                 while (parent != null)
@@ -535,6 +574,19 @@ namespace FFIV_ScreenReader.Patches
             {
                 // Safety checks before starting coroutine
                 if (__instance == null || __instance.gameObject == null || __instance.transform == null)
+                {
+                    return;
+                }
+
+                // Check if popup is active - if so, read button instead of menu text
+                if (PopupState.ShouldSuppress() || SaveLoadMenuState.ShouldSuppress())
+                {
+                    PopupPatches.ReadCurrentButton(__instance);
+                    return;
+                }
+
+                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
+                if (SaveLoadMenuState.IsActive)
                 {
                     return;
                 }

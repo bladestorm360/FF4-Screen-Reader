@@ -24,6 +24,18 @@ namespace FFIV_ScreenReader.Field
         public virtual Vector3 Position => GameEntity?.transform?.position ?? Vector3.zero;
 
         /// <summary>
+        /// Unity layer this entity is on (BottomLayer=9, GroundLayer=10, UpperLayer=11, CeilLayer=12)
+        /// Used for elevation-aware pathfinding on multi-level maps like the moon surface.
+        /// </summary>
+        public int Layer { get; set; } = 10; // Default to GroundLayer
+
+        /// <summary>
+        /// Gets the Z coordinate for pathfinding based on the entity's Unity layer.
+        /// BottomLayer(9)=0, GroundLayer(10)=1, UpperLayer(11)=2, CeilLayer(12)=3
+        /// </summary>
+        public int PathfindingZ => Layer >= 9 ? Layer - 9 : 0;
+
+        /// <summary>
         /// Entity name (localized if available)
         /// </summary>
         public virtual string Name => GameEntity?.Property?.Name ?? "Unknown";

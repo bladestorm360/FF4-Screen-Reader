@@ -9,45 +9,246 @@ using UnityEngine;
 
 namespace FFIV_ScreenReader.Patches
 {
+    // ============================================================
+    // Per-Page Dialogue System
+    // Announces dialogue text page-by-page as player advances,
+    // formatted as "Speaker: Text" with speaker announced only on change.
+    // ============================================================
+
+    /// <summary>
+    /// Tracks dialogue state for per-page announcements.
+    /// Stores content from SetContent, announces via PlayingInit hook.
+    /// </summary>
+    public static class DialogueTracker
+    {
+        private static string[] storedMessages = null;
+        private static string currentSpeaker = "";
+        private static string lastAnnouncedSpeaker = "";
+        private static int nextAnnouncementIndex = 0;  // Our own index, not the game's stale messageLineIndex
+
+        /// <summary>
+        /// Known invalid speaker names (locations, menu labels, etc.)
+        /// </summary>
+        private static readonly string[] InvalidSpeakers = new string[]
+        {
+            "Load", "Save", "New Game", "Continue", "Config", "Quit",
+            "Yes", "No", "OK", "Cancel"
+        };
+
+        /// <summary>
+        /// Store content from SetContent for per-page retrieval.
+        /// </summary>
+        public static void StoreContent(Il2CppSystem.Collections.Generic.List<Il2CppLast.Systems.Message.BaseContent> contentList)
+        {
+            if (contentList == null || contentList.Count == 0)
+            {
+                storedMessages = null;
+                return;
+            }
+
+            // Extract text from each content item
+            var messages = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < contentList.Count; i++)
+            {
+                var content = contentList[i];
+                if (content != null && !string.IsNullOrWhiteSpace(content.ContentText))
+                {
+                    messages.Add(content.ContentText.Trim());
+                }
+            }
+
+            storedMessages = messages.ToArray();
+            nextAnnouncementIndex = 0; // Reset our index for new dialogue
+        }
+
+        /// <summary>
+        /// Set the current speaker. Will be included in announcement if changed.
+        /// </summary>
+        public static void SetSpeaker(string speaker)
+        {
+            if (string.IsNullOrWhiteSpace(speaker))
+                return;
+
+            string cleanSpeaker = speaker.Trim();
+
+            // Filter out invalid speakers (locations, menu labels)
+            if (!IsValidSpeaker(cleanSpeaker))
+                return;
+
+            currentSpeaker = cleanSpeaker;
+        }
+
+        /// <summary>
+        /// Check if a speaker name is valid (not a location or menu label).
+        /// </summary>
+        private static bool IsValidSpeaker(string speaker)
+        {
+            // Filter location names with separators
+            if (speaker.Contains("–") || speaker.Contains("-"))
+                return false;
+
+            // Filter known invalid strings
+            foreach (var invalid in InvalidSpeakers)
+            {
+                if (speaker.Equals(invalid, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Announce the current page. Called from PlayingInit.
+        /// Uses our own nextAnnouncementIndex instead of game's stale messageLineIndex.
+        /// </summary>
+        public static void AnnounceForLineIndex(int gameLineIndex, string speakerFromInstance)
+        {
+            // Update speaker from instance if available
+            if (!string.IsNullOrWhiteSpace(speakerFromInstance))
+            {
+                SetSpeaker(speakerFromInstance);
+            }
+
+            // Skip if no stored messages
+            if (storedMessages == null || storedMessages.Length == 0)
+                return;
+
+            // Use our own index instead of game's potentially stale messageLineIndex
+            int localIndex = nextAnnouncementIndex;
+
+            // Skip if we've already announced all pages
+            if (localIndex >= storedMessages.Length)
+                return;
+
+            string text = storedMessages[localIndex];
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                nextAnnouncementIndex++; // Still advance past empty page
+                return;
+            }
+
+            // Build announcement with speaker if changed
+            string announcement;
+            if (!string.IsNullOrEmpty(currentSpeaker) && currentSpeaker != lastAnnouncedSpeaker)
+            {
+                announcement = $"{currentSpeaker}: {text}";
+                lastAnnouncedSpeaker = currentSpeaker;
+            }
+            else
+            {
+                announcement = text;
+            }
+
+            FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
+            nextAnnouncementIndex++;
+        }
+
+        /// <summary>
+        /// Reset the tracker (e.g., when dialogue ends).
+        /// </summary>
+        public static void Reset()
+        {
+            storedMessages = null;
+            currentSpeaker = "";
+            lastAnnouncedSpeaker = "";
+            nextAnnouncementIndex = 0;
+        }
+
+        /// <summary>
+        /// Clear last announced speaker to force re-announcement on next dialogue.
+        /// Call on scene transitions and after auto-scroll events to re-establish context.
+        /// </summary>
+        public static void ClearLastAnnouncedSpeaker()
+        {
+            lastAnnouncedSpeaker = "";
+        }
+    }
+
     /// <summary>
     /// Tracker for location/map name announcements.
-    /// Prevents duplicate announcements when multiple sources fire (e.g., FadeMessageManager + other patches).
+    /// Uses content-based matching (no timers) to prevent duplicates.
+    /// E.g., "Mysidia" is skipped if "Entering Mysidia" was just announced.
     /// </summary>
     public static class LocationMessageTracker
     {
-        private static string lastLocationMessage = "";
-        private static float lastLocationMessageTime = 0f;
-        private const float DEDUP_WINDOW_SECONDS = 1.5f;
+        private static string lastFadeMessage = "";
+        private static bool inMapTransition = false;
 
         /// <summary>
-        /// Check if a location message should be announced.
-        /// Returns true if the message is new or enough time has passed.
+        /// Record a FadeMessage and mark that we're in a map transition.
+        /// Called from FadeMessageManager_Play_Patch before announcing.
         /// </summary>
-        public static bool ShouldAnnounce(string message)
+        public static void SetLastFadeMessage(string message)
+        {
+            lastFadeMessage = message?.Trim() ?? "";
+            inMapTransition = !string.IsNullOrEmpty(lastFadeMessage);
+        }
+
+        /// <summary>
+        /// Check if a SystemMessage should be announced.
+        /// Returns false if:
+        /// - The message is contained in the last FadeMessage (duplicate)
+        /// - No FadeMessage fired but this looks like a location (menu open case)
+        /// </summary>
+        public static bool ShouldAnnounceSystemMessage(string message)
         {
             if (string.IsNullOrWhiteSpace(message))
                 return false;
 
-            float currentTime = UnityEngine.Time.time;
+            string trimmed = message.Trim();
 
-            // Allow if message is different or enough time has passed
-            if (message != lastLocationMessage || (currentTime - lastLocationMessageTime) >= DEDUP_WINDOW_SECONDS)
+            // If we're in a map transition (FadeMessage fired)
+            if (inMapTransition && !string.IsNullOrEmpty(lastFadeMessage))
             {
-                lastLocationMessage = message;
-                lastLocationMessageTime = currentTime;
-                return true;
+                // Skip if this message is contained in the FadeMessage
+                // E.g., "Mysidia" contained in "Entering Mysidia"
+                if (lastFadeMessage.Contains(trimmed, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+            else if (!inMapTransition)
+            {
+                // No FadeMessage fired - this might be menu open or other UI event
+                // Skip if it looks like a short location name (1-3 words, no punctuation)
+                // This prevents "Mysidia" from being announced when opening menu
+                if (LooksLikeLocationName(trimmed))
+                {
+                    return false;
+                }
             }
 
-            return false;
+            return true;
         }
 
         /// <summary>
-        /// Reset the tracker.
+        /// Check if a string looks like a location name.
+        /// Location names are typically 1-3 words without special punctuation.
+        /// </summary>
+        private static bool LooksLikeLocationName(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            // If it has sentence-like punctuation, it's probably a system message
+            if (text.Contains('.') || text.Contains('!') || text.Contains('?'))
+                return false;
+
+            // Count words (simple split)
+            string[] words = text.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Location names are typically 1-4 words (e.g., "Mysidia", "Castle Baron", "Tower of Babil")
+            // System messages tend to be longer
+            return words.Length <= 4;
+        }
+
+        /// <summary>
+        /// Reset state on scene transition.
         /// </summary>
         public static void Reset()
         {
-            lastLocationMessage = "";
-            lastLocationMessageTime = 0f;
+            lastFadeMessage = "";
+            inMapTransition = false;
         }
     }
 
@@ -58,217 +259,64 @@ namespace FFIV_ScreenReader.Patches
 
     /// <summary>
     /// Patch MessageWindowView.SetSpeker for speaker names in dialogue.
-    /// Filters out location names that get incorrectly passed as speaker names.
+    /// NOTE: Now only logs - DialogueTracker handles announcements via PlayingInit.
     /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Message.MessageWindowView), "SetSpeker")]
     public static class MessageWindowView_SetSpeker_Patch
     {
-        private static string lastSpeaker = "";
-
         [HarmonyPostfix]
         public static void Postfix(string value)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(value))
-                {
-                    lastSpeaker = "";
-                    return;
-                }
-
-                string cleanSpeaker = value.Trim();
-
-                // Filter out location names that get passed as speaker names
-                // Location names typically contain "–" (en-dash) separator like "Castle Baron – 1F"
-                if (cleanSpeaker.Contains("–") || cleanSpeaker.Contains("-"))
-                {
-                    MelonLogger.Msg($"[Speaker - Filtered location] {cleanSpeaker}");
-                    return;
-                }
-
-                if (cleanSpeaker == lastSpeaker)
-                {
-                    return;
-                }
-
-                lastSpeaker = cleanSpeaker;
-                MelonLogger.Msg($"[Speaker] {cleanSpeaker}");
-                FFIV_ScreenReaderMod.SpeakText(cleanSpeaker, interrupt: false);
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Error in MessageWindowView.SetSpeker patch: {ex.Message}");
-            }
+            // Speaker is now handled by DialogueTracker via PlayingInit
+            // This patch is kept for logging only
         }
     }
 
     /// <summary>
     /// Patch MessageWindowView.SetMessage for dialogue text display.
+    /// NOTE: Now disabled - DialogueTracker handles announcements via PlayingInit.
+    /// This was previously used for typewriter effect tracking.
     /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Message.MessageWindowView), "SetMessage")]
     public static class MessageWindowView_SetMessage_Patch
     {
-        private static string lastMessage = "";
-
         [HarmonyPostfix]
         public static void Postfix(Il2CppLast.Message.MessageWindowView __instance, string message)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(message))
-                {
-                    if (!string.IsNullOrWhiteSpace(lastMessage))
-                    {
-                        lastMessage = "";
-                    }
-                    return;
-                }
-
-                string cleanMessage = message.Trim();
-
-                if (cleanMessage == lastMessage)
-                {
-                    return;
-                }
-
-                if (!string.IsNullOrWhiteSpace(lastMessage) && cleanMessage.StartsWith(lastMessage))
-                {
-                    string newText = cleanMessage.Substring(lastMessage.Length).Trim();
-                    if (!string.IsNullOrWhiteSpace(newText))
-                    {
-                        MelonLogger.Msg($"[Message - New] {newText}");
-                        FFIV_ScreenReaderMod.SpeakText(newText, interrupt: false);
-                    }
-                }
-                else
-                {
-                    MelonLogger.Msg($"[Message - Full] {cleanMessage}");
-                    FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
-                }
-
-                lastMessage = cleanMessage;
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Error in MessageWindowView.SetMessage patch: {ex.Message}");
-            }
+            // Dialogue is now handled by DialogueTracker via PlayingInit
+            // This patch is kept but disabled
         }
     }
 
     /// <summary>
     /// Patch Unity Text component's text setter as a fallback for dialogue.
-    /// Only captures text from Message-related components.
+    /// NOTE: Now disabled - DialogueTracker handles announcements via PlayingInit.
+    /// This was previously used as a fallback for message text.
     /// </summary>
     [HarmonyPatch(typeof(UnityEngine.UI.Text), "set_text")]
     public static class UnityText_SetText_Patch
     {
-        private static string lastTextValue = "";
-        private static float lastTextTime = 0f;
-
         [HarmonyPostfix]
         public static void Postfix(UnityEngine.UI.Text __instance, string value)
         {
-            try
-            {
-                if (string.IsNullOrWhiteSpace(value))
-                {
-                    return;
-                }
-
-                string cleanText = value.Trim();
-
-                // Debounce within 0.1 seconds
-                float currentTime = UnityEngine.Time.time;
-                if (cleanText == lastTextValue && (currentTime - lastTextTime) < 0.1f)
-                {
-                    return;
-                }
-
-                bool isMessageText = false;
-                string gameObjectName = "";
-                try
-                {
-                    if (__instance != null && __instance.gameObject != null)
-                    {
-                        gameObjectName = __instance.gameObject.name;
-
-                        // INCLUDE: Message/Dialogue text
-                        if (gameObjectName.Contains("Message") && !gameObjectName.Contains("System"))
-                        {
-                            isMessageText = true;
-                        }
-
-                        // EXCLUDE: Menu, UI, Status, and other non-dialogue text
-                        if (gameObjectName.Contains("Menu") ||
-                            gameObjectName.Contains("Item") ||
-                            gameObjectName.Contains("Ability") ||
-                            gameObjectName.Contains("Status") ||
-                            gameObjectName.Contains("HP") ||
-                            gameObjectName.Contains("MP") ||
-                            gameObjectName.Contains("Level") ||
-                            gameObjectName.Contains("Button") ||
-                            gameObjectName.Contains("Icon") ||
-                            gameObjectName.Contains("Gauge") ||
-                            gameObjectName.Contains("Number") ||
-                            gameObjectName.Contains("Command"))
-                        {
-                            isMessageText = false;
-                        }
-
-                        // Exclude battle UI components to prevent overwriting target announcements
-                        if (__instance.GetComponentInParent<Il2CppLast.UI.KeyInput.BattleCommandSelectController>() != null ||
-                            __instance.GetComponentInParent<Il2CppLast.UI.KeyInput.BattleItemInfomationController>() != null ||
-                            __instance.GetComponentInParent<Il2CppLast.UI.KeyInput.ItemUseController>() != null)
-                        {
-                            return;
-                        }
-                    }
-                }
-                catch { }
-
-                if (isMessageText)
-                {
-                    MelonLogger.Msg($"[UnityText:{gameObjectName}] {cleanText}");
-                    FFIV_ScreenReaderMod.SpeakText(cleanText, interrupt: false);
-                    lastTextValue = cleanText;
-                    lastTextTime = currentTime;
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Error in UnityText.set_text patch: {ex.Message}");
-            }
+            // Dialogue is now handled by DialogueTracker via PlayingInit
+            // This patch is kept but disabled to prevent double announcements
         }
     }
 
     /// <summary>
     /// Patch MessageWindowManager.SetSpeker for speaker names from manager level.
+    /// Stores speaker in DialogueTracker for announcement with dialogue text.
     /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Message.MessageWindowManager), "SetSpeker")]
     public static class MessageWindowManager_SetSpeker_Patch
     {
-        private static string lastSpeaker = "";
-
         [HarmonyPostfix]
         public static void Postfix(string name)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    lastSpeaker = "";
-                    return;
-                }
-
-                string cleanSpeaker = name.Trim();
-                if (cleanSpeaker == lastSpeaker)
-                {
-                    return;
-                }
-
-                lastSpeaker = cleanSpeaker;
-                MelonLogger.Msg($"[MessageWindowManager.Speaker] {cleanSpeaker}");
-                FFIV_ScreenReaderMod.SpeakText(cleanSpeaker, interrupt: false);
+                DialogueTracker.SetSpeaker(name);
             }
             catch (Exception ex)
             {
@@ -279,8 +327,7 @@ namespace FFIV_ScreenReader.Patches
 
     /// <summary>
     /// Patch MessageWindowManager.SetContent for dialogue content.
-    /// This is the KEY patch for reading dialogue text in FF4/FF5.
-    /// BaseContent is in Last.Systems.Message namespace and has ContentText property.
+    /// Stores content in DialogueTracker for per-page announcement via PlayingInit.
     /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Message.MessageWindowManager), "SetContent")]
     public static class MessageWindowManager_SetContent_Patch
@@ -290,29 +337,7 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                MelonLogger.Msg($"[MessageWindowManager.Content] Content list with {contentList.Count} items set");
-
-                var sb = new System.Text.StringBuilder();
-                for (int i = 0; i < contentList.Count; i++)
-                {
-                    var content = contentList[i];
-                    if (content != null && !string.IsNullOrWhiteSpace(content.ContentText))
-                    {
-                        sb.AppendLine(content.ContentText.Trim());
-                    }
-                }
-
-                string fullText = sb.ToString().Trim();
-                if (!string.IsNullOrWhiteSpace(fullText))
-                {
-                    MelonLogger.Msg($"[MessageWindowManager.Content - Text] {fullText}");
-                    FFIV_ScreenReaderMod.SpeakText(fullText, interrupt: false);
-                }
+                DialogueTracker.StoreContent(contentList);
             }
             catch (Exception ex)
             {
@@ -323,7 +348,7 @@ namespace FFIV_ScreenReader.Patches
 
     /// <summary>
     /// Patch FadeMessageManager for location names, chapter titles, etc.
-    /// Uses time-based deduplication to prevent "Castle Baron 1F" then "Castle Baron".
+    /// Records message for content-based deduplication with SystemMessage.
     /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Message.FadeMessageManager), "Play")]
     public static class FadeMessageManager_Play_Patch
@@ -340,13 +365,9 @@ namespace FFIV_ScreenReader.Patches
 
                 string cleanMessage = message.Trim();
 
-                // Use location tracker for deduplication
-                // This prevents duplicate map name announcements from multiple sources
-                if (!LocationMessageTracker.ShouldAnnounce(cleanMessage))
-                {
-                    MelonLogger.Msg($"[FadeMessage - Deduplicated] {cleanMessage}");
-                    return;
-                }
+                // Record this FadeMessage for deduplication with SystemMessage
+                // E.g., "Entering Mysidia" recorded so "Mysidia" can be skipped
+                LocationMessageTracker.SetLastFadeMessage(cleanMessage);
 
                 MelonLogger.Msg($"[FadeMessage] {cleanMessage}");
                 FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
@@ -400,6 +421,7 @@ namespace FFIV_ScreenReader.Patches
 
     /// <summary>
     /// Patch SystemMessageWindowManager for system messages.
+    /// Uses content-based deduplication to prevent duplicate location announcements.
     /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Management.SystemMessageWindowManager), "SetMessage")]
     public static class SystemMessageWindowManager_SetMessage_Patch
@@ -420,6 +442,13 @@ namespace FFIV_ScreenReader.Patches
                     string message = messageManager.GetMessage(messageId);
                     if (!string.IsNullOrWhiteSpace(message))
                     {
+                        // Check for duplicate location announcement
+                        if (!LocationMessageTracker.ShouldAnnounceSystemMessage(message))
+                        {
+                            MelonLogger.Msg($"[SystemMessage - Deduplicated] {message}");
+                            return;
+                        }
+
                         MelonLogger.Msg($"[SystemMessage] {message}");
                         FFIV_ScreenReaderMod.SpeakText(message, interrupt: true);
                     }
@@ -477,6 +506,34 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
+    // ============================================================
+    // Per-Page Dialogue Announcement via PlayingInit
+    // Fires once per page when text starts displaying.
+    // ============================================================
+
+    /// <summary>
+    /// Patch MessageWindowManager.PlayingInit for per-page dialogue announcements.
+    /// Fires when entering Playing state - once per page.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.Message.MessageWindowManager), "PlayingInit")]
+    public static class MessageWindowManager_PlayingInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.Message.MessageWindowManager __instance)
+        {
+            try
+            {
+                int lineIndex = __instance.messageLineIndex;
+                string speaker = __instance.spekerValue;
+                DialogueTracker.AnnounceForLineIndex(lineIndex, speaker);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in MessageWindowManager.PlayingInit patch: {ex.Message}");
+            }
+        }
+    }
+
     /// <summary>
     /// Patch EventProcedure.EventTalk for event-based dialogue.
     /// </summary>
@@ -507,6 +564,114 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in EventProcedure.EventTalk patch: {ex.Message}");
+            }
+        }
+    }
+
+    // ============================================================
+    // LineFade Per-Line Announcement System
+    // Announces each line of story text as it appears on screen,
+    // using the game's internal timing via PlayInit hook.
+    // ============================================================
+
+    /// <summary>
+    /// Tracks LineFade message state for per-line announcements.
+    /// </summary>
+    public static class LineFadeMessageTracker
+    {
+        private static string[] storedMessages = null;
+        private static int currentLineIndex = 0;
+
+        /// <summary>
+        /// Store messages when SetData is called.
+        /// </summary>
+        public static void SetMessages(Il2CppSystem.Collections.Generic.List<string> messages)
+        {
+            if (messages == null || messages.Count == 0)
+            {
+                storedMessages = null;
+                currentLineIndex = 0;
+                return;
+            }
+
+            storedMessages = new string[messages.Count];
+            for (int i = 0; i < messages.Count; i++)
+            {
+                storedMessages[i] = messages[i];
+            }
+            currentLineIndex = 0;
+        }
+
+        /// <summary>
+        /// Get and announce the next line. Called when PlayInit fires.
+        /// </summary>
+        public static void AnnounceNextLine()
+        {
+            if (storedMessages == null || currentLineIndex >= storedMessages.Length)
+            {
+                return;
+            }
+
+            string line = storedMessages[currentLineIndex];
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                FFIV_ScreenReaderMod.SpeakText(line.Trim(), interrupt: false);
+            }
+
+            currentLineIndex++;
+        }
+
+        /// <summary>
+        /// Reset the tracker.
+        /// </summary>
+        public static void Reset()
+        {
+            storedMessages = null;
+            currentLineIndex = 0;
+        }
+    }
+
+    /// <summary>
+    /// Patch LineFadeMessageWindowController.SetData to store messages for per-line announcement.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.UI.Message.LineFadeMessageWindowController), "SetData")]
+    public static class LineFadeController_SetData_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppSystem.Collections.Generic.List<string> messages)
+        {
+            try
+            {
+                LineFadeMessageTracker.SetMessages(messages);
+
+                // Clear speaker context so next regular dialogue re-announces the speaker
+                // This re-establishes context after auto-scrolling text events
+                DialogueTracker.ClearLastAnnouncedSpeaker();
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in LineFadeController.SetData patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patch LineFadeMessageWindowController.PlayInit to announce each line as it appears.
+    /// PlayInit is called once per line by the game's internal state machine.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.UI.Message.LineFadeMessageWindowController), "PlayInit")]
+    public static class LineFadeController_PlayInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            try
+            {
+                LineFadeMessageTracker.AnnounceNextLine();
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in LineFadeController.PlayInit patch: {ex.Message}");
             }
         }
     }
