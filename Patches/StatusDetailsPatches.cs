@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Reflection;
 using HarmonyLib;
 using MelonLoader;
 using Il2CppLast.UI.KeyInput;
@@ -13,8 +14,64 @@ using Il2CppSystem.Collections.Generic;
 using UnityEngine;
 using StatusDetailsController = Il2CppSerial.FF4.UI.KeyInput.StatusDetailsController;
 
+// Import MenuState classes
+using StatusMenuState = FFIV_ScreenReader.Core.StatusMenuState;
+
+// StatusWindowController is in base namespace
+using FF4StatusWindowController = Il2CppLast.UI.KeyInput.StatusWindowController;
+
 namespace FFIV_ScreenReader.Patches
 {
+    /// <summary>
+    /// Manual patches for status menu state transitions.
+    /// Hooks StatusWindowController.SetActive to clear state when status/character selection menu closes.
+    /// </summary>
+    public static class StatusMenuStatePatches
+    {
+        private static bool isPatched = false;
+
+        /// <summary>
+        /// Apply manual Harmony patches for status menu state management.
+        /// </summary>
+        public static void ApplyPatches(HarmonyLib.Harmony harmony)
+        {
+            if (isPatched)
+                return;
+
+            try
+            {
+                // Patch StatusWindowController.SetActive(false) to clear state when menu closes
+                Type controllerType = typeof(FF4StatusWindowController);
+                var setActiveMethod = controllerType.GetMethod("SetActive", BindingFlags.Instance | BindingFlags.Public);
+                if (setActiveMethod != null)
+                {
+                    var postfix = typeof(StatusMenuStatePatches).GetMethod(nameof(StatusWindowController_SetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(setActiveMethod, postfix: new HarmonyMethod(postfix));
+                }
+
+                isPatched = true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[StatusMenu] Error applying state patches: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Postfix for StatusWindowController.SetActive - clears state when menu closes.
+        /// This handles character selection backing out to main menu.
+        /// </summary>
+        public static void StatusWindowController_SetActive_Postfix(FF4StatusWindowController __instance, bool isActive)
+        {
+            if (!isActive && StatusMenuState.IsActive)
+            {
+                StatusMenuState.Reset();
+                StatusMenuTracker.Reset();
+            }
+        }
+    }
+
     /// <summary>
     /// Tracks whether the status menu was opened by user action.
     /// Prevents status announcements during game initialization.
@@ -28,18 +85,11 @@ namespace FFIV_ScreenReader.Patches
         public static bool IsUserOpened { get; set; } = false;
 
         /// <summary>
-        /// Time of last user interaction with status menu.
-        /// Used for timeout-based auto-reset.
-        /// </summary>
-        private static float lastInteractionTime = 0f;
-
-        /// <summary>
         /// Mark that user has opened the status menu.
         /// </summary>
         public static void MarkUserOpened()
         {
             IsUserOpened = true;
-            lastInteractionTime = UnityEngine.Time.time;
         }
 
         /// <summary>
@@ -52,15 +102,10 @@ namespace FFIV_ScreenReader.Patches
 
         /// <summary>
         /// Check if menu access should be considered user-initiated.
-        /// Auto-resets after 5 seconds of no interaction.
+        /// Returns true only if user explicitly opened the menu via navigation.
         /// </summary>
         public static bool ShouldAnnounce()
         {
-            // Auto-reset after 5 seconds
-            if (IsUserOpened && (UnityEngine.Time.time - lastInteractionTime) > 5f)
-            {
-                IsUserOpened = false;
-            }
             return IsUserOpened;
         }
     }
@@ -133,7 +178,6 @@ namespace FFIV_ScreenReader.Patches
                         var targetData = statusController.targetData;
                         if (targetData != null)
                         {
-                            MelonLogger.Msg("[Status] Successfully accessed targetData directly");
                             return targetData;
                         }
                     }
@@ -148,13 +192,12 @@ namespace FFIV_ScreenReader.Patches
                         var traversed = Traverse.Create(statusController).Field("targetData").GetValue<OwnedCharacterData>();
                         if (traversed != null)
                         {
-                            MelonLogger.Msg("[Status] Successfully accessed targetData via Traverse");
                             return traversed;
                         }
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        MelonLogger.Warning($"[Status] Traverse access failed: {ex.Message}");
+                        // Traverse access failed
                     }
                 }
             }
@@ -211,6 +254,9 @@ namespace FFIV_ScreenReader.Patches
                 // Mark that user has opened the status menu
                 StatusMenuTracker.MarkUserOpened();
 
+                // Set status menu state active
+                StatusMenuState.SetActive();
+
                 // Use coroutine for one-frame delay to ensure UI has updated
                 CoroutineManager.StartManaged(DelayedCharacterAnnouncement(contents, index));
             }
@@ -243,7 +289,6 @@ namespace FFIV_ScreenReader.Patches
 
                 if (!string.IsNullOrWhiteSpace(characterInfo))
                 {
-                    MelonLogger.Msg($"[Status Select] {characterInfo}");
                     FFIV_ScreenReaderMod.SpeakText(characterInfo);
                 }
             }
@@ -271,15 +316,8 @@ namespace FFIV_ScreenReader.Patches
                 // Register the controller in GameObjectCache (always do this)
                 Utils.GameObjectCache.Register(__instance);
 
-                // CRITICAL: Only announce if user explicitly opened the status menu
-                // This prevents stats being announced during game initialization/map load
-                if (!StatusMenuTracker.ShouldAnnounce())
-                {
-                    return;
-                }
-
                 // IMPORTANT: Filter out initialization/background calls
-                // Only announce when the status details screen is actually visible
+                // Only proceed when the status details screen is actually visible
                 if (__instance.gameObject == null || !__instance.gameObject.activeInHierarchy)
                 {
                     return;
@@ -293,12 +331,53 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Use coroutine for one-frame delay to ensure UI has updated
+                // Always initialize navigation when controller is visible
+                // This allows arrow key navigation even if we don't announce
+                InitializeNavigation(__instance);
+
+                // Only announce if user explicitly opened the status menu
+                // This prevents stats being announced during game initialization/map load
+                if (!StatusMenuTracker.ShouldAnnounce())
+                {
+                    return;
+                }
+
+                // Use coroutine for one-frame delay to ensure UI has updated for speech
                 CoroutineManager.StartManaged(DelayedStatusAnnouncement(__instance));
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in StatusDetailsController.InitDisplay patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Initialize navigation state for arrow key stat browsing.
+        /// Called whenever status details controller becomes visible.
+        /// </summary>
+        private static void InitializeNavigation(StatusDetailsController controller)
+        {
+            try
+            {
+                var characterData = StatusDetailsHelpers.GetCharacterDataFromController(controller);
+                if (characterData != null)
+                {
+                    var tracker = StatusNavigationTracker.Instance;
+                    tracker.IsNavigationActive = true;
+                    tracker.CurrentStatIndex = 0;  // Start at top
+                    tracker.ActiveController = controller;
+                    tracker.CurrentCharacterData = characterData;
+
+                    // Also set for existing stat reading methods (hotkeys)
+                    StatusDetailsReader.SetCurrentCharacterData(characterData);
+
+                    // Initialize the stat list
+                    StatusNavigationReader.InitializeStatList();
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error initializing status navigation: {ex.Message}");
             }
         }
 
@@ -328,38 +407,7 @@ namespace FFIV_ScreenReader.Patches
                     yield break;
                 }
 
-                MelonLogger.Msg($"[Status Details] {statusText}");
                 FFIV_ScreenReaderMod.SpeakText(statusText);
-
-                // Initialize navigation state for arrow key browsing
-                try
-                {
-                    var characterData = StatusDetailsHelpers.GetCharacterDataFromController(controller);
-                    if (characterData != null)
-                    {
-                        var tracker = StatusNavigationTracker.Instance;
-                        tracker.IsNavigationActive = true;
-                        tracker.CurrentStatIndex = 0;  // Start at top
-                        tracker.ActiveController = controller;
-                        tracker.CurrentCharacterData = characterData;
-
-                        // Also set for existing stat reading methods (hotkeys)
-                        StatusDetailsReader.SetCurrentCharacterData(characterData);
-
-                        // Initialize the stat list
-                        StatusNavigationReader.InitializeStatList();
-
-                        MelonLogger.Msg("[Status] Navigation initialized - use Up/Down arrows to browse stats");
-                    }
-                    else
-                    {
-                        MelonLogger.Warning("[Status] Could not get character data for navigation");
-                    }
-                }
-                catch (Exception navEx)
-                {
-                    MelonLogger.Warning($"Error initializing navigation: {navEx.Message}");
-                }
             }
             catch (Exception ex)
             {
@@ -390,8 +438,6 @@ namespace FFIV_ScreenReader.Patches
 
                 // Reset the status menu tracker
                 StatusMenuTracker.Reset();
-
-                MelonLogger.Msg("[Status] Menu exited, state cleared");
             }
             catch (Exception ex)
             {

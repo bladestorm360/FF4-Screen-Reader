@@ -130,9 +130,6 @@ namespace FFIV_ScreenReader.Field
                 // Get the area ID from the map
                 int areaId = map.AreaId;
 
-                // Debug logging for map name resolution
-                MelonLogger.Msg($"[MapNameResolver] MapId={mapId} AreaId={areaId} MapName={map.MapName} MapTitle={map.MapTitle}");
-
                 // Get the Area master data
                 var areaList = masterManager.GetList<Area>();
                 if (areaList == null || !areaList.ContainsKey(areaId))
@@ -171,13 +168,10 @@ namespace FFIV_ScreenReader.Field
                     }
                 }
 
-                // Debug logging for resolved names
-                MelonLogger.Msg($"[MapNameResolver] AreaNameKey={areaNameKey} AreaName='{areaName}' MapTitleKey={mapTitleKey} MapTitle='{mapTitle}'");
-
-                // Combine area name and map title
+                // Combine area name and map title with en-dash to match game's MSG_LOCATION_STICK format
                 if (!string.IsNullOrEmpty(areaName) && !string.IsNullOrEmpty(mapTitle))
                 {
-                    return $"{areaName} {mapTitle}";
+                    return $"{areaName} – {mapTitle}";  // en-dash U+2013
                 }
                 else if (!string.IsNullOrEmpty(areaName))
                 {

@@ -22,8 +22,6 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                MelonLogger.Msg($"=== SaveSlotReader: Checking cursor at index {cursorIndex} ===");
-
                 // Walk up the hierarchy to find the save list structure
                 Transform current = cursorTransform;
                 int depth = 0;
@@ -34,15 +32,12 @@ namespace FFIV_ScreenReader.Menus
                     if (current.name.Contains("save") || current.name.Contains("load") ||
                         current.name.Contains("data_select"))
                     {
-                        MelonLogger.Msg($"Found potential save menu structure: {current.name}");
-
                         // Try to find Content list (common pattern: Scroll View -> Viewport -> Content)
                         Transform contentList = FindContentList(current);
 
                         if (contentList != null && cursorIndex >= 0 && cursorIndex < contentList.childCount)
                         {
                             Transform saveSlot = contentList.GetChild(cursorIndex);
-                            MelonLogger.Msg($"Found save slot at index {cursorIndex}: {saveSlot.name}");
 
                             // Try to read the slot information
                             string slotInfo = ReadSlotInformation(saveSlot, cursorIndex);
@@ -56,8 +51,6 @@ namespace FFIV_ScreenReader.Menus
                     current = current.parent;
                     depth++;
                 }
-
-                MelonLogger.Msg("SaveSlotReader: Not a save slot menu");
             }
             catch (Exception ex)
             {
@@ -97,13 +90,6 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                // Try to get SaveContentController component
-                var saveController = slotTransform.GetComponent<SaveContentController>();
-                if (saveController == null)
-                {
-                    saveController = slotTransform.GetComponentInChildren<SaveContentController>();
-                }
-
                 // Try to get SaveContentView component
                 var saveView = slotTransform.GetComponent<SaveContentView>();
                 if (saveView == null)
@@ -111,15 +97,13 @@ namespace FFIV_ScreenReader.Menus
                     saveView = slotTransform.GetComponentInChildren<SaveContentView>();
                 }
 
-                // Try direct text extraction as fallback
+                // Try direct text extraction
                 if (saveView != null)
                 {
-                    MelonLogger.Msg("Found SaveContentView, extracting text fields");
                     return ReadFromSaveContentView(saveView, slotIndex);
                 }
 
                 // Fallback: Try to find text components
-                MelonLogger.Msg("Trying text component fallback");
                 return ReadFromTextComponents(slotTransform, slotIndex);
             }
             catch (Exception ex)
@@ -137,23 +121,6 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                MelonLogger.Msg("=== Inspecting SaveContentView fields ===");
-
-                // Debug: Check all the text fields
-                MelonLogger.Msg($"EmptyText: {(view.EmptyText != null ? "exists" : "null")}");
-                if (view.EmptyText != null)
-                {
-                    MelonLogger.Msg($"  - GameObject: {(view.EmptyText.gameObject != null ? view.EmptyText.gameObject.name : "null")}");
-                    MelonLogger.Msg($"  - Active: {(view.EmptyText.gameObject != null ? view.EmptyText.gameObject.activeSelf.ToString() : "N/A")}");
-                    MelonLogger.Msg($"  - Text: '{view.EmptyText.text}'");
-                }
-
-                MelonLogger.Msg($"areaNameText: {(view.areaNameText != null ? $"'{view.areaNameText.text}'" : "null")}");
-                MelonLogger.Msg($"floorNameText: {(view.floorNameText != null ? $"'{view.floorNameText.text}'" : "null")}");
-                MelonLogger.Msg($"LevelText: {(view.LevelText != null ? $"'{view.LevelText.text}'" : "null")}");
-                MelonLogger.Msg($"hourText: {(view.hourText != null ? $"'{view.hourText.text}'" : "null")}");
-                MelonLogger.Msg($"minuteText: {(view.minuteText != null ? $"'{view.minuteText.text}'" : "null")}");
-
                 // Check if slot is empty
                 if (view.EmptyText != null && view.EmptyText.gameObject != null &&
                     view.EmptyText.gameObject.activeSelf)
@@ -161,7 +128,6 @@ namespace FFIV_ScreenReader.Menus
                     string emptyText = view.EmptyText.text;
                     if (!string.IsNullOrEmpty(emptyText))
                     {
-                        MelonLogger.Msg($"Slot {slotIndex + 1} is empty (EmptyText active and has text)");
                         return $"Slot {slotIndex + 1}: {emptyText}";
                     }
                 }
@@ -219,7 +185,6 @@ namespace FFIV_ScreenReader.Menus
                     announcement += ", " + playTime;
                 }
 
-                MelonLogger.Msg($"Save slot info: {announcement}");
                 return announcement;
             }
             catch (Exception ex)
@@ -256,8 +221,6 @@ namespace FFIV_ScreenReader.Menus
 
                     string content = text.text.Trim();
                     if (string.IsNullOrEmpty(content)) return;
-
-                    MelonLogger.Msg($"  Text component '{text.name}': '{content}'");
 
                     // Check for character name
                     if (text.name.Contains("chara_name"))
@@ -304,8 +267,6 @@ namespace FFIV_ScreenReader.Menus
                     }
                 });
 
-                MelonLogger.Msg($"Found {textCount} text components in slot");
-
                 // IMPORTANT: Only treat as empty if we have NO character data
                 // The "empty" text component exists on all slots, it's just hidden on occupied ones
                 bool hasData = !string.IsNullOrEmpty(characterName) ||
@@ -329,7 +290,6 @@ namespace FFIV_ScreenReader.Menus
                         slotIdentifier = $"Slot {slotIndex + 1}";
                     }
 
-                    MelonLogger.Msg($"{slotIdentifier} is empty (no character data)");
                     return $"{slotIdentifier}: {empty}";
                 }
 
@@ -377,7 +337,6 @@ namespace FFIV_ScreenReader.Menus
 
                 if (announcement != $"Slot {slotIndex + 1}")
                 {
-                    MelonLogger.Msg($"Fallback read successful: {announcement}");
                     return announcement;
                 }
             }

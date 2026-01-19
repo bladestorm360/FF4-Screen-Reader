@@ -26,7 +26,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(BattleCommandSelectController), nameof(BattleCommandSelectController.SetCursor))]
     public static class BattleCommandSelectController_SetCursor_Patch
     {
-        private static int lastAnnouncedIndex = -1;
+        private const string DEDUP_CONTEXT = "BattleCommand.Select";
 
         [HarmonyPostfix]
         public static void Postfix(BattleCommandSelectController __instance, int index)
@@ -45,32 +45,20 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // SAFETY: Skip if flee is in progress to prevent command menu announcements
+                // from interrupting the flee sequence
+                if (GlobalBattleMessageTracker.IsFleeInProgress)
+                {
+                    return;
+                }
+
                 // Skip duplicate announcements
-                if (index == lastAnnouncedIndex)
-                {
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, index))
                     return;
-                }
-                lastAnnouncedIndex = index;
 
-                // Get the content list
-                var contentList = __instance.contentList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                // Validate index
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                // Get the command content at the cursor position
-                var contentController = contentList[index];
+                var contentController = SelectContentHelper.TryGetItem(__instance.contentList, index);
                 if (contentController == null || contentController.TargetCommand == null)
-                {
                     return;
-                }
 
                 // Get the localized command name using MessageManager
                 string mesIdName = contentController.TargetCommand.MesIdName;
@@ -91,7 +79,6 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                MelonLogger.Msg($"[Battle Command Menu] {commandName}");
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
             catch (Exception ex)
@@ -109,37 +96,20 @@ namespace FFIV_ScreenReader.Patches
         new Type[] { typeof(Cursor), typeof(CustomScrollView.WithinRangeType) })]
     public static class BattleItemInfomationController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "BattleItem.Select";
 
         [HarmonyPostfix]
         public static void Postfix(BattleItemInfomationController __instance, Cursor targetCursor)
         {
             try
             {
-                if (__instance == null || targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
 
-                int index = targetCursor.Index;
-
-                var contentList = __instance.contentList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                // Get the selected content controller from the content list
-                var selectedContent = contentList[index];
+                var selectedContent = SelectContentHelper.TryGetItem(__instance.contentList, index);
                 if (selectedContent == null)
-                {
                     return;
-                }
 
                 // Get the item name from Data
                 string itemName = null;
@@ -227,13 +197,11 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Battle Item] {announcement}");
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -252,37 +220,20 @@ namespace FFIV_ScreenReader.Patches
         new Type[] { typeof(Cursor), typeof(CustomScrollView.WithinRangeType) })]
     public static class BattleQuantityAbilityInfomationController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "BattleAbility.Select";
 
         [HarmonyPostfix]
         public static void Postfix(BattleQuantityAbilityInfomationController __instance, Cursor targetCursor)
         {
             try
             {
-                if (__instance == null || targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
 
-                // Get the content list (contains BattleAbilityInfomationContentController items)
-                var contentList = __instance.contentList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                int index = targetCursor.Index;
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                // Get the selected content controller
-                var selectedContent = contentList[index];
+                var selectedContent = SelectContentHelper.TryGetItem(__instance.contentList, index);
                 if (selectedContent == null)
-                {
                     return;
-                }
 
                 // Get the ability data
                 var abilityData = selectedContent.Data;
@@ -336,13 +287,11 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Battle Ability] {announcement}");
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

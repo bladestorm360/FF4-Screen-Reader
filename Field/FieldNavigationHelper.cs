@@ -167,7 +167,7 @@ namespace FFIV_ScreenReader.Field
                 {
                     currentMapId = Il2CppLast.Management.UserDataManager.Instance()?.CurrentMapId ?? -1;
                 }
-                catch { }
+                catch (Exception) { }
 
                 // Use layer-based Z resolution for all maps
                 int pathfindZ = playerLayer >= 9 ? playerLayer - 9 : 0;
@@ -179,59 +179,6 @@ namespace FFIV_ScreenReader.Field
                 // Set Z coordinates for pathfinding
                 startCell.z = pathfindZ;
                 destCell.z = pathfindZ;
-
-                // DEBUG: Log comprehensive position and state data
-                try
-                {
-                    var fieldMap = Utils.GameObjectCache.Get<FieldMap>();
-                    Vector3 playerLocalPos = player?.transform?.localPosition ?? Vector3.zero;
-                    Vector2 scrollOffset = Vector2.zero;
-                    bool isWorldMap = false;
-                    bool isMoonMap = (currentMapId == 3);
-
-                    if (fieldMap?.fieldController != null)
-                    {
-                        scrollOffset = fieldMap.fieldController.MapScrollOffset;
-                        try
-                        {
-                            var mapManager = Il2CppLast.Map.MapLoadProcessor.GetMapManager();
-                            if (mapManager?.CurrentMapModel != null)
-                            {
-                                isWorldMap = mapManager.CurrentMapModel.IsAreaTypeWorld;
-                            }
-                        }
-                        catch { }
-                    }
-
-                    MelonLogger.Msg("=== PATHFIND DEBUG ===");
-                    MelonLogger.Msg($"MapId={currentMapId}, IsWorldMap={isWorldMap}, IsMoon={isMoonMap}");
-                    MelonLogger.Msg($"MapSize: {mapWidth}x{mapHeight}");
-                    MelonLogger.Msg($"ScrollOffset: ({scrollOffset.x}, {scrollOffset.y})");
-                    MelonLogger.Msg($"Player WorldPos: ({playerWorldPos.x:F1}, {playerWorldPos.y:F1}, {playerWorldPos.z:F1})");
-                    MelonLogger.Msg($"Player LocalPos: ({playerLocalPos.x:F1}, {playerLocalPos.y:F1}, {playerLocalPos.z:F1})");
-                    MelonLogger.Msg($"Target WorldPos: ({targetWorldPos.x:F1}, {targetWorldPos.y:F1}, {targetWorldPos.z:F1})");
-                    MelonLogger.Msg($"StartCell: ({startCell.x}, {startCell.y}, {startCell.z})");
-                    MelonLogger.Msg($"DestCell: ({destCell.x}, {destCell.y}, {destCell.z})");
-                    MelonLogger.Msg($"PlayerLayer={playerLayer}, PathfindZ={pathfindZ}, IsOnCollision={player?.IsOnCollision}");
-
-                    // Try to get game's cell conversion for comparison
-                    try
-                    {
-                        Vector3 gameStartCell = fieldMap.fieldController.ConvertWorldPositionToCellPosition(playerWorldPos);
-                        Vector3 gameDestCell = fieldMap.fieldController.ConvertWorldPositionToCellPosition(targetWorldPos);
-                        MelonLogger.Msg($"Game StartCell: ({gameStartCell.x:F1}, {gameStartCell.y:F1}, {gameStartCell.z:F1})");
-                        MelonLogger.Msg($"Game DestCell: ({gameDestCell.x:F1}, {gameDestCell.y:F1}, {gameDestCell.z:F1})");
-                    }
-                    catch (Exception ex)
-                    {
-                        MelonLogger.Msg($"Game cell conversion failed: {ex.Message}");
-                    }
-                    MelonLogger.Msg("======================");
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Msg($"Debug logging error: {ex.Message}");
-                }
 
                 Il2CppSystem.Collections.Generic.List<Vector3> pathPoints = null;
 
@@ -295,22 +242,17 @@ namespace FFIV_ScreenReader.Field
                 // If we can path A→B but NOT B→A, the path crosses a ledge we can't climb back up
                 if (currentMapId == 3 && player != null)
                 {
-                    MelonLogger.Msg($"[MoonPath] Testing reverse path from dest to player...");
-
                     // Try pathfinding in reverse (from destination to player)
                     bool useCollision = player.IsOnCollision;
                     var reversePathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, destCell, startCell, useCollision);
 
                     if (reversePathPoints == null || reversePathPoints.Count == 0)
                     {
-                        MelonLogger.Msg($"[MoonPath] REJECTED: Reverse path failed - one-way ledge detected");
                         pathInfo.ErrorMessage = "Path crosses one-way ledge";
                         pathInfo.StepCount = 0;
                         pathInfo.Description = "Path blocked by ledge";
                         return pathInfo;
                     }
-
-                    MelonLogger.Msg($"[MoonPath] Reverse path OK ({reversePathPoints.Count} points) - bidirectional path confirmed");
                 }
 
                 pathInfo.Success = true;

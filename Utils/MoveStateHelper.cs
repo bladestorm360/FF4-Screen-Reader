@@ -92,7 +92,6 @@ namespace FFIV_ScreenReader.Utils
                 FFIV_ScreenReader.Patches.MovementSpeechPatches.SyncToOnFoot();
 
                 FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText("On foot", interrupt: false);
-                MelonLoader.MelonLogger.Msg($"[MoveState] Entered interior map - now on foot");
                 return true;
             }
             return false;
@@ -153,7 +152,6 @@ namespace FFIV_ScreenReader.Utils
             {
                 lastAnnouncedState = newState;
                 FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
-                MelonLoader.MelonLogger.Msg($"[MoveState] State change: {GetMoveStateName(previousState)} -> {GetMoveStateName(newState)}");
             }
         }
 

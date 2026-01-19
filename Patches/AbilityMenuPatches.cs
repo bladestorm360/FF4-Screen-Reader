@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using MelonLoader;
 using Il2CppLast.UI.KeyInput;
@@ -11,8 +12,65 @@ using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
 
+// Import MenuState classes
+using AbilityMenuState = FFIV_ScreenReader.Core.AbilityMenuState;
+
+// Type alias for window controller (FF4-specific namespace)
+using AbilityWindowController = Il2CppSerial.FF4.UI.KeyInput.AbilityWindowController;
+
 namespace FFIV_ScreenReader.Patches
 {
+    /// <summary>
+    /// Manual patches for ability menu state transitions.
+    /// For Ability menu, both the command level (magic type selection) and ability list are handled by SelectContent patches.
+    /// State is cleared when the AbilityWindowController is deactivated (menu closes).
+    /// </summary>
+    public static class AbilityMenuStatePatches
+    {
+        private static bool isPatched = false;
+
+        /// <summary>
+        /// Apply manual Harmony patches for ability menu state management.
+        /// Unlike Items/Equipment, Ability menu's command level is also handled by patches.
+        /// We only need to clear state when the menu closes entirely.
+        /// </summary>
+        public static void ApplyPatches(HarmonyLib.Harmony harmony)
+        {
+            if (isPatched)
+                return;
+
+            try
+            {
+                // Patch SetActive(false) to clear state when ability menu closes
+                Type controllerType = typeof(AbilityWindowController);
+                var setActiveMethod = controllerType.GetMethod("SetActive", BindingFlags.Instance | BindingFlags.Public);
+                if (setActiveMethod != null)
+                {
+                    var postfix = typeof(AbilityMenuStatePatches).GetMethod(nameof(AbilityWindow_SetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(setActiveMethod, postfix: new HarmonyMethod(postfix));
+                }
+
+                isPatched = true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[AbilityMenu] Error applying state patches: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Postfix for AbilityWindowController.SetActive - clears state when menu closes.
+        /// </summary>
+        public static void AbilityWindow_SetActive_Postfix(AbilityWindowController __instance, bool isActive)
+        {
+            if (!isActive && AbilityMenuState.IsActive)
+            {
+                AbilityMenuState.Reset();
+            }
+        }
+    }
+
     /// <summary>
     /// Controller-based patches for the Ability Menu accessed from the main menu.
     /// Provides screen reader accessibility for:
@@ -31,7 +89,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(AbilityCommandController), nameof(AbilityCommandController.SelectContent))]
     public static class AbilityCommandController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "AbilityMenu.Command";
 
         [HarmonyPostfix]
         public static void Postfix(AbilityCommandController __instance, int index)
@@ -39,29 +97,11 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 if (__instance == null)
-                {
                     return;
-                }
 
-                // Get the content list
-                var contentList = __instance.contentList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                // Validate index
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                // Get the content view at the cursor position
-                var contentView = contentList[index];
+                var contentView = SelectContentHelper.TryGetItem(__instance.contentList, index);
                 if (contentView == null || contentView.text == null)
-                {
                     return;
-                }
 
                 // Get the command name from the text component
                 string commandName = contentView.text.text;
@@ -79,13 +119,14 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements
-                if (commandName == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, commandName))
                 {
                     return;
                 }
-                lastAnnouncement = commandName;
 
-                MelonLogger.Msg($"[Ability Command] {commandName}");
+                // Set ability menu state active
+                AbilityMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
             catch (Exception ex)
@@ -103,37 +144,20 @@ namespace FFIV_ScreenReader.Patches
         new Type[] { typeof(Cursor), typeof(CustomScrollView.WithinRangeType), typeof(bool) })]
     public static class AbilityContentListController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "AbilityMenu.Content";
 
         [HarmonyPostfix]
         public static void Postfix(AbilityContentListController __instance, Cursor targetCursor)
         {
             try
             {
-                if (__instance == null || targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
 
-                // Get the content list
-                var contentList = __instance.contentList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                int index = targetCursor.Index;
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                // Get the selected content controller
-                var selectedContent = contentList[index];
+                var selectedContent = SelectContentHelper.TryGetItem(__instance.contentList, index);
                 if (selectedContent == null)
-                {
                     return;
-                }
 
                 // Get the ability data
                 var abilityData = selectedContent.Data;
@@ -209,13 +233,14 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Ability List] {announcement}");
+                // Set ability menu state active
+                AbilityMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -235,36 +260,20 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(AbilityUseContentListController), "SelectContent", new Type[] { typeof(Il2CppSystem.Collections.Generic.IEnumerable<ItemTargetSelectContentController>), typeof(Il2CppLast.UI.Cursor) })]
     public static class AbilityUseContentListController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "AbilityMenu.UseTarget";
 
         [HarmonyPostfix]
         public static void Postfix(AbilityUseContentListController __instance, Il2CppSystem.Collections.Generic.IEnumerable<ItemTargetSelectContentController> targetContents, Il2CppLast.UI.Cursor targetCursor)
         {
             try
             {
-                if (__instance == null || targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
 
-                // Get the content list from the controller
-                var contentList = __instance.contentList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                int index = targetCursor.Index;
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                var selectedController = contentList[index];
+                var selectedController = SelectContentHelper.TryGetItem(__instance.contentList, index);
                 if (selectedController == null || selectedController.CurrentData == null)
-                {
                     return;
-                }
 
                 var data = selectedController.CurrentData;
                 string characterName = data.Name;
@@ -273,71 +282,19 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Build announcement with HP and MP information
+                // Build announcement with HP, MP, and status conditions using helper
                 string announcement = characterName;
-
-                try
-                {
-                    // Get the character's parameter data
-                    var parameter = data.parameter;
-                    if (parameter != null)
-                    {
-                        int currentHP = parameter.CurrentHP;
-                        int maxHP = parameter.ConfirmedMaxHp();
-                        int currentMP = parameter.CurrentMP;
-                        int maxMP = parameter.ConfirmedMaxMp();
-
-                        announcement += $", HP {currentHP}/{maxHP}, MP {currentMP}/{maxMP}";
-
-                        // Get status conditions
-                        var conditionList = parameter.ConfirmedConditionList();
-                        if (conditionList != null && conditionList.Count > 0)
-                        {
-                            var messageManager = MessageManager.Instance;
-                            if (messageManager != null)
-                            {
-                                var statusNames = new System.Collections.Generic.List<string>();
-
-                                foreach (var condition in conditionList)
-                                {
-                                    if (condition != null)
-                                    {
-                                        string conditionMesId = condition.MesIdName;
-
-                                        // Skip conditions with no message ID (internal/hidden statuses)
-                                        if (!string.IsNullOrEmpty(conditionMesId) && conditionMesId != "None")
-                                        {
-                                            string localizedConditionName = messageManager.GetMessage(conditionMesId);
-                                            if (!string.IsNullOrEmpty(localizedConditionName))
-                                            {
-                                                statusNames.Add(localizedConditionName);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (statusNames.Count > 0)
-                                {
-                                    announcement += $", {string.Join(", ", statusNames)}";
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Warning($"Error reading HP/MP/Status for {characterName}: {ex.Message}");
-                    // Continue with just the name if stats can't be read
-                }
+                announcement += CharacterStatusHelper.GetFullStatus(data.parameter);
 
                 // Skip duplicates
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Ability Target] {announcement}");
+                // Set ability menu state active
+                AbilityMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

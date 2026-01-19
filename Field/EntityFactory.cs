@@ -75,10 +75,6 @@ namespace FFIV_ScreenReader.Field
         {
             var results = new List<NavigableEntity>();
 
-            // DEBUG: Log entity scan header
-            MelonLogger.Msg("=== ENTITY SCAN START ===");
-            MelonLogger.Msg($"Player scan position: ({playerPos.x:F1}, {playerPos.y:F1}, {playerPos.z:F1})");
-
             foreach (var fieldEntity in fieldEntities)
             {
                 var entity = CreateFromFieldEntity(fieldEntity, playerPos);
@@ -88,7 +84,6 @@ namespace FFIV_ScreenReader.Field
                 }
             }
 
-            MelonLogger.Msg($"=== ENTITY SCAN END ({results.Count} entities) ===");
             return results;
         }
 
@@ -136,26 +131,6 @@ namespace FFIV_ScreenReader.Field
                     {
                         int destMapId = gotoMapProp.MapId;
                         int currentMapId = GetCurrentMapId();
-
-                        // DEBUG: Log GotoMap entity positions and layer
-                        try
-                        {
-                            Vector3 worldPos = fieldEntity.transform.position;
-                            Vector3 localPos = fieldEntity.transform.localPosition;
-                            int entityLayer = fieldEntity.gameObject.layer;
-                            int pathfindingZ = entityLayer >= 9 ? entityLayer - 9 : 0;
-                            string entityName = fieldEntity.Property?.Name ?? "Unknown";
-                            MelonLogger.Msg($"[GotoMap] {entityName} -> MapId {destMapId}");
-                            MelonLogger.Msg($"  WorldPos: ({worldPos.x:F1}, {worldPos.y:F1}, {worldPos.z:F1})");
-                            MelonLogger.Msg($"  LocalPos: ({localPos.x:F1}, {localPos.y:F1}, {localPos.z:F1})");
-                            MelonLogger.Msg($"  Layer: {entityLayer} (PathfindZ={pathfindingZ})");
-                            if (worldPos != localPos)
-                            {
-                                Vector3 diff = worldPos - localPos;
-                                MelonLogger.Msg($"  DIFF: ({diff.x:F1}, {diff.y:F1}, {diff.z:F1})");
-                            }
-                        }
-                        catch { }
 
                         // Skip if destination is current map (same-map teleport)
                         if (destMapId == currentMapId && currentMapId != -1)

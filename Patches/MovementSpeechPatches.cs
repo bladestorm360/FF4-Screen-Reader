@@ -89,7 +89,6 @@ namespace FFIV_ScreenReader.Patches
                         if (parameters.Length == 1 && parameters[0].ParameterType == typeof(bool))
                         {
                             targetMethod = method;
-                            MelonLogger.Msg("[FieldReady] Found MainGame.set_FieldReady method");
                             break;
                         }
                     }
@@ -101,7 +100,6 @@ namespace FFIV_ScreenReader.Patches
                         BindingFlags.Public | BindingFlags.Static);
 
                     harmony.Patch(targetMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[FieldReady] Patched MainGame.set_FieldReady successfully");
                 }
                 else
                 {
@@ -123,7 +121,6 @@ namespace FFIV_ScreenReader.Patches
             {
                 if (value)
                 {
-                    MelonLogger.Msg("[FieldReady] Field is now ready - triggering entity scan");
                     OnFieldReady?.Invoke();
                 }
             }
@@ -154,7 +151,6 @@ namespace FFIV_ScreenReader.Patches
                         if (parameters.Length >= 1 && parameters[0].ParameterType == typeof(int))
                         {
                             targetMethod = method;
-                            MelonLogger.Msg($"[MoveState] Found ChangeTransportation method with {parameters.Length} parameters");
                             break;
                         }
                     }
@@ -166,7 +162,6 @@ namespace FFIV_ScreenReader.Patches
                         BindingFlags.Public | BindingFlags.Static);
 
                     harmony.Patch(targetMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[MoveState] Patched ChangeTransportation successfully");
                 }
                 else
                 {
@@ -202,7 +197,6 @@ namespace FFIV_ScreenReader.Patches
                 // These are used during cinematics and transitions, not actual vehicle changes
                 if (IsIntermediateTransportation(transportationId))
                 {
-                    MelonLogger.Msg($"[MoveState] ChangeTransportation: Skipping intermediate state (id={transportationId})");
                     return;
                 }
 
@@ -233,7 +227,6 @@ namespace FFIV_ScreenReader.Patches
                 {
                     lastAnnouncedTransportId = transportationId;
                     Core.FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
-                    MelonLogger.Msg($"[MoveState] ChangeTransportation: {GetTransportationName(previousId) ?? "player"} -> {GetTransportationName(transportationId) ?? "player"} (id={transportationId})");
                 }
             }
             catch (Exception ex)
@@ -285,7 +278,6 @@ namespace FFIV_ScreenReader.Patches
                             parameters[0].ParameterType == typeof(int))
                         {
                             targetMethod = method;
-                            MelonLogger.Msg($"[MoveState] Found GetOn method with {parameters.Length} parameters");
                             break;
                         }
                     }
@@ -297,7 +289,6 @@ namespace FFIV_ScreenReader.Patches
                         BindingFlags.Public | BindingFlags.Static);
 
                     harmony.Patch(targetMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[MoveState] Patched GetOn successfully");
                 }
                 else
                 {
@@ -330,7 +321,6 @@ namespace FFIV_ScreenReader.Patches
                         if (parameters.Length >= 1 && parameters[0].ParameterType == typeof(int))
                         {
                             targetMethod = method;
-                            MelonLogger.Msg($"[MoveState] Found GetOff method with {parameters.Length} parameters");
                             break;
                         }
                     }
@@ -342,7 +332,6 @@ namespace FFIV_ScreenReader.Patches
                         BindingFlags.Public | BindingFlags.Static);
 
                     harmony.Patch(targetMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[MoveState] Patched GetOff successfully");
                 }
                 else
                 {
@@ -375,7 +364,6 @@ namespace FFIV_ScreenReader.Patches
                     lastTransportationId = typeId;
                     string announcement = $"On {vehicleName}";
                     Core.FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
-                    MelonLogger.Msg($"[MoveState] GetOn: {vehicleName} (typeId={typeId})");
                 }
             }
             catch (Exception ex)
@@ -405,7 +393,6 @@ namespace FFIV_ScreenReader.Patches
                 if (!string.IsNullOrEmpty(vehicleName))
                 {
                     Core.FFIV_ScreenReaderMod.SpeakText("On foot", interrupt: false);
-                    MelonLogger.Msg($"[MoveState] GetOff: {vehicleName} (typeId={typeId})");
                 }
             }
             catch (Exception ex)

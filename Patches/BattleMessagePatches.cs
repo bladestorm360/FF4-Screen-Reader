@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using MelonLoader;
 using Il2CppLast.Message;
@@ -10,43 +11,114 @@ using Il2CppLast.UI.Message;
 using Il2CppLast.Battle;
 using Il2CppLast.Battle.Function;
 using Il2CppLast.Data.Master;
+using Il2CppLast.Systems;
 using FFIV_ScreenReader.Core;
+using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.TextUtils;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
-    /// Global tracker for battle message deduplication.
-    /// Prevents the same action from being announced multiple times in quick succession.
+    /// Global tracker for battle action deduplication.
+    /// Tracks actor+action to distinguish initial actions from results.
+    /// Uses simple string equality (no time-based logic per Rule 3).
     /// </summary>
     public static class GlobalBattleMessageTracker
     {
         private static string lastMessage = "";
-        private static float lastMessageTime = 0f;
-        private const float DEDUP_WINDOW_SECONDS = 1.5f;
+
+        // Actor+action tracking for two-part abilities (Pray, Steal, Flee, etc.)
+        private static string lastAnnouncedActor = "";
+        private static string lastAnnouncedAction = "";
+
+        // Flee-in-progress flag to suppress command menu announcements
+        public static bool IsFleeInProgress { get; private set; } = false;
 
         public static bool ShouldAnnounce(string message)
         {
             if (string.IsNullOrWhiteSpace(message))
                 return false;
 
-            float currentTime = UnityEngine.Time.time;
-
-            // Allow if message is different or enough time has passed
-            if (message != lastMessage || (currentTime - lastMessageTime) >= DEDUP_WINDOW_SECONDS)
+            // Simple string equality - no time window
+            if (message != lastMessage)
             {
                 lastMessage = message;
-                lastMessageTime = currentTime;
                 return true;
             }
 
             return false;
         }
 
+        /// <summary>
+        /// Records that an action was announced for an actor.
+        /// Used to prevent CreateActFunction from announcing results as new actions.
+        /// </summary>
+        public static void RecordAction(string actor, string action)
+        {
+            lastAnnouncedActor = actor ?? "";
+            lastAnnouncedAction = action ?? "";
+        }
+
+        /// <summary>
+        /// Checks if we already announced an action for this actor.
+        /// If so, subsequent CreateActFunction calls are likely result messages.
+        /// </summary>
+        public static bool HasRecentActionForActor(string actor)
+        {
+            if (string.IsNullOrWhiteSpace(actor) || string.IsNullOrWhiteSpace(lastAnnouncedActor))
+                return false;
+
+            return actor.Equals(lastAnnouncedActor, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Checks if a message matches the last announced action name.
+        /// Used by SetCommadnMessage to avoid duplicating CreateActFunction announcements.
+        /// </summary>
+        public static bool IsRedundantActionMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message) || string.IsNullOrWhiteSpace(lastAnnouncedAction))
+                return false;
+
+            // Check if message matches the action name (case-insensitive)
+            return message.Trim().Equals(lastAnnouncedAction.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Sets the flee-in-progress flag to suppress command menu announcements.
+        /// </summary>
+        public static void SetFleeInProgress(bool inProgress)
+        {
+            IsFleeInProgress = inProgress;
+        }
+
+        /// <summary>
+        /// Clears the flee flag. Called when battle ends or escape result is announced.
+        /// </summary>
+        public static void ClearFleeInProgress()
+        {
+            if (IsFleeInProgress)
+            {
+                IsFleeInProgress = false;
+            }
+        }
+
+        /// <summary>
+        /// Clears the last actor tracking. Call when a new actor takes an action.
+        /// </summary>
+        public static void ClearLastActor()
+        {
+            lastAnnouncedActor = "";
+            lastAnnouncedAction = "";
+        }
+
         public static void Reset()
         {
             lastMessage = "";
-            lastMessageTime = 0f;
+            lastAnnouncedActor = "";
+            lastAnnouncedAction = "";
+            IsFleeInProgress = false;
         }
     }
 
@@ -58,33 +130,50 @@ namespace FFIV_ScreenReader.Patches
     /// <summary>
     /// Patch ParameterActFunctionManagment.CreateActFunction to announce battle actions.
     /// This is called when any unit (player or enemy) performs an action.
-    /// Announces: "Cecil attacks", "Goblin uses Goblin Punch", etc.
+    /// Announces: "Cecil attacks", "Rosa uses Pray", "Cecil flees", etc.
+    /// Skips result messages (handled by SetCommadnMessage).
     /// </summary>
     [HarmonyPatch(typeof(ParameterActFunctionManagment), nameof(ParameterActFunctionManagment.CreateActFunction))]
     public static class ParameterActFunctionManagment_CreateActFunction_Patch
     {
+        // Known flee/escape command IDs - checked against Command.Id
+        private static readonly HashSet<int> FleeCommandIds = new HashSet<int>();
+        private static bool fleeCommandIdsInitialized = false;
+
         [HarmonyPostfix]
         public static void Postfix(BattleActData battleActData)
         {
             try
             {
-                if (battleActData == null)
+                if (battleActData?.AttackUnitData == null)
                     return;
 
-                // Get attacker name
-                string attackerName = GetActorName(battleActData.AttackUnitData);
+                string attackerName = BattleUnitHelper.GetUnitName(battleActData.AttackUnitData);
                 if (string.IsNullOrWhiteSpace(attackerName))
                     return;
 
-                // Get action name
-                string actionName = GetActionName(battleActData);
-                if (string.IsNullOrWhiteSpace(actionName))
+                // Check if we already announced an action for this actor recently
+                // If so, this is likely a result message (e.g., "Prayer unanswered") - skip it
+                if (GlobalBattleMessageTracker.HasRecentActionForActor(attackerName))
+                {
                     return;
+                }
 
-                // Format message naturally
+                // Check for Flee command specifically
+                bool isFlee = IsFleeCommand(battleActData);
+
+                string actionName = GetActionName(battleActData, isFlee);
+                if (string.IsNullOrWhiteSpace(actionName))
+                    return; // Skip actions with no name
+
                 string message;
-                if (actionName.Equals("Attack", StringComparison.OrdinalIgnoreCase) ||
-                    actionName.Equals("attack", StringComparison.OrdinalIgnoreCase))
+                if (isFlee)
+                {
+                    // Format flee as "Cecil flees." to match "Cecil attacks."
+                    message = $"{attackerName} flees";
+                    GlobalBattleMessageTracker.SetFleeInProgress(true);
+                }
+                else if (actionName.Equals("Attack", StringComparison.OrdinalIgnoreCase))
                 {
                     message = $"{attackerName} attacks";
                 }
@@ -93,12 +182,11 @@ namespace FFIV_ScreenReader.Patches
                     message = $"{attackerName} uses {actionName}";
                 }
 
-                // Use global deduplication
-                if (GlobalBattleMessageTracker.ShouldAnnounce(message))
-                {
-                    MelonLogger.Msg($"[Battle Action] {message}");
-                    FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
-                }
+                // Record this action to prevent duplicates from SetCommadnMessage
+                // and to detect result messages in subsequent CreateActFunction calls
+                GlobalBattleMessageTracker.RecordAction(attackerName, actionName);
+
+                FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
             }
             catch (Exception ex)
             {
@@ -106,51 +194,64 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        private static string GetActorName(BattleUnitData unitData)
+        /// <summary>
+        /// Checks if this action is a Flee/Escape command.
+        /// </summary>
+        private static bool IsFleeCommand(BattleActData actData)
         {
-            if (unitData == null)
-                return null;
+            if (actData?.Command == null)
+                return false;
 
-            // Try player character
-            var playerData = unitData.TryCast<Il2Cpp.BattlePlayerData>();
-            if (playerData?.ownedCharacterData != null)
+            try
             {
-                return playerData.ownedCharacterData.Name;
-            }
-
-            // Try enemy
-            var enemyData = unitData.TryCast<BattleEnemyData>();
-            if (enemyData != null)
-            {
-                try
+                // Check command MesIdName for escape-related IDs
+                string mesIdName = actData.Command.MesIdName;
+                if (!string.IsNullOrEmpty(mesIdName))
                 {
-                    string mesIdName = enemyData.GetMesIdName();
-                    var messageManager = MessageManager.Instance;
-                    if (messageManager != null && !string.IsNullOrEmpty(mesIdName))
+                    // Common escape command message IDs
+                    if (mesIdName.Contains("ESCAPE", StringComparison.OrdinalIgnoreCase) ||
+                        mesIdName.Contains("FLEE", StringComparison.OrdinalIgnoreCase) ||
+                        mesIdName.Contains("RUN", StringComparison.OrdinalIgnoreCase))
                     {
-                        string localizedName = messageManager.GetMessage(mesIdName);
-                        if (!string.IsNullOrEmpty(localizedName))
+                        return true;
+                    }
+                }
+
+                // Also check command name directly
+                var messageManager = MessageManager.Instance;
+                if (messageManager != null && !string.IsNullOrEmpty(mesIdName))
+                {
+                    string commandName = messageManager.GetMessage(mesIdName);
+                    if (!string.IsNullOrEmpty(commandName))
+                    {
+                        if (commandName.Equals("Flee", StringComparison.OrdinalIgnoreCase) ||
+                            commandName.Equals("Escape", StringComparison.OrdinalIgnoreCase) ||
+                            commandName.Equals("Run", StringComparison.OrdinalIgnoreCase))
                         {
-                            return localizedName;
+                            return true;
                         }
                     }
                 }
-                catch { }
             }
+            catch (Exception) { }
 
-            return null;
+            return false;
         }
 
-        private static string GetActionName(BattleActData actData)
+        private static string GetActionName(BattleActData actData, bool isFlee)
         {
             if (actData == null)
                 return null;
+
+            // For flee commands, return "Flee" as the action name
+            if (isFlee)
+                return "Flee";
 
             var messageManager = MessageManager.Instance;
             if (messageManager == null)
                 return null;
 
-            // Check for item first (items have a direct Name property)
+            // Check for item first
             if (actData.itemList != null && actData.itemList.Count > 0)
             {
                 var item = actData.itemList[0];
@@ -162,13 +263,31 @@ namespace FFIV_ScreenReader.Patches
                         if (!string.IsNullOrEmpty(name))
                             return name;
                     }
-                    catch { }
+                    catch (Exception) { }
                 }
             }
 
-            // Get command name (Attack, Magic, Item, etc.)
-            // Note: Ability class doesn't have MesIdName directly,
-            // so we rely on the Command to describe the action type
+            // Check for abilities using ContentUtitlity
+            if (actData.abilityList != null && actData.abilityList.Count > 0)
+            {
+                var ability = actData.abilityList[0];
+                if (ability != null)
+                {
+                    try
+                    {
+                        string abilityName = ContentUtitlity.GetAbilityName(ability);
+                        // Strip icon markup tags like <IC_WMGC>, <IC_SMGC> etc.
+                        abilityName = StripIconMarkup(abilityName);
+                        if (!string.IsNullOrEmpty(abilityName))
+                            return abilityName;
+                        // Ability with empty name - return null to skip
+                        return null;
+                    }
+                    catch (Exception) { }
+                }
+            }
+
+            // Fall back to command name
             var command = actData.Command;
             if (command != null)
             {
@@ -182,7 +301,7 @@ namespace FFIV_ScreenReader.Patches
                             return name;
                     }
                 }
-                catch { }
+                catch (Exception) { }
             }
 
             return null;
@@ -193,7 +312,7 @@ namespace FFIV_ScreenReader.Patches
     public static class ScrollMessageManager_Play_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix(ScrollMessageClient.ScrollType type, string message)
+        public static void Postfix(Il2CppLast.Management.ScrollMessageClient.ScrollType type, string message)
         {
             try
             {
@@ -203,12 +322,81 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 string cleanMessage = message.Trim();
-                MelonLogger.Msg($"[ScrollMessage] {cleanMessage}");
                 FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in ScrollMessageManager.Play patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patch ScrollMessageClient.PlayMessageId to catch battle messages by ID.
+    /// This catches messages like "Back Attack!", "Preemptive Strike!", "The party escaped!" etc.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.Management.ScrollMessageClient), nameof(Il2CppLast.Management.ScrollMessageClient.PlayMessageId))]
+    public static class ScrollMessageClient_PlayMessageId_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.Management.ScrollMessageClient.ScrollType type, string messageId)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(messageId))
+                {
+                    return;
+                }
+
+                // Look up the localized message
+                var messageManager = MessageManager.Instance;
+                if (messageManager != null)
+                {
+                    string message = messageManager.GetMessage(messageId);
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        string cleanMessage = message.Trim();
+                        // Use global deduplication to avoid double announcements with ScrollMessageManager.Play
+                        if (GlobalBattleMessageTracker.ShouldAnnounce(cleanMessage))
+                        {
+                            FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ScrollMessageClient.PlayMessageId patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Patch ScrollMessageClient.PlayMessageValue for direct message display.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.Management.ScrollMessageClient), nameof(Il2CppLast.Management.ScrollMessageClient.PlayMessageValue))]
+    public static class ScrollMessageClient_PlayMessageValue_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.Management.ScrollMessageClient.ScrollType type, string messageValue)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(messageValue))
+                {
+                    return;
+                }
+
+                string cleanMessage = messageValue.Trim();
+                // Use global deduplication to avoid double announcements with ScrollMessageManager.Play
+                if (GlobalBattleMessageTracker.ShouldAnnounce(cleanMessage))
+                {
+                    FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ScrollMessageClient.PlayMessageValue patch: {ex.Message}");
             }
         }
     }
@@ -221,53 +409,17 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                string targetName = "Unknown";
-
-                // Check if this is a BattlePlayerData (player character)
-                var playerData = data.TryCast<Il2Cpp.BattlePlayerData>();
-                if (playerData != null)
-                {
-                    try
-                    {
-                        var ownedCharData = playerData.ownedCharacterData;
-                        if (ownedCharData != null)
-                        {
-                            targetName = ownedCharData.Name;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        MelonLogger.Warning($"Error getting player name: {ex.Message}");
-                    }
-                }
-
-                // Check if this is a BattleEnemyData (enemy)
-                var enemyData = data.TryCast<Il2CppLast.Battle.BattleEnemyData>();
-                if (enemyData != null)
-                {
-                    try
-                    {
-                        string mesIdName = enemyData.GetMesIdName();
-                        var messageManager = Il2CppLast.Management.MessageManager.Instance;
-                        if (messageManager != null && !string.IsNullOrEmpty(mesIdName))
-                        {
-                            string localizedName = messageManager.GetMessage(mesIdName);
-                            if (!string.IsNullOrEmpty(localizedName))
-                            {
-                                targetName = localizedName;
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        MelonLogger.Warning($"Error getting enemy name: {ex.Message}");
-                    }
-                }
+                string targetName = BattleUnitHelper.GetUnitName(data) ?? "Unknown";
 
                 string message;
-                if (hitType == Il2CppLast.Systems.HitType.Miss || value == 0)
+                if (hitType == Il2CppLast.Systems.HitType.Miss)
                 {
                     message = $"{targetName}: Miss";
+                }
+                else if (value == 0)
+                {
+                    // Non-damaging ability (buff/debuff) - don't announce, status effects handle it
+                    return;
                 }
                 else if (hitType == Il2CppLast.Systems.HitType.Recovery)
                 {
@@ -282,7 +434,6 @@ namespace FFIV_ScreenReader.Patches
                     message = $"{targetName}: {value} damage";
                 }
 
-                MelonLogger.Msg($"[Damage] {message}");
                 FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
             }
             catch (Exception ex)
@@ -301,7 +452,6 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 string message = $"{hitCountValue} hits";
-                MelonLogger.Msg($"[Hit Count] {message}");
                 FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
             }
             catch (Exception ex)
@@ -315,7 +465,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.Battle.BattleConditionController), nameof(Il2CppLast.Battle.BattleConditionController.Add))]
     public static class BattleConditionController_Add_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "Battle.ConditionAdd";
 
         [HarmonyPostfix]
         public static void Postfix(BattleUnitData battleUnitData, int id)
@@ -328,29 +478,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Get target name
-                string targetName = "Unknown";
-                var playerData = battleUnitData.TryCast<Il2Cpp.BattlePlayerData>();
-                if (playerData?.ownedCharacterData != null)
-                {
-                    targetName = playerData.ownedCharacterData.Name;
-                }
-                else
-                {
-                    var enemyData = battleUnitData.TryCast<BattleEnemyData>();
-                    if (enemyData != null)
-                    {
-                        string mesIdName = enemyData.GetMesIdName();
-                        var messageManager = MessageManager.Instance;
-                        if (messageManager != null && !string.IsNullOrEmpty(mesIdName))
-                        {
-                            string localizedName = messageManager.GetMessage(mesIdName);
-                            if (!string.IsNullOrEmpty(localizedName))
-                            {
-                                targetName = localizedName;
-                            }
-                        }
-                    }
-                }
+                string targetName = BattleUnitHelper.GetUnitName(battleUnitData) ?? "Unknown";
 
                 // Get condition name from ID - look up from ConfirmedConditionList (includes equipment statuses)
                 string conditionName = null;
@@ -407,13 +535,11 @@ namespace FFIV_ScreenReader.Patches
                 string announcement = $"{targetName}: {conditionName}";
 
                 // Skip duplicates
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Status] {announcement}");
                 FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
             }
             catch (Exception ex)
@@ -423,14 +549,13 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
-    // Patch BattleMenuController from KeyInput namespace - command messages like "Cecil uses Fire"
-    // Also handles Libra/Scan spell results which call this method repeatedly with the same text
+    // Patch BattleMenuController from KeyInput namespace - announces result messages
+    // Skips action names that were already announced by CreateActFunction
+    // Uses simple string equality for deduplication (no time-based logic per Rule 3)
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleMenuController), nameof(Il2CppLast.UI.KeyInput.BattleMenuController.SetCommadnMessage))]
     public static class BattleMenuController_KeyInput_SetCommadnMessage_Patch
     {
         private static string lastMessage = "";
-        private static float lastMessageTime = 0f;
-        private const float MESSAGE_THROTTLE_SECONDS = 2.5f; // Only announce if message changes or 2.5 seconds has passed
 
         [HarmonyPostfix]
         public static void Postfix(string message)
@@ -443,7 +568,6 @@ namespace FFIV_ScreenReader.Patches
                     if (!string.IsNullOrWhiteSpace(lastMessage))
                     {
                         lastMessage = "";
-                        lastMessageTime = 0f;
                     }
                     return;
                 }
@@ -451,21 +575,21 @@ namespace FFIV_ScreenReader.Patches
                 // Create managed string from Il2Cpp string to prevent GC issues
                 string cleanMessage = message.Trim();
 
-                // Get current time
-                float currentTime = UnityEngine.Time.time;
-
-                // Skip if this is the same message within the throttle window
-                // This prevents Libra/Scan results from being announced 40+ times
-                if (cleanMessage == lastMessage && (currentTime - lastMessageTime) < MESSAGE_THROTTLE_SECONDS)
+                // Skip if this message matches the action name just announced by CreateActFunction
+                // This prevents duplicate announcements like "Rosa uses Pray" followed by "Pray"
+                if (GlobalBattleMessageTracker.IsRedundantActionMessage(cleanMessage))
                 {
                     return;
                 }
 
-                // This is either a new message or enough time has passed
-                lastMessage = cleanMessage;
-                lastMessageTime = currentTime;
+                // Skip duplicate messages (simple string equality)
+                if (cleanMessage == lastMessage)
+                {
+                    return;
+                }
 
-                MelonLogger.Msg($"[Battle Command] {cleanMessage}");
+                lastMessage = cleanMessage;
+
                 FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
             }
             catch (Exception ex)
@@ -479,7 +603,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleMenuController), nameof(Il2CppLast.UI.KeyInput.BattleMenuController.SetCommandSelectTarget))]
     public static class BattleMenuController_SetCommandSelectTarget_Patch
     {
-        private static string lastCharacter = "";
+        private const string DEDUP_CONTEXT = "Battle.Turn";
         public static Il2Cpp.BattlePlayerData CurrentActiveCharacter = null;
 
         [HarmonyPostfix]
@@ -487,15 +611,20 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                // Set battle state active (this is called on every turn, so it keeps state fresh)
+                BattleState.SetActive();
+
+                // Clear flee-in-progress flag when a player's turn begins
+                // If flee succeeded, battle would have ended. If we're here, flee failed.
+                GlobalBattleMessageTracker.ClearFleeInProgress();
+
                 // Store the currently active character for health/status readouts
                 CurrentActiveCharacter = targetData;
 
-                // CRITICAL: Reset enemy targeting state when a new turn begins
-                // This ensures enemy names are announced every time, even if the same enemy
-                // was targeted on previous turns
-                BattleTargetSelectController_SelectContent_Enemy_Patch.lastAnnouncedIndex = -1;
-                BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncedIndex = -1;
-                BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncement = "";
+                // CRITICAL: Reset enemy/player targeting state when a new turn begins
+                AnnouncementDeduplicator.Reset(
+                    BattleTargetSelectController_SelectContent_Enemy_Patch.DEDUP_CONTEXT,
+                    BattleTargetSelectController_SelectContent_Player_Patch.DEDUP_CONTEXT);
 
                 if (targetData != null && targetData.ownedCharacterData != null)
                 {
@@ -504,14 +633,12 @@ namespace FFIV_ScreenReader.Patches
                     if (!string.IsNullOrWhiteSpace(characterName))
                     {
                         // Skip duplicate announcements
-                        if (characterName == lastCharacter)
+                        if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, characterName))
                         {
                             return;
                         }
-                        lastCharacter = characterName;
 
                         string message = $"{characterName}'s turn";
-                        MelonLogger.Msg($"[Battle Turn] {message}");
                         FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
                     }
                 }
@@ -528,8 +655,8 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleTargetSelectController), nameof(Il2CppLast.UI.KeyInput.BattleTargetSelectController.SelectContent), new Type[] { typeof(Il2CppSystem.Collections.Generic.IEnumerable<Il2Cpp.BattlePlayerData>), typeof(int) })]
     public static class BattleTargetSelectController_SelectContent_Player_Patch
     {
-        public static int lastAnnouncedIndex = -1;
-        public static string lastAnnouncement = "";
+        public const string DEDUP_CONTEXT = "Battle.Target.Player";
+        public const string DEDUP_CONTEXT_ENEMY = "Battle.Target.Enemy";
 
         [HarmonyPostfix]
         public static void Postfix(Il2CppSystem.Collections.Generic.IEnumerable<Il2Cpp.BattlePlayerData> list, int index)
@@ -557,76 +684,31 @@ namespace FFIV_ScreenReader.Patches
                         string characterName = selectedPlayer.ownedCharacterData.Name;
                         if (!string.IsNullOrEmpty(characterName))
                         {
-                            // Build announcement with HP and MP information
+                            // Build announcement with HP, MP, and status conditions using helper
                             string announcement = characterName;
 
-                            // Try to get HP and MP from BattleUnitDataInfo
                             try
                             {
                                 var unitDataInfo = selectedPlayer.BattleUnitDataInfo;
                                 if (unitDataInfo != null && unitDataInfo.Parameter != null)
                                 {
-                                    int currentHP = unitDataInfo.Parameter.CurrentHP;
-                                    int maxHP = unitDataInfo.Parameter.ConfirmedMaxHp();
-                                    int currentMP = unitDataInfo.Parameter.CurrentMP;
-                                    int maxMP = unitDataInfo.Parameter.ConfirmedMaxMp();
-
-                                    announcement += $", HP {currentHP}/{maxHP}, MP {currentMP}/{maxMP}";
-
-                                    // Get status conditions
-                                    var conditionList = unitDataInfo.Parameter.ConfirmedConditionList();
-                                    if (conditionList != null && conditionList.Count > 0)
-                                    {
-                                        var messageManager = MessageManager.Instance;
-                                        if (messageManager != null)
-                                        {
-                                            var statusNames = new System.Collections.Generic.List<string>();
-
-                                            foreach (var condition in conditionList)
-                                            {
-                                                if (condition != null)
-                                                {
-                                                    string conditionMesId = condition.MesIdName;
-
-                                                    // Skip conditions with no message ID (internal/hidden statuses)
-                                                    if (!string.IsNullOrEmpty(conditionMesId) && conditionMesId != "None")
-                                                    {
-                                                        string localizedConditionName = messageManager.GetMessage(conditionMesId);
-                                                        if (!string.IsNullOrEmpty(localizedConditionName))
-                                                        {
-                                                            statusNames.Add(localizedConditionName);
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            if (statusNames.Count > 0)
-                                            {
-                                                announcement += $", {string.Join(", ", statusNames)}";
-                                            }
-                                        }
-                                    }
+                                    announcement += CharacterStatusHelper.GetFullStatus(unitDataInfo.Parameter);
                                 }
                             }
                             catch (Exception ex)
                             {
                                 MelonLogger.Warning($"Error reading HP/MP for {characterName}: {ex.Message}");
-                                // Continue with just the name if stats can't be read
                             }
 
                             // Skip duplicate announcements (same index AND same announcement)
-                            if (index == lastAnnouncedIndex && announcement == lastAnnouncement)
+                            if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, index, announcement))
                             {
                                 return;
                             }
-                            lastAnnouncedIndex = index;
-                            lastAnnouncement = announcement;
 
                             // Reset enemy targeting tracking when player is selected
-                            // This ensures switching between enemy/player targets announces correctly
-                            BattleTargetSelectController_SelectContent_Enemy_Patch.lastAnnouncedIndex = -1;
+                            AnnouncementDeduplicator.Reset(DEDUP_CONTEXT_ENEMY);
 
-                            MelonLogger.Msg($"[Player Target] {announcement}");
                             FFIV_ScreenReaderMod.SpeakText(announcement);
                         }
                     }
@@ -649,10 +731,9 @@ namespace FFIV_ScreenReader.Patches
             if (isActive)
             {
                 // Reset tracking when cursor becomes active so first selection is always announced
-                // This provides defense-in-depth along with the reset in SetCommandSelectTarget
-                BattleTargetSelectController_SelectContent_Enemy_Patch.lastAnnouncedIndex = -1;
-                BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncedIndex = -1;
-                BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncement = "";
+                AnnouncementDeduplicator.Reset(
+                    BattleTargetSelectController_SelectContent_Player_Patch.DEDUP_CONTEXT,
+                    BattleTargetSelectController_SelectContent_Enemy_Patch.DEDUP_CONTEXT);
             }
         }
     }
@@ -661,7 +742,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleTargetSelectController), nameof(Il2CppLast.UI.KeyInput.BattleTargetSelectController.SelectContent), new Type[] { typeof(Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.Battle.BattleEnemyData>), typeof(int) })]
     public static class BattleTargetSelectController_SelectContent_Enemy_Patch
     {
-        public static int lastAnnouncedIndex = -1;
+        public const string DEDUP_CONTEXT = "Battle.Target.Enemy";
 
         [HarmonyPostfix]
         public static void Postfix(Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.Battle.BattleEnemyData> list, int index)
@@ -682,18 +763,13 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements based on index only
-                // This prevents re-announcing when SelectContent is called multiple times for the same selection
-                // but allows re-announcement when navigating back to the same enemy after selecting a different one
-                if (index == lastAnnouncedIndex)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, index))
                 {
                     return;
                 }
-                lastAnnouncedIndex = index;
 
                 // Reset player targeting tracking when enemy is selected
-                // This ensures switching between enemy/player targets announces correctly
-                BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncedIndex = -1;
-                BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncement = "";
+                AnnouncementDeduplicator.Reset(BattleTargetSelectController_SelectContent_Player_Patch.DEDUP_CONTEXT);
 
                 // Get the enemy at the specified index
                 if (index >= 0 && index < enemyList.Count)
@@ -757,13 +833,11 @@ namespace FFIV_ScreenReader.Patches
                                             announcement += $", HP {currentHP}/{maxHP}";
                                         }
                                     }
-                                    catch (Exception hpEx)
+                                    catch
                                     {
-                                        MelonLogger.Warning($"Error reading HP for {localizedName}: {hpEx.Message}");
                                         // Continue with just the name if HP can't be read
                                     }
 
-                                    MelonLogger.Msg($"[Enemy Target] {announcement}");
                                     FFIV_ScreenReaderMod.SpeakText(announcement);
                                 }
                             }

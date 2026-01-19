@@ -176,7 +176,7 @@ namespace FFIV_ScreenReader.Patches
 
         /// <summary>
         /// Record a FadeMessage and mark that we're in a map transition.
-        /// Called from FadeMessageManager_Play_Patch before announcing.
+        /// Called from FadeMessageManager_Play_Patch and CheckMapTransition before announcing.
         /// </summary>
         public static void SetLastFadeMessage(string message)
         {
@@ -197,7 +197,7 @@ namespace FFIV_ScreenReader.Patches
 
             string trimmed = message.Trim();
 
-            // If we're in a map transition (FadeMessage fired)
+            // If we're in a map transition (FadeMessage or CheckMapTransition fired)
             if (inMapTransition && !string.IsNullOrEmpty(lastFadeMessage))
             {
                 // Skip if this message is contained in the FadeMessage
@@ -369,7 +369,6 @@ namespace FFIV_ScreenReader.Patches
                 // E.g., "Entering Mysidia" recorded so "Mysidia" can be skipped
                 LocationMessageTracker.SetLastFadeMessage(cleanMessage);
 
-                MelonLogger.Msg($"[FadeMessage] {cleanMessage}");
                 FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
             }
             catch (Exception ex)
@@ -408,7 +407,6 @@ namespace FFIV_ScreenReader.Patches
                 string fullText = sb.ToString().Trim();
                 if (!string.IsNullOrWhiteSpace(fullText))
                 {
-                    MelonLogger.Msg($"[LineFadeMessage] {fullText}");
                     FFIV_ScreenReaderMod.SpeakText(fullText, interrupt: false);
                 }
             }
@@ -445,17 +443,14 @@ namespace FFIV_ScreenReader.Patches
                         // Check for duplicate location announcement
                         if (!LocationMessageTracker.ShouldAnnounceSystemMessage(message))
                         {
-                            MelonLogger.Msg($"[SystemMessage - Deduplicated] {message}");
                             return;
                         }
 
-                        MelonLogger.Msg($"[SystemMessage] {message}");
                         FFIV_ScreenReaderMod.SpeakText(message, interrupt: true);
                     }
                 }
                 else
                 {
-                    MelonLogger.Msg($"[SystemMessage ID] {messageId}");
                     FFIV_ScreenReaderMod.SpeakText(messageId, interrupt: true);
                 }
             }
@@ -496,7 +491,6 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 string choicesText = sb.ToString();
-                MelonLogger.Msg($"[MessageChoice] {choicesText}");
                 FFIV_ScreenReaderMod.SpeakText(choicesText, interrupt: true);
             }
             catch (Exception ex)
@@ -556,7 +550,6 @@ namespace FFIV_ScreenReader.Patches
                     string message = messageManager.GetMessage(messageId);
                     if (!string.IsNullOrWhiteSpace(message))
                     {
-                        MelonLogger.Msg($"[EventTalk] {message}");
                         FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
                     }
                 }

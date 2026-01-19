@@ -10,6 +10,9 @@ using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Menus;
 using GameCursor = Il2CppLast.UI.Cursor;
 
+// Import MenuState classes
+using PartyMenuState = FFIV_ScreenReader.Core.PartyMenuState;
+
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
@@ -21,7 +24,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(PartySettingMenuBaseController), nameof(PartySettingMenuBaseController.SelectContent))]
     public static class PartySettingMenuBaseController_SelectContent_Patch
     {
-        private static string lastAnnouncedText = "";
+        private const string DEDUP_CONTEXT = "PartySetting.Select";
         private static PartySettingMenuBaseController.State lastState = PartySettingMenuBaseController.State.None;
 
         [HarmonyPostfix]
@@ -37,6 +40,9 @@ namespace FFIV_ScreenReader.Patches
 
                 // Check for state transitions and announce them
                 CheckAndAnnounceStateTransition(__instance);
+
+                // Set party menu state active
+                PartyMenuState.SetActive();
 
                 // Check which section we're in
                 bool isCharacterList = IsNavigatingCharacterList(__instance, index);
@@ -116,26 +122,9 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                // Get the members list
-                var members = __instance.members;
-                if (members == null || members.Count == 0)
-                {
-                    return;
-                }
-
-                // Validate index
-                if (index < 0 || index >= members.Count)
-                {
-                    return;
-                }
-
-                // Get the character data at this index
-                var characterData = members[index];
+                var characterData = SelectContentHelper.TryGetItem(__instance.members, index);
                 if (characterData == null)
-                {
-                    MelonLogger.Warning($"PartySettingMenuBaseController: character at index {index} is null");
                     return;
-                }
 
                 // Build announcement string
                 var announcement = BuildCharacterAnnouncement(__instance, characterData, index);
@@ -147,11 +136,10 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements
-                if (announcement == lastAnnouncedText)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncedText = announcement;
 
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
@@ -201,11 +189,10 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicate announcements
-                if (announcement == lastAnnouncedText)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncedText = announcement;
 
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }

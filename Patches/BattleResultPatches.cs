@@ -28,6 +28,9 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                // Battle is ending - clear battle state
+                BattleState.Reset();
+
                 if (data == null || isReverse)
                 {
                     return;
@@ -166,13 +169,11 @@ namespace FFIV_ScreenReader.Patches
             // Skip duplicate
             if (data == lastBattleData && announcement == lastAnnouncement)
             {
-                MelonLogger.Msg($"[Battle Results] Skipping duplicate announcement from {source} (same battle)");
                 return;
             }
 
             lastBattleData = data;
             lastAnnouncement = announcement;
-            MelonLogger.Msg($"[Battle Results {source}] {announcement}");
             FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
         }
 

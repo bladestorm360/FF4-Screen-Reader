@@ -6,14 +6,17 @@ using System.Collections;
 using MelonLoader;
 using System;
 
+// Import MenuState classes
+using ShopState = FFIV_ScreenReader.Core.ShopState;
+
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
-    /// Tracks shop menu state to prevent 'I' key from working outside shop menus
+    /// Tracks shop menu data for 'I' key item description support.
+    /// State is delegated to ShopState.IsActive - no separate boolean.
     /// </summary>
     public static class ShopMenuTracker
     {
-        public static bool IsShopMenuActive { get; set; }
         public static ShopInfoController ActiveInfoController { get; set; }
         public static string LastItemDescription { get; set; }
         public static string LastItemMpCost { get; set; }
@@ -26,7 +29,7 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         public static bool ValidateState()
         {
-            if (IsShopMenuActive && ActiveInfoController != null)
+            if (ShopState.IsActive && ActiveInfoController != null)
             {
                 if (ActiveInfoController.gameObject == null ||
                     !ActiveInfoController.gameObject.activeInHierarchy)
@@ -36,12 +39,11 @@ namespace FFIV_ScreenReader.Patches
                     return false;
                 }
             }
-            return IsShopMenuActive;
+            return ShopState.IsActive;
         }
 
         public static void Reset()
         {
-            IsShopMenuActive = false;
             ActiveInfoController = null;
             LastItemDescription = null;
             LastItemMpCost = null;
@@ -75,12 +77,7 @@ namespace FFIV_ScreenReader.Patches
 
                 if (!string.IsNullOrEmpty(announcement))
                 {
-                    MelonLogger.Msg($"[Shop Details - I Key] {announcement}");
                     FFIV_ScreenReaderMod.SpeakText(announcement);
-                }
-                else
-                {
-                    MelonLogger.Msg("[Shop Details - I Key] No description available");
                 }
             }
             catch (Exception ex)
@@ -102,10 +99,11 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch]
     public static class ShopPatches
     {
-        private static string lastAnnouncedItem = "";
+        private const string DEDUP_CONTEXT = "Shop.Item";
 
         /// <summary>
         /// Announces shop command menu options (Buy, Sell, Equipment, Back).
+        /// Also restores ShopState when returning from Equipment submenu.
         /// </summary>
         [HarmonyPatch(typeof(ShopCommandMenuController), nameof(ShopCommandMenuController.SetCursor))]
         [HarmonyPostfix]
@@ -113,6 +111,15 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                // Restore ShopState if returning from Equipment submenu
+                // Skip announcement because generic cursor already read it (ShopState was inactive)
+                if (ShopState.EnteredEquipmentSubmenu)
+                {
+                    ShopState.EnteredEquipmentSubmenu = false;
+                    ShopState.SetActive();
+                    return; // Generic cursor already announced, don't duplicate
+                }
+
                 if (__instance?.contentList == null || index < 0 || index >= __instance.contentList.Count)
                     return;
 
@@ -143,9 +150,19 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                // Empty description means returning to command menu - don't announce stale item data
+                if (string.IsNullOrEmpty(value))
+                {
+                    // Also reset dedup so next submenu entry announces first item
+                    AnnouncementDeduplicator.Reset(DEDUP_CONTEXT);
+                    return;
+                }
+
+                // Set shop state active first (handles ClearOtherMenuStates)
+                ShopState.SetActive();
+
                 // Store the controller and description for 'I' key access
                 ShopMenuTracker.ActiveInfoController = __instance;
-                ShopMenuTracker.IsShopMenuActive = true;
                 ShopMenuTracker.LastItemDescription = value;
 
                 // Also get MP cost if available
@@ -195,17 +212,10 @@ namespace FFIV_ScreenReader.Patches
                     string announcement = string.IsNullOrEmpty(price) ? itemName : $"{itemName}, {price}";
 
                     // Deduplicate by content
-                    if (itemName != lastAnnouncedItem)
+                    if (AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, itemName))
                     {
-                        lastAnnouncedItem = itemName;
-                        MelonLogger.Msg($"[Shop Item] {announcement}");
                         CoroutineManager.StartManaged(DelayedAnnounceShopItem(announcement));
                     }
-                }
-                else
-                {
-                    // Fallback: just log description was stored
-                    MelonLogger.Msg($"[Shop Description Stored] {value}");
                 }
             }
             catch (Exception ex)
@@ -260,21 +270,18 @@ namespace FFIV_ScreenReader.Patches
         private static IEnumerator DelayedAnnounceShopCommand(string commandText)
         {
             yield return null; // Wait one frame for UI to update
-            MelonLogger.Msg($"[Shop Command] {commandText}");
             FFIV_ScreenReaderMod.SpeakText($"{commandText}");
         }
 
         private static IEnumerator DelayedAnnounceShopItem(string itemText)
         {
             yield return null; // Wait one frame for UI to update
-            MelonLogger.Msg($"[Shop Item] {itemText}");
             FFIV_ScreenReaderMod.SpeakText($"{itemText}");
         }
 
         private static IEnumerator DelayedAnnounceQuantity(string quantityText)
         {
             yield return null; // Wait one frame for UI to update
-            MelonLogger.Msg($"[Shop Quantity] {quantityText}");
             FFIV_ScreenReaderMod.SpeakText($"{quantityText}");
         }
     }

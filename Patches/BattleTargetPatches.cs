@@ -5,6 +5,7 @@ using Il2CppLast.Battle;
 using Il2CppLast.Management;
 using Il2CppLast.UI.KeyInput;
 using FFIV_ScreenReader.Core;
+using FFIV_ScreenReader.Utils;
 using BattlePlayerData = Il2Cpp.BattlePlayerData;
 
 namespace FFIV_ScreenReader.Patches
@@ -40,7 +41,6 @@ namespace FFIV_ScreenReader.Patches
         public static void SetTargetSelectionActive(bool active)
         {
             IsTargetSelectionActive = active;
-            MelonLogger.Msg($"[Battle Target] Target selection active: {active}");
         }
 
         /// <summary>
@@ -53,10 +53,8 @@ namespace FFIV_ScreenReader.Patches
             lastWasAllEnemies = false;
 
             // Reset individual target tracking
-            BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncedIndex = -1;
-            BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncement = "";
+            AnnouncementDeduplicator.Reset(BattleTargetSelectController_SelectContent_Player_Patch.DEDUP_CONTEXT);
 
-            MelonLogger.Msg("[Battle Target] All allies");
             FFIV_ScreenReaderMod.SpeakText("All allies");
         }
 
@@ -70,9 +68,8 @@ namespace FFIV_ScreenReader.Patches
             lastWasAllPlayers = false;
 
             // Reset individual target tracking
-            BattleTargetSelectController_SelectContent_Enemy_Patch.lastAnnouncedIndex = -1;
+            AnnouncementDeduplicator.Reset(BattleTargetSelectController_SelectContent_Enemy_Patch.DEDUP_CONTEXT);
 
-            MelonLogger.Msg("[Battle Target] All enemies");
             FFIV_ScreenReaderMod.SpeakText("All enemies");
         }
     }
@@ -88,16 +85,15 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg($"[Battle Target] ShowWindow({isShow})");
                 BattleTargetPatches.SetTargetSelectionActive(isShow);
                 BattleTargetPatches.ResetState();
 
                 // Reset individual target tracking when window state changes
                 if (isShow)
                 {
-                    BattleTargetSelectController_SelectContent_Enemy_Patch.lastAnnouncedIndex = -1;
-                    BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncedIndex = -1;
-                    BattleTargetSelectController_SelectContent_Player_Patch.lastAnnouncement = "";
+                    AnnouncementDeduplicator.Reset(
+                        BattleTargetSelectController_SelectContent_Enemy_Patch.DEDUP_CONTEXT,
+                        BattleTargetSelectController_SelectContent_Player_Patch.DEDUP_CONTEXT);
                 }
             }
             catch (Exception ex)
@@ -118,7 +114,6 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg("[Battle Target] PlayerAllInit called");
                 BattleTargetPatches.AnnounceAllPlayers();
             }
             catch (Exception ex)
@@ -139,7 +134,6 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg("[Battle Target] EnemyAllInit called");
                 BattleTargetPatches.AnnounceAllEnemies();
             }
             catch (Exception ex)

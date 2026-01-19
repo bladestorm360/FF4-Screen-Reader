@@ -23,7 +23,6 @@ namespace FFIV_ScreenReader.Utils
             {
                 if (activeCoroutines.Count > 0)
                 {
-                    MelonLogger.Msg($"Cleaning up {activeCoroutines.Count} active coroutines");
                     foreach (var coroutine in activeCoroutines)
                     {
                         try
@@ -32,7 +31,7 @@ namespace FFIV_ScreenReader.Utils
                         }
                         catch (Exception ex)
                         {
-                            MelonLogger.Error($"Error stopping coroutine: {ex.Message}");
+                            MelonLogger.Warning($"Error stopping coroutine: {ex.Message}");
                         }
                     }
                     activeCoroutines.Clear();
@@ -53,7 +52,6 @@ namespace FFIV_ScreenReader.Utils
                 // If we're at the limit, remove the oldest one from tracking
                 if (activeCoroutines.Count >= maxConcurrentCoroutines)
                 {
-                    MelonLogger.Msg("Too many active coroutines, removing oldest from tracking");
                     activeCoroutines.RemoveAt(0);
                 }
 
@@ -62,11 +60,10 @@ namespace FFIV_ScreenReader.Utils
                 {
                     MelonCoroutines.Start(coroutine);
                     activeCoroutines.Add(coroutine);
-                    MelonLogger.Msg($"Started coroutine. Active count: {activeCoroutines.Count}");
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Error($"Error starting managed coroutine: {ex.Message}");
+                    MelonLogger.Warning($"Error starting managed coroutine: {ex.Message}");
                 }
             }
         }

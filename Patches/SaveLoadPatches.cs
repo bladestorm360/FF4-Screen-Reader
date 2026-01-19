@@ -81,7 +81,11 @@ namespace FFIV_ScreenReader.Patches
                 // Patch SaveListController.SelectContent for slot navigation
                 TryPatchSaveListSelectContent(harmony);
 
-                MelonLogger.Msg("[SaveLoad] All save/load patches applied successfully");
+                // Patch SetActive(bool) on window controllers to clear state when windows close
+                TryPatchTitleLoadSetActive(harmony);
+                TryPatchMainMenuLoadSetActive(harmony);
+                TryPatchMainMenuSaveSetActive(harmony);
+
             }
             catch (Exception ex)
             {
@@ -104,7 +108,6 @@ namespace FFIV_ScreenReader.Patches
                     var postfix = typeof(SaveLoadPatches).GetMethod(nameof(SaveListSelectContent_Postfix),
                         BindingFlags.Public | BindingFlags.Static);
                     harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[SaveLoad] Patched SaveListController.SelectContent");
                 }
                 else
                 {
@@ -132,7 +135,6 @@ namespace FFIV_ScreenReader.Patches
                     var postfix = typeof(SaveLoadPatches).GetMethod(nameof(TitleLoadSetPopupActive_Postfix),
                         BindingFlags.Public | BindingFlags.Static);
                     harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[SaveLoad] Patched TitleLoadController.SetPopupActive");
                 }
                 else
                 {
@@ -160,7 +162,6 @@ namespace FFIV_ScreenReader.Patches
                     var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuLoadSetPopupActive_Postfix),
                         BindingFlags.Public | BindingFlags.Static);
                     harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[SaveLoad] Patched MainMenuLoadController.SetPopupActive");
                 }
                 else
                 {
@@ -188,7 +189,6 @@ namespace FFIV_ScreenReader.Patches
                     var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuSaveSetPopupActive_Postfix),
                         BindingFlags.Public | BindingFlags.Static);
                     harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[SaveLoad] Patched MainMenuSaveController.SetPopupActive");
                 }
                 else
                 {
@@ -216,7 +216,6 @@ namespace FFIV_ScreenReader.Patches
                     var postfix = typeof(SaveLoadPatches).GetMethod(nameof(InterruptionSetEnablePopup_Postfix),
                         BindingFlags.Public | BindingFlags.Static);
                     harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[SaveLoad] Patched InterruptionController.SetEnablePopup (QuickSave)");
                 }
                 else
                 {
@@ -226,6 +225,87 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[SaveLoad] Failed to patch InterruptionController: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Patches LoadGameWindowController.SetActive (title screen load) to clear state when window closes.
+        /// </summary>
+        private static void TryPatchTitleLoadSetActive(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(TitleLoadController);
+                var method = AccessTools.Method(controllerType, "SetActive", new Type[] { typeof(bool) });
+
+                if (method != null)
+                {
+                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(TitleLoadSetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+                else
+                {
+                    MelonLogger.Warning("[SaveLoad] TitleLoadController.SetActive not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Failed to patch TitleLoadController.SetActive: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Patches LoadWindowController.SetActive (main menu load) to clear state when window closes.
+        /// </summary>
+        private static void TryPatchMainMenuLoadSetActive(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(MainMenuLoadController);
+                var method = AccessTools.Method(controllerType, "SetActive", new Type[] { typeof(bool) });
+
+                if (method != null)
+                {
+                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuLoadSetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+                else
+                {
+                    MelonLogger.Warning("[SaveLoad] MainMenuLoadController.SetActive not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Failed to patch MainMenuLoadController.SetActive: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Patches SaveWindowController.SetActive (main menu save) to clear state when window closes.
+        /// </summary>
+        private static void TryPatchMainMenuSaveSetActive(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(MainMenuSaveController);
+                var method = AccessTools.Method(controllerType, "SetActive", new Type[] { typeof(bool) });
+
+                if (method != null)
+                {
+                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuSaveSetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+                else
+                {
+                    MelonLogger.Warning("[SaveLoad] MainMenuSaveController.SetActive not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Failed to patch MainMenuSaveController.SetActive: {ex.Message}");
             }
         }
 
@@ -267,22 +347,20 @@ namespace FFIV_ScreenReader.Patches
                 var gameObject = controller.gameObject;
                 if (gameObject == null || !gameObject.activeInHierarchy)
                 {
-                    MelonLogger.Msg("[SaveLoad] SaveListController not active in hierarchy, skipping announcement");
                     return;
                 }
 
                 // Check if the cursor is visible (indicates user is actually navigating)
                 if (targetCursor.gameObject == null || !targetCursor.gameObject.activeInHierarchy)
                 {
-                    MelonLogger.Msg("[SaveLoad] Cursor not active in hierarchy, skipping announcement");
                     return;
                 }
 
                 // Mark that we're in the save/load menu (suppresses MenuTextDiscovery)
+                MenuState.ClearOtherMenuStates("SaveLoad");
                 SaveLoadMenuState.IsActive = true;
 
                 int index = targetCursor.Index;
-                MelonLogger.Msg($"[SaveLoad] SaveListController.SelectContent called, cursor index={index}");
 
                 // Start coroutine to read slot after UI updates
                 CoroutineManager.StartManaged(ReadSaveSlotDelayed(controller.Pointer, index));
@@ -301,7 +379,6 @@ namespace FFIV_ScreenReader.Patches
         {
             if (SaveLoadMenuState.IsActive)
             {
-                MelonLogger.Msg("[SaveLoad] Clearing save/load menu state");
                 SaveLoadMenuState.IsActive = false;
                 SaveLoadMenuState.IsInConfirmation = false;
             }
@@ -319,7 +396,6 @@ namespace FFIV_ScreenReader.Patches
                 string slotInfo = ReadSaveSlotInfo(controllerPtr, index);
                 if (!string.IsNullOrEmpty(slotInfo))
                 {
-                    MelonLogger.Msg($"[SaveLoad] Slot {index}: {slotInfo}");
                     FFIV_ScreenReaderMod.SpeakText(slotInfo, interrupt: true);
                 }
             }
@@ -343,7 +419,6 @@ namespace FFIV_ScreenReader.Patches
                     IntPtr contentListPtr = *(IntPtr*)((byte*)controllerPtr.ToPointer() + SAVE_LIST_CONTENT_LIST);
                     if (contentListPtr == IntPtr.Zero)
                     {
-                        MelonLogger.Warning("[SaveLoad] contentList is null");
                         return null;
                     }
 
@@ -351,7 +426,6 @@ namespace FFIV_ScreenReader.Patches
                     int size = *(int*)((byte*)contentListPtr.ToPointer() + 0x18);
                     if (index < 0 || index >= size)
                     {
-                        MelonLogger.Warning($"[SaveLoad] Index {index} out of bounds (size={size})");
                         return null;
                     }
 
@@ -366,7 +440,6 @@ namespace FFIV_ScreenReader.Patches
                     IntPtr viewPtr = *(IntPtr*)((byte*)contentControllerPtr.ToPointer() + SAVE_CONTENT_CONTROLLER_VIEW);
                     if (viewPtr == IntPtr.Zero)
                     {
-                        MelonLogger.Warning("[SaveLoad] SaveContentView is null");
                         return null;
                     }
 
@@ -501,8 +574,6 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg($"[SaveLoad] TitleLoad.SetPopupActive called with isEnable={isEnable}");
-
                 if (isEnable)
                 {
                     var controller = __instance as TitleLoadController;
@@ -526,8 +597,6 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg($"[SaveLoad] MainMenuLoad.SetPopupActive called with isEnable={isEnable}");
-
                 if (isEnable)
                 {
                     var controller = __instance as MainMenuLoadController;
@@ -551,8 +620,6 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg($"[SaveLoad] MainMenuSave.SetPopupActive called with isEnable={isEnable}");
-
                 if (isEnable)
                 {
                     var controller = __instance as MainMenuSaveController;
@@ -576,8 +643,6 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg($"[SaveLoad] Interruption.SetEnablePopup called with isEnable={isEnable}");
-
                 if (isEnable)
                 {
                     var controller = __instance as InterruptionController;
@@ -598,6 +663,60 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
+        /// Postfix for LoadGameWindowController.SetActive - clears state when window is deactivated.
+        /// </summary>
+        public static void TitleLoadSetActive_Postfix(bool isActive)
+        {
+            try
+            {
+                if (!isActive && SaveLoadMenuState.IsActive)
+                {
+                    SaveLoadMenuState.ResetState();
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Error in TitleLoadSetActive_Postfix: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Postfix for LoadWindowController.SetActive - clears state when window is deactivated.
+        /// </summary>
+        public static void MainMenuLoadSetActive_Postfix(bool isActive)
+        {
+            try
+            {
+                if (!isActive && SaveLoadMenuState.IsActive)
+                {
+                    SaveLoadMenuState.ResetState();
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Error in MainMenuLoadSetActive_Postfix: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Postfix for SaveWindowController.SetActive - clears state when window is deactivated.
+        /// </summary>
+        public static void MainMenuSaveSetActive_Postfix(bool isActive)
+        {
+            try
+            {
+                if (!isActive && SaveLoadMenuState.IsActive)
+                {
+                    SaveLoadMenuState.ResetState();
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Error in MainMenuSaveSetActive_Postfix: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Starts a coroutine to read SavePopup message after a short delay.
         /// The delay allows the UI to populate the text before we read it.
         /// </summary>
@@ -605,7 +724,6 @@ namespace FFIV_ScreenReader.Patches
         {
             if (controllerPtr == IntPtr.Zero)
             {
-                MelonLogger.Warning($"[SaveLoad] {context}: Controller pointer is null");
                 return;
             }
 
@@ -617,11 +735,8 @@ namespace FFIV_ScreenReader.Patches
                     IntPtr popupPtr = *(IntPtr*)((byte*)controllerPtr.ToPointer() + savePopupOffset);
                     if (popupPtr == IntPtr.Zero)
                     {
-                        MelonLogger.Warning($"[SaveLoad] {context}: SavePopup pointer is null");
                         return;
                     }
-
-                    MelonLogger.Msg($"[SaveLoad] {context}: SavePopup at 0x{popupPtr.ToInt64():X}");
 
                     // Set state for button navigation immediately
                     SaveLoadMenuState.IsActive = true;
@@ -664,12 +779,10 @@ namespace FFIV_ScreenReader.Patches
                     IntPtr messageTextPtr = *(IntPtr*)((byte*)popupPtr.ToPointer() + SAVE_POPUP_MESSAGE_TEXT_OFFSET);
                     if (messageTextPtr == IntPtr.Zero)
                     {
-                        MelonLogger.Warning($"[SaveLoad] {context}: messageText pointer is null");
                         // Still try to announce title if we have it
                         if (!string.IsNullOrWhiteSpace(title))
                         {
                             title = StripRichTextTags(title);
-                            MelonLogger.Msg($"[SaveLoad] {context} (title only): {title}");
                             FFIV_ScreenReaderMod.SpeakText(title);
                         }
                         yield break;
@@ -695,12 +808,7 @@ namespace FFIV_ScreenReader.Patches
                             announcement = message;
                         }
 
-                        MelonLogger.Msg($"[SaveLoad] {context}: {announcement}");
                         FFIV_ScreenReaderMod.SpeakText(announcement);
-                    }
-                    else
-                    {
-                        MelonLogger.Warning($"[SaveLoad] {context}: Message is empty");
                     }
                 }
             }
@@ -727,7 +835,6 @@ namespace FFIV_ScreenReader.Patches
         {
             SaveLoadMenuState.ResetState();
             PopupState.Clear();
-            MelonLogger.Msg("[SaveLoad] Popup closed, state cleared");
         }
     }
 }

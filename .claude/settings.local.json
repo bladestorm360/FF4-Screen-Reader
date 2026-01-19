@@ -25,7 +25,8 @@
       "Bash(cmd /c dir \"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy IV pr\\\\MelonLoader\\\\logs\")",
       "Bash(cmd /c \"dir \"\"d:\\\\games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy IV pr\\\\MelonLoader\\\\Logs\"\"\")",
       "Bash(find:*)",
-      "Bash(powershell -Command \"& cmd /c ''D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\ff5\\\\ff5-screen-reader\\\\build_and_deploy.bat''\")"
+      "Bash(powershell -Command \"& cmd /c ''D:\\\\Games\\\\Dev\\\\Unity\\\\FFPR\\\\ff5\\\\ff5-screen-reader\\\\build_and_deploy.bat''\")",
+      "Bash(powershell -Command \"Select-String -Path ''D:\\\\Games\\\\steamlibrary\\\\steamapps\\\\common\\\\final fantasy iv pr\\\\MelonLoader\\\\Logs\\\\26-1-18_12-53-23.log'' -Pattern ''ItemDetails'' | Select-Object -Last 50\")"
     ],
     "additionalDirectories": [
       "d:\\games\\dev\\unity\\ffpr\\ff4",

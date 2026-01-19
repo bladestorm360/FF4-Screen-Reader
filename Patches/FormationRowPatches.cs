@@ -23,39 +23,25 @@ namespace FFIV_ScreenReader.Patches
                 // Get the current character index from the cursor
                 var cursor = __instance.selectCursor;
                 if (cursor == null)
-                {
-                    MelonLogger.Warning("selectCursor is null");
                     return;
-                }
 
                 int index = cursor.Index;
-                MelonLogger.Msg($"=== SwitchCorps called for index {index} ===");
 
                 // Get the current corps list to determine current state
                 var userDataManager = UserDataManager.Instance();
                 if (userDataManager == null)
-                {
-                    MelonLogger.Warning("UserDataManager is null");
                     return;
-                }
 
                 var corpsList = userDataManager.GetCorpsListClone();
                 if (corpsList == null || index < 0 || index >= corpsList.Count)
-                {
-                    MelonLogger.Warning($"Invalid corps list or index: index={index}, list count={corpsList?.Count ?? 0}");
                     return;
-                }
 
                 var corps = corpsList[index];
                 if (corps == null)
-                {
-                    MelonLogger.Warning($"Corps at index {index} is null");
                     return;
-                }
 
                 // Get current corps ID (Front or Back)
                 CorpsId currentId = corps.Id;
-                MelonLogger.Msg($"Current corps ID: {currentId}");
 
                 // Determine what it's switching TO (opposite of current)
                 // CorpsId.Front = 1, CorpsId.Back = 2
@@ -71,10 +57,7 @@ namespace FFIV_ScreenReader.Patches
                 else
                 {
                     newRow = $"Unknown Row Type {currentId}";
-                    MelonLogger.Warning($"Unexpected corps ID: {currentId}");
                 }
-
-                MelonLogger.Msg($"Switching to: {newRow}");
 
                 // Announce the new row state
                 FFIV_ScreenReaderMod.SpeakText(newRow);

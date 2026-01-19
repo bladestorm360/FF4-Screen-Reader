@@ -5,6 +5,9 @@ using Il2CppLast.Defaine;
 using Il2CppLast.UI.KeyInput;
 using FFIV_ScreenReader.Core;
 
+// Import MenuState classes
+using TitleMenuState = FFIV_ScreenReader.Core.TitleMenuState;
+
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
@@ -72,7 +75,9 @@ namespace FFIV_ScreenReader.Patches
                 }
                 lastAnnouncedCommand = commandId;
 
-                MelonLogger.Msg($"[Title Menu] {commandName}");
+                // Set title menu state active
+                TitleMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
             catch (Exception ex)

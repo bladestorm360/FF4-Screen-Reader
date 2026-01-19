@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using HarmonyLib;
 using MelonLoader;
 using Il2CppLast.UI.KeyInput;
@@ -6,36 +7,280 @@ using Il2CppLast.UI;
 using Il2CppLast.Defaine;
 using Il2CppLast.Management;
 using FFIV_ScreenReader.Core;
+using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
+
+// Import MenuState classes
+using ItemMenuState = FFIV_ScreenReader.Core.ItemMenuState;
+using EquipmentMenuState = FFIV_ScreenReader.Core.EquipmentMenuState;
+
+// Type aliases for window controllers (in base namespace)
+using ItemWindowController = Il2CppLast.UI.KeyInput.ItemWindowController;
+using EquipmentWindowController = Il2CppLast.UI.KeyInput.EquipmentWindowController;
 
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
-    /// Tracker for equipment menu announcements.
-    /// Prevents duplicate announcements when multiple patches fire for the same slot.
+    /// Manual patches for item and equipment menu state transitions.
+    /// Hooks window controller SetActive to clear state when menus close entirely.
+    /// Also hooks command controller SetFocus for finer-grained state transitions.
     /// </summary>
-    public static class EquipmentMenuTracker
+    public static class ItemMenuStatePatches
     {
-        private static string lastAnnouncement = "";
+        private static bool isPatched = false;
+
+        /// <summary>
+        /// Apply manual Harmony patches for state transitions.
+        /// Uses SetActive(false) on window controllers to clear state when menus close.
+        /// </summary>
+        public static void ApplyPatches(HarmonyLib.Harmony harmony)
+        {
+            if (isPatched)
+                return;
+
+            try
+            {
+                // Patch ItemWindowController.SetActive - clears state when item menu closes
+                PatchItemWindowController(harmony);
+
+                // Patch EquipmentWindowController.SetActive - clears state when equipment menu closes
+                PatchEquipmentWindowController(harmony);
+
+                // Patch command controllers for state clearing when returning to command bar
+                PatchItemCommandController(harmony);
+                PatchEquipmentCommandController(harmony);
+
+                // Patch ItemListController.ResetController - clears state when leaving item list
+                // This covers Use, Key Items, and Sort menus returning to command bar
+                PatchItemListController(harmony);
+
+                // Patch ItemWindowController.CommandSelectInit - clears state when returning to command bar
+                // This is the definitive hook for when the item menu transitions to command bar state
+                PatchItemWindowControllerCommandSelectInit(harmony);
+
+                isPatched = true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Error applying state patches: {ex.Message}");
+            }
+        }
+
+        private static void PatchItemWindowController(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(ItemWindowController);
+                var method = controllerType.GetMethod("SetActive", BindingFlags.Instance | BindingFlags.Public);
+                if (method != null)
+                {
+                    var postfix = typeof(ItemMenuStatePatches).GetMethod(nameof(ItemWindowController_SetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Failed to patch ItemWindowController.SetActive: {ex.Message}");
+            }
+        }
+
+        private static void PatchEquipmentWindowController(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(EquipmentWindowController);
+                var method = controllerType.GetMethod("SetActive", BindingFlags.Instance | BindingFlags.Public);
+                if (method != null)
+                {
+                    var postfix = typeof(ItemMenuStatePatches).GetMethod(nameof(EquipmentWindowController_SetActive_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Failed to patch EquipmentWindowController.SetActive: {ex.Message}");
+            }
+        }
+
+        private static void PatchItemCommandController(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(Il2CppLast.UI.KeyInput.ItemCommandController);
+                var method = controllerType.GetMethod("SetFocus", BindingFlags.Instance | BindingFlags.Public);
+                if (method != null)
+                {
+                    var postfix = typeof(ItemMenuStatePatches).GetMethod(nameof(ItemCommandController_SetFocus_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Failed to patch ItemCommandController.SetFocus: {ex.Message}");
+            }
+        }
+
+        private static void PatchEquipmentCommandController(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(Il2CppLast.UI.KeyInput.EquipmentCommandController);
+                var method = controllerType.GetMethod("SetFocus", BindingFlags.Instance | BindingFlags.Public);
+                if (method != null)
+                {
+                    var postfix = typeof(ItemMenuStatePatches).GetMethod(nameof(EquipmentCommandController_SetFocus_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Failed to patch EquipmentCommandController.SetFocus: {ex.Message}");
+            }
+        }
+
+        private static void PatchItemListController(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type controllerType = typeof(Il2CppLast.UI.KeyInput.ItemListController);
+                var method = controllerType.GetMethod("ResetController", BindingFlags.Instance | BindingFlags.Public);
+                if (method != null)
+                {
+                    var postfix = typeof(ItemMenuStatePatches).GetMethod(nameof(ItemListController_ResetController_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Failed to patch ItemListController.ResetController: {ex.Message}");
+            }
+        }
+
+        private static void PatchItemWindowControllerCommandSelectInit(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                // Use AccessTools.Method which handles Il2Cpp private methods better than GetMethod
+                var method = AccessTools.Method(typeof(ItemWindowController), "CommandSelectInit");
+                if (method != null)
+                {
+                    var postfix = typeof(ItemMenuStatePatches).GetMethod(nameof(ItemWindowController_CommandSelectInit_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Failed to patch ItemWindowController.CommandSelectInit: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Postfix for ItemWindowController.SetActive - clears item menu state when menu closes.
+        /// This is the definitive hook for when the item menu is fully closed.
+        /// </summary>
+        public static void ItemWindowController_SetActive_Postfix(ItemWindowController __instance, bool isActive)
+        {
+            if (!isActive && ItemMenuState.IsActive)
+            {
+                ItemMenuState.Reset();
+            }
+        }
+
+        /// <summary>
+        /// Postfix for EquipmentWindowController.SetActive - clears equipment menu state when menu closes.
+        /// This is the definitive hook for when the equipment menu is fully closed.
+        /// </summary>
+        public static void EquipmentWindowController_SetActive_Postfix(EquipmentWindowController __instance, bool isActive)
+        {
+            if (!isActive && EquipmentMenuState.IsActive)
+            {
+                EquipmentMenuState.Reset();
+            }
+        }
+
+        /// <summary>
+        /// Postfix for ItemCommandController.SetFocus - placeholder for potential future use.
+        /// State clearing is handled by CommandSelectInit.
+        /// </summary>
+        public static void ItemCommandController_SetFocus_Postfix(Il2CppLast.UI.KeyInput.ItemCommandController __instance, bool isFocus)
+        {
+            // State clearing handled by CommandSelectInit
+        }
+
+        /// <summary>
+        /// Postfix for EquipmentCommandController.SetFocus - handles state transitions.
+        /// When gaining focus from shop: clears ShopState so generic cursor can read command bar.
+        /// When gaining focus from equipment slots: clears EquipmentMenuState.
+        /// </summary>
+        public static void EquipmentCommandController_SetFocus_Postfix(Il2CppLast.UI.KeyInput.EquipmentCommandController __instance, bool isFocus)
+        {
+            if (isFocus)
+            {
+                // When gaining focus from shop, clear ShopState to allow generic cursor to read
+                // This enables the equipment command bar (Equip/Optimal/Remove All) to be announced
+                if (ShopState.IsActive)
+                {
+                    ShopState.ClearForEquipmentSubmenu();
+                }
+
+                // When returning from equipment slots to command bar, clear EquipmentMenuState
+                if (EquipmentMenuState.IsActive)
+                {
+                    EquipmentMenuState.Reset();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Postfix for ItemListController.ResetController - clears state when leaving item list.
+        /// This fires when returning from Use/Key Items/Sort menus to command bar.
+        /// </summary>
+        public static void ItemListController_ResetController_Postfix(Il2CppLast.UI.KeyInput.ItemListController __instance, bool isForced)
+        {
+            if (ItemMenuState.IsActive)
+            {
+                ItemMenuState.Reset();
+            }
+        }
+
+        /// <summary>
+        /// Postfix for ItemWindowController.CommandSelectInit - clears state when returning to command bar.
+        /// This fires exactly when the item menu transitions to the CommandSelect state (Use/Key Items/Sort).
+        /// </summary>
+        public static void ItemWindowController_CommandSelectInit_Postfix(ItemWindowController __instance)
+        {
+            if (ItemMenuState.IsActive)
+            {
+                ItemMenuState.Reset();
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// Deduplicator for equipment menu announcements.
+    /// Prevents duplicate announcements when multiple patches fire for the same slot.
+    /// Uses centralized AnnouncementDeduplicator.
+    /// NOTE: This is NOT a state tracker - menu state is managed by EquipmentMenuState.
+    /// </summary>
+    public static class EquipmentAnnouncementDeduplicator
+    {
+        private const string DEDUP_CONTEXT = "EquipmentMenu.Announcement";
 
         public static bool ShouldAnnounce(string message)
         {
-            if (string.IsNullOrWhiteSpace(message))
-                return false;
-
-            // Content-based deduplication
-            if (message != lastAnnouncement)
-            {
-                lastAnnouncement = message;
-                return true;
-            }
-
-            return false;
+            return AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, message);
         }
 
         public static void Reset()
         {
-            lastAnnouncement = "";
+            AnnouncementDeduplicator.Reset(DEDUP_CONTEXT);
         }
     }
 
@@ -54,7 +299,7 @@ namespace FFIV_ScreenReader.Patches
     })]
     public static class ItemListController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "ItemMenu.List";
 
         [HarmonyPostfix]
         public static void Postfix(
@@ -87,6 +332,9 @@ namespace FFIV_ScreenReader.Patches
                 {
                     return;
                 }
+
+                // Store for I key equipment compatibility lookup
+                ItemMenuState.LastSelectedItem = itemData;
 
                 string itemName = itemData.Name;
                 if (string.IsNullOrEmpty(itemName))
@@ -126,13 +374,14 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicates
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Item Menu] {announcement}");
+                // Set item menu state active
+                ItemMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -151,7 +400,7 @@ namespace FFIV_ScreenReader.Patches
     })]
     public static class EquipmentSelectWindowController_SetCursor_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "EquipmentMenu.Select";
 
         [HarmonyPostfix]
         public static void Postfix(
@@ -160,28 +409,13 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
 
-                var contentList = __instance.ContentDataList;
-                if (contentList == null || contentList.Count == 0)
-                {
-                    return;
-                }
-
-                int index = targetCursor.Index;
-                if (index < 0 || index >= contentList.Count)
-                {
-                    return;
-                }
-
-                var equipmentData = contentList[index];
+                var equipmentData = SelectContentHelper.TryGetItem(__instance.ContentDataList, index);
                 if (equipmentData == null)
-                {
                     return;
-                }
 
                 string itemName = equipmentData.Name;
                 if (string.IsNullOrEmpty(itemName))
@@ -227,13 +461,14 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Skip duplicates
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Equipment Menu] {announcement}");
+                // Set equipment menu state active
+                EquipmentMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -258,39 +493,33 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
-
-                int index = targetCursor.Index;
 
                 // Get slot name and equipped item from contentList
                 string slotName = null;
                 string equippedItem = null;
-                if (__instance.contentList != null && index >= 0 && index < __instance.contentList.Count)
+                var contentView = SelectContentHelper.TryGetItem(__instance.contentList, index);
+                if (contentView != null)
                 {
-                    var contentView = __instance.contentList[index];
-                    if (contentView != null)
+                    // Get slot name from partText
+                    if (contentView.partText != null)
                     {
-                        // Get slot name from partText
-                        if (contentView.partText != null)
-                        {
-                            slotName = contentView.partText.text;
-                        }
+                        slotName = contentView.partText.text;
+                    }
 
-                        // Get item data from Data property
-                        var itemData = contentView.Data;
-                        if (itemData != null)
-                        {
-                            equippedItem = itemData.Name;
+                    // Get item data from Data property
+                    var itemData = contentView.Data;
+                    if (itemData != null)
+                    {
+                        equippedItem = itemData.Name;
 
-                            // Get parameter message (ATK +15, DEF +8, etc.)
-                            string paramMessage = itemData.ParameterMessage;
-                            if (!string.IsNullOrEmpty(paramMessage))
-                            {
-                                equippedItem += ", " + paramMessage;
-                            }
+                        // Get parameter message (ATK +15, DEF +8, etc.)
+                        string paramMessage = itemData.ParameterMessage;
+                        if (!string.IsNullOrEmpty(paramMessage))
+                        {
+                            equippedItem += ", " + paramMessage;
                         }
                     }
                 }
@@ -322,13 +551,15 @@ namespace FFIV_ScreenReader.Patches
                 // Filter icon markup
                 announcement = StripIconMarkup(announcement);
 
-                // Use time-based deduplication to prevent interruption by other patches
-                if (!EquipmentMenuTracker.ShouldAnnounce(announcement))
+                // Use deduplication to prevent interruption by other patches
+                if (!EquipmentAnnouncementDeduplicator.ShouldAnnounce(announcement))
                 {
                     return;
                 }
 
-                MelonLogger.Msg($"[Equipment Slot] {announcement}");
+                // Set equipment menu state active
+                EquipmentMenuState.SetActive();
+
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -346,36 +577,22 @@ namespace FFIV_ScreenReader.Patches
     })]
     public static class ItemUseController_SelectContent_Patch
     {
-        private static string lastAnnouncement = "";
+        private const string DEDUP_CONTEXT = "ItemMenu.UseTarget";
 
         [HarmonyPostfix]
         public static void Postfix(Il2CppLast.UI.KeyInput.ItemUseController __instance, Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController> targetContents, Il2CppLast.UI.Cursor targetCursor)
         {
             try
             {
-                if (__instance == null || targetCursor == null)
-                {
+                int index = SelectContentHelper.GetCursorIndex(__instance, targetCursor);
+                if (index < 0)
                     return;
-                }
 
-                // Access the contentList field via reflection or try to iterate targetContents
+                // Convert IEnumerable to List for indexed access
                 var targetList = new Il2CppSystem.Collections.Generic.List<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController>(targetContents);
-                if (targetList == null || targetList.Count == 0)
-                {
-                    return;
-                }
-
-                int index = targetCursor.Index;
-                if (index < 0 || index >= targetList.Count)
-                {
-                    return;
-                }
-
-                var selectedController = targetList[index];
+                var selectedController = SelectContentHelper.TryGetItem(targetList, index);
                 if (selectedController == null || selectedController.CurrentData == null)
-                {
                     return;
-                }
 
                 var data = selectedController.CurrentData;
                 string characterName = data.Name;
@@ -384,64 +601,15 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // Build announcement with HP, MP, and status conditions using helper
                 string announcement = characterName;
+                announcement += CharacterStatusHelper.GetFullStatus(data.Parameter);
 
-                try
-                {
-                    var parameter = data.Parameter;
-                    if (parameter != null)
-                    {
-                        int currentHP = parameter.CurrentHP;
-                        int maxHP = parameter.ConfirmedMaxHp();
-                        int currentMP = parameter.CurrentMP;
-                        int maxMP = parameter.ConfirmedMaxMp();
-
-                        announcement += $", HP {currentHP}/{maxHP}, MP {currentMP}/{maxMP}";
-
-                        var conditionList = parameter.ConfirmedConditionList();
-                        if (conditionList != null && conditionList.Count > 0)
-                        {
-                            var messageManager = MessageManager.Instance;
-                            if (messageManager != null)
-                            {
-                                var statusNames = new System.Collections.Generic.List<string>();
-
-                                foreach (var condition in conditionList)
-                                {
-                                    if (condition != null)
-                                    {
-                                        string conditionMesId = condition.MesIdName;
-                                        if (!string.IsNullOrEmpty(conditionMesId) && conditionMesId != "None")
-                                        {
-                                            string localizedConditionName = messageManager.GetMessage(conditionMesId);
-                                            if (!string.IsNullOrEmpty(localizedConditionName))
-                                            {
-                                                statusNames.Add(localizedConditionName);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if (statusNames.Count > 0)
-                                {
-                                    announcement += $", {string.Join(", ", statusNames)}";
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Warning($"Error reading HP/MP for {characterName}: {ex.Message}");
-                }
-
-                if (announcement == lastAnnouncement)
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
                 {
                     return;
                 }
-                lastAnnouncement = announcement;
 
-                MelonLogger.Msg($"[Item Target] {announcement}");
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

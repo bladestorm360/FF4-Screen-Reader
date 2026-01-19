@@ -11,7 +11,46 @@ namespace FFIV_ScreenReader.Patches
     /// <summary>
     /// Harmony patches for cursor navigation.
     /// Hooks NextIndex and PrevIndex to announce menu items as players navigate.
+    ///
+    /// PERFORMANCE OPTIMIZATION (January 2026):
+    /// Replaced expensive hierarchy walks and FindObjectsOfType with O(1) state flag checks.
+    /// Each specialized menu sets its state flag when active, and this generic handler
+    /// simply checks those flags instead of traversing the transform hierarchy.
     /// </summary>
+
+    /// <summary>
+    /// Centralized suppression check - determines if specialized patches are handling navigation.
+    /// All checks are O(1) boolean comparisons instead of O(n) hierarchy traversals.
+    /// </summary>
+    internal static class CursorSuppressionCheck
+    {
+        /// <summary>
+        /// Returns true if a specialized patch is handling cursor navigation,
+        /// meaning the generic cursor patch should skip processing.
+        /// </summary>
+        public static bool ShouldSuppress()
+        {
+            // Battle state - replaces expensive FindObjectsOfType<BattleEnemyEntity>
+            if (BattleState.ShouldSuppress()) return true;
+
+            // Menu states - replaces hierarchy walks
+            if (ShopState.ShouldSuppress()) return true;
+            if (ItemMenuState.ShouldSuppress()) return true;
+            if (EquipmentMenuState.ShouldSuppress()) return true;
+            if (AbilityMenuState.ShouldSuppress()) return true;
+            if (ConfigMenuState.ShouldSuppress()) return true;
+            if (StatusMenuState.ShouldSuppress()) return true;
+            if (PartyMenuState.ShouldSuppress()) return true;
+            if (TitleMenuState.ShouldSuppress()) return true;
+
+            // Existing state flags
+            if (SaveLoadMenuState.IsActive) return true;
+            if (NamingPatches.ShouldSuppress()) return true;
+
+            return false;
+        }
+    }
+
     [HarmonyPatch(typeof(GameCursor), nameof(GameCursor.NextIndex))]
     public static class Cursor_NextIndex_Patch
     {
@@ -33,151 +72,10 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
-                if (SaveLoadMenuState.IsActive)
+                // Check all state flags - O(1) operation instead of hierarchy walks
+                if (CursorSuppressionCheck.ShouldSuppress())
                 {
                     return;
-                }
-
-                // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
-                var parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("item_target_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip ALL battle navigation (battle controller patches handle everything in battle)
-                var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
-                if (enemyEntities != null && enemyEntities.Length > 0)
-                {
-                    return; // We're in battle - let controller patches handle it
-                }
-
-                // Skip if this is battle target selection (handled by BattleTargetSelectController.SelectContent patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("battle_target") ||
-                        parentName.Contains("battletarget") ||
-                        parentName.Contains("battle_command") ||
-                        parentName.Contains("battlecommand") ||
-                        parentName.Contains("battle_item") ||
-                        parentName.Contains("battleitem") ||
-                        parentName.Contains("battle_ability") ||
-                        parentName.Contains("battleability") ||
-                        parentName.Contains("battle_infomation") ||
-                        parentName.Contains("battleinfomation") ||
-                        parentName.Contains("battle_menu") ||
-                        parentName.Contains("battlemenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is title menu navigation (handled by TitleMenuCommandController.SetCursor patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("title_command") || parent.name.Contains("TitleMenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is config menu navigation (handled by ConfigCommandController.SetFocus patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("config") || parent.name.Contains("Config"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is item menu navigation (handled by ItemListController.SelectContent patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("list_window"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment menu navigation (handled by EquipmentSelectWindowController.SetCursor patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment slot navigation (handled by EquipmentInfoWindowController.SelectContent patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_info_content") || parent.name.Contains("EquipmentInfo"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is shop navigation (handled by ShopPatches)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("shop") || parent.name.Contains("Shop"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is party setting menu (handled by PartySettingMenuBaseController.SelectContent patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("party") || parent.name.Contains("Party"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is status details screen (handled by StatusDetailsController patches)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("status") || parent.name.Contains("Status"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is ability menu navigation (handled by AbilityMenuPatches)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("ability"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
                 }
 
                 // Use managed coroutine system
@@ -217,151 +115,10 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
-                if (SaveLoadMenuState.IsActive)
+                // Check all state flags - O(1) operation instead of hierarchy walks
+                if (CursorSuppressionCheck.ShouldSuppress())
                 {
                     return;
-                }
-
-                // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
-                var parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("item_target_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip ALL battle navigation (battle controller patches handle everything in battle)
-                var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
-                if (enemyEntities != null && enemyEntities.Length > 0)
-                {
-                    return; // We're in battle - let controller patches handle it
-                }
-
-                // Skip if this is battle target selection
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("battle_target") ||
-                        parentName.Contains("battletarget") ||
-                        parentName.Contains("battle_command") ||
-                        parentName.Contains("battlecommand") ||
-                        parentName.Contains("battle_item") ||
-                        parentName.Contains("battleitem") ||
-                        parentName.Contains("battle_ability") ||
-                        parentName.Contains("battleability") ||
-                        parentName.Contains("battle_infomation") ||
-                        parentName.Contains("battleinfomation") ||
-                        parentName.Contains("battle_menu") ||
-                        parentName.Contains("battlemenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is title menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("title_command") || parent.name.Contains("TitleMenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is config menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("config") || parent.name.Contains("Config"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is item menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("list_window"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment slot navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_info_content") || parent.name.Contains("EquipmentInfo"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is shop navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("shop") || parent.name.Contains("Shop"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is party setting menu
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("party") || parent.name.Contains("Party"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is status details screen
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("status") || parent.name.Contains("Status"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is ability menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("ability"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
                 }
 
                 // Use managed coroutine system
@@ -401,151 +158,10 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
-                if (SaveLoadMenuState.IsActive)
+                // Check all state flags - O(1) operation instead of hierarchy walks
+                if (CursorSuppressionCheck.ShouldSuppress())
                 {
                     return;
-                }
-
-                // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
-                var parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("item_target_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip ALL battle navigation (battle controller patches handle everything in battle)
-                var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
-                if (enemyEntities != null && enemyEntities.Length > 0)
-                {
-                    return; // We're in battle - let controller patches handle it
-                }
-
-                // Skip if this is battle target selection
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("battle_target") ||
-                        parentName.Contains("battletarget") ||
-                        parentName.Contains("battle_command") ||
-                        parentName.Contains("battlecommand") ||
-                        parentName.Contains("battle_item") ||
-                        parentName.Contains("battleitem") ||
-                        parentName.Contains("battle_ability") ||
-                        parentName.Contains("battleability") ||
-                        parentName.Contains("battle_infomation") ||
-                        parentName.Contains("battleinfomation") ||
-                        parentName.Contains("battle_menu") ||
-                        parentName.Contains("battlemenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is title menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("title_command") || parent.name.Contains("TitleMenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is config menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("config") || parent.name.Contains("Config"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is item menu navigation (handled by ItemListController.SelectContent patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("list_window"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment slot navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_info_content") || parent.name.Contains("EquipmentInfo"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is shop navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("shop") || parent.name.Contains("Shop"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is party setting menu
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("party") || parent.name.Contains("Party"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is status details screen
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("status") || parent.name.Contains("Status"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is ability menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("ability"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
                 }
 
                 // Use managed coroutine system
@@ -585,151 +201,10 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Skip if in save/load menu (handled by SaveListController.SelectContent patch)
-                if (SaveLoadMenuState.IsActive)
+                // Check all state flags - O(1) operation instead of hierarchy walks
+                if (CursorSuppressionCheck.ShouldSuppress())
                 {
                     return;
-                }
-
-                // Skip if this is item target selection (handled by ItemUseController.SelectContent patch)
-                var parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("item_target_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip ALL battle navigation (battle controller patches handle everything in battle)
-                var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
-                if (enemyEntities != null && enemyEntities.Length > 0)
-                {
-                    return; // We're in battle - let controller patches handle it
-                }
-
-                // Skip if this is battle target selection
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("battle_target") ||
-                        parentName.Contains("battletarget") ||
-                        parentName.Contains("battle_command") ||
-                        parentName.Contains("battlecommand") ||
-                        parentName.Contains("battle_item") ||
-                        parentName.Contains("battleitem") ||
-                        parentName.Contains("battle_ability") ||
-                        parentName.Contains("battleability") ||
-                        parentName.Contains("battle_infomation") ||
-                        parentName.Contains("battleinfomation") ||
-                        parentName.Contains("battle_menu") ||
-                        parentName.Contains("battlemenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is title menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("title_command") || parent.name.Contains("TitleMenu"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is config menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("config") || parent.name.Contains("Config"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is item menu navigation (handled by ItemListController.SelectContent patch)
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("list_window"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_select"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is equipment slot navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("equip_info_content") || parent.name.Contains("EquipmentInfo"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is shop navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("shop") || parent.name.Contains("Shop"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is party setting menu
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("party") || parent.name.Contains("Party"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is status details screen
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    if (parent.name.Contains("status") || parent.name.Contains("Status"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
-                }
-
-                // Skip if this is ability menu navigation
-                parent = __instance.transform.parent;
-                while (parent != null)
-                {
-                    string parentName = parent.name.ToLower();
-                    if (parentName.Contains("ability"))
-                    {
-                        return;
-                    }
-                    parent = parent.parent;
                 }
 
                 // Use managed coroutine system

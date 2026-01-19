@@ -45,11 +45,8 @@ namespace FFIV_ScreenReader.Menus
 
                 if (!isBattleScene && !isMenuOpen)
                 {
-                    MelonLogger.Msg("CharacterSelectionReader: Menu not open and not in battle - skipping character data read to prevent false positives during scene load");
                     return null;
                 }
-
-                MelonLogger.Msg($"=== CharacterSelectionReader: Checking cursor at index {cursorIndex} ===");
 
                 // Walk up the hierarchy to find character selection structures
                 Transform current = cursorTransform;
@@ -62,15 +59,12 @@ namespace FFIV_ScreenReader.Menus
                         current.name.Contains("status") || current.name.Contains("formation") ||
                         current.name.Contains("party") || current.name.Contains("member"))
                     {
-                        MelonLogger.Msg($"Found potential character menu structure: {current.name}");
-
                         // Try to find Content list (common pattern: Scroll View -> Viewport -> Content)
                         Transform contentList = FindContentList(current);
 
                         if (contentList != null && cursorIndex >= 0 && cursorIndex < contentList.childCount)
                         {
                             Transform characterSlot = contentList.GetChild(cursorIndex);
-                            MelonLogger.Msg($"Found character slot at index {cursorIndex}: {characterSlot.name}");
 
                             // Try to read the character information
                             string characterInfo = ReadCharacterInformation(characterSlot, cursorIndex);
@@ -92,11 +86,9 @@ namespace FFIV_ScreenReader.Menus
 
                         if (hasPartText && hasLastText)
                         {
-                            MelonLogger.Msg("Skipping equipment slot navigation (handled by EquipmentInfoWindowController patch)");
                             return null;
                         }
 
-                        MelonLogger.Msg($"Found character info element: {current.name}");
                         string characterInfo = ReadCharacterInformation(current, cursorIndex);
                         if (characterInfo != null)
                         {
@@ -107,8 +99,6 @@ namespace FFIV_ScreenReader.Menus
                     current = current.parent;
                     depth++;
                 }
-
-                MelonLogger.Msg("CharacterSelectionReader: Not a character selection menu");
             }
             catch (Exception ex)
             {
@@ -148,32 +138,7 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                // Try to get ICharaStatusContentController component
-                var statusController = slotTransform.GetComponent<ICharaStatusContentController>();
-                if (statusController == null)
-                {
-                    statusController = slotTransform.GetComponentInChildren<ICharaStatusContentController>();
-                }
-
-                // Try to get MenuCharacterController component
-                var menuCharController = slotTransform.GetComponent<MenuCharacterController>();
-                if (menuCharController == null)
-                {
-                    menuCharController = slotTransform.GetComponentInChildren<MenuCharacterController>();
-                }
-
-                // Log what we found
-                if (statusController != null)
-                {
-                    MelonLogger.Msg("Found ICharaStatusContentController");
-                }
-                if (menuCharController != null)
-                {
-                    MelonLogger.Msg("Found MenuCharacterController");
-                }
-
-                // Try direct text extraction as fallback
-                MelonLogger.Msg("Trying text component reading");
+                // Try direct text extraction
                 return ReadFromTextComponents(slotTransform, slotIndex);
             }
             catch (Exception ex)
@@ -209,8 +174,6 @@ namespace FFIV_ScreenReader.Menus
 
                     string content = text.text.Trim();
                     if (string.IsNullOrEmpty(content)) return;
-
-                    MelonLogger.Msg($"  Text component '{text.name}': '{content}'");
 
                     // Check for character name
                     if (text.name.Contains("name") && !text.name.Contains("job") &&
@@ -262,8 +225,6 @@ namespace FFIV_ScreenReader.Menus
                         }
                     }
                 });
-
-                MelonLogger.Msg($"Found {textCount} text components in character slot");
 
                 // Build announcement string
                 string announcement = "";
@@ -345,7 +306,6 @@ namespace FFIV_ScreenReader.Menus
 
                 if (!string.IsNullOrEmpty(announcement))
                 {
-                    MelonLogger.Msg($"Character info read: {announcement}");
                     return announcement;
                 }
             }

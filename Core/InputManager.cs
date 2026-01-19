@@ -231,13 +231,18 @@ namespace FFIV_ScreenReader.Core
                 mod.AnnounceCurrentCharacterStatus();
             }
 
-            // Hotkey: I to announce item details or config option description/tooltip
+            // Hotkey: I to announce item details, equipment requirements, or config option description/tooltip
             if (Input.GetKeyDown(KeyCode.I))
             {
                 // Check shop menu first (highest priority)
                 if (FFIV_ScreenReader.Patches.ShopMenuTracker.ValidateState())
                 {
                     FFIV_ScreenReader.Patches.ShopDetailsAnnouncer.AnnounceCurrentItemDetails();
+                }
+                // Check item menu for equipment compatibility
+                else if (ItemMenuState.IsActive)
+                {
+                    FFIV_ScreenReader.Patches.ItemDetailsAnnouncer.AnnounceEquipRequirements();
                 }
                 else
                 {
@@ -321,12 +326,11 @@ namespace FFIV_ScreenReader.Core
                 int moveState = MoveStateHelper.GetCurrentMoveState();
                 string stateName = MoveStateHelper.GetMoveStateName(moveState);
 
-                MelonLogger.Msg($"[Vehicle State] MoveState={moveState} ({stateName})");
                 FFIV_ScreenReaderMod.SpeakText(stateName, interrupt: true);
             }
             catch (System.Exception ex)
             {
-                MelonLogger.Error($"[Vehicle State] Error: {ex.Message}");
+                MelonLogger.Warning($"[Vehicle State] Error: {ex.Message}");
                 FFIV_ScreenReaderMod.SpeakText("Unable to detect vehicle state", interrupt: true);
             }
         }
@@ -380,7 +384,6 @@ namespace FFIV_ScreenReader.Core
                     string description = GetDescriptionText(keyInputController);
                     if (!string.IsNullOrEmpty(description))
                     {
-                        MelonLogger.Msg($"[Config Tooltip] {description}");
                         FFIV_ScreenReaderMod.SpeakText(description);
                         return;
                     }
@@ -391,7 +394,7 @@ namespace FFIV_ScreenReader.Core
             }
             catch (System.Exception ex)
             {
-                MelonLogger.Error($"Error reading config tooltip: {ex.Message}");
+                MelonLogger.Warning($"Error reading config tooltip: {ex.Message}");
             }
         }
 

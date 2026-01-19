@@ -18,6 +18,102 @@ namespace FFIV_ScreenReader.Menus
     public static class ConfigMenuReader
     {
         /// <summary>
+        /// Gets the displayed slider value text from a KeyInput controller.
+        /// Returns the text as shown in the UI (e.g., "5" for BGM/SFX, "100%" for Master volume).
+        /// </summary>
+        public static string GetSliderValueText(ConfigCommandController_KeyInput controller)
+        {
+            try
+            {
+                if (controller?.view?.sliderValueText != null)
+                {
+                    string text = controller.view.sliderValueText.text?.Trim();
+                    if (!string.IsNullOrEmpty(text) && !IsPlaceholderText(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error getting slider value text: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Gets the displayed arrow change text from a KeyInput controller.
+        /// Returns the text as shown in the UI (e.g., "Walk", "Run").
+        /// </summary>
+        public static string GetArrowChangeText(ConfigCommandController_KeyInput controller)
+        {
+            try
+            {
+                if (controller?.view?.arrowChangeText != null)
+                {
+                    string text = controller.view.arrowChangeText.text?.Trim();
+                    if (!string.IsNullOrEmpty(text) && !IsPlaceholderText(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error getting arrow change text: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Gets the displayed slider value text from a Touch controller.
+        /// Returns the text as shown in the UI.
+        /// </summary>
+        public static string GetSliderValueText(ConfigCommandController_Touch controller)
+        {
+            try
+            {
+                if (controller?.view?.sliderValueText != null)
+                {
+                    string text = controller.view.sliderValueText.text?.Trim();
+                    if (!string.IsNullOrEmpty(text) && !IsPlaceholderText(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error getting touch slider value text: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Gets the displayed arrow change text from a Touch controller.
+        /// Returns the text as shown in the UI.
+        /// </summary>
+        public static string GetArrowChangeText(ConfigCommandController_Touch controller)
+        {
+            try
+            {
+                if (controller?.view?.arrowChangeText != null)
+                {
+                    string text = controller.view.arrowChangeText.text?.Trim();
+                    if (!string.IsNullOrEmpty(text) && !IsPlaceholderText(text))
+                    {
+                        return text;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error getting touch arrow change text: {ex.Message}");
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Find config value directly from a ConfigCommandController instance.
         /// This is used by the controller-based patch system.
         /// </summary>
@@ -82,8 +178,6 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                MelonLogger.Msg($"=== Looking for config values (cursor index: {cursorIndex}) ===");
-
                 // Try to find the controller and use its CommandList instead of navigating hierarchy
                 string value = TryReadFromController(cursorTransform, cursorIndex);
                 if (value != null && !IsPlaceholderText(value)) return value;
@@ -96,14 +190,11 @@ namespace FFIV_ScreenReader.Menus
                     // Look for config_root which contains the list
                     if (current.name == "config_root")
                     {
-                        MelonLogger.Msg($"Found config_root, looking for content at index {cursorIndex}");
-
                         // Find the Content object that contains all config items
                         var content = current.GetComponentInChildren<Transform>()?.Find("MaskObject/Scroll View/Viewport/Content");
                         if (content != null && cursorIndex >= 0 && cursorIndex < content.childCount)
                         {
                             var configItem = content.GetChild(cursorIndex);
-                            MelonLogger.Msg($"Found config item at index {cursorIndex}: {configItem.name}");
 
                             // Try KeyInput version first (in-game config)
                             string configValue = ReadKeyInputConfigValue(configItem);
@@ -124,20 +215,14 @@ namespace FFIV_ScreenReader.Menus
                     // Check for in-game config menu structure (command_list_root)
                     if (current.name.Contains("command_list") || current.name.Contains("menu_list"))
                     {
-                        MelonLogger.Msg($"Found in-game config structure: {current.name}, looking for config values");
-
                         // Find Content under Scroll View
                         Transform contentList = FindContentList(current);
 
                         if (contentList != null && cursorIndex >= 0 && cursorIndex < contentList.childCount)
                         {
-                            MelonLogger.Msg($"In-game config: Found content list with {contentList.childCount} items, cursor at {cursorIndex}");
-
                             var menuItem = contentList.GetChild(cursorIndex);
                             if (menuItem != null)
                             {
-                                MelonLogger.Msg($"In-game config item: {menuItem.name}");
-
                                 // Try KeyInput version first (in-game config)
                                 string menuValue = ReadKeyInputConfigValue(menuItem);
                                 if (menuValue != null && !IsPlaceholderText(menuValue)) return menuValue;
@@ -146,7 +231,6 @@ namespace FFIV_ScreenReader.Menus
                                 Transform rootChild = menuItem.Find("root");
                                 if (rootChild != null)
                                 {
-                                    MelonLogger.Msg("Found root child in in-game config, checking for type-specific roots");
                                     menuValue = ReadTypeSpecificValue(rootChild);
                                     if (menuValue != null && !IsPlaceholderText(menuValue)) return menuValue;
                                 }
@@ -158,8 +242,6 @@ namespace FFIV_ScreenReader.Menus
                     current = current.parent;
                     depth++;
                 }
-
-                MelonLogger.Msg("No config values found");
             }
             catch (Exception ex)
             {
@@ -191,7 +273,6 @@ namespace FFIV_ScreenReader.Menus
                 // Check if cursor is inside a dialog - if so, skip config controller
                 if (IsCursorInDialog(cursorTransform))
                 {
-                    MelonLogger.Msg("Cursor is in dialog, skipping config value read");
                     return null;
                 }
 
@@ -199,8 +280,6 @@ namespace FFIV_ScreenReader.Menus
                 var controllerTouch = UnityEngine.Object.FindObjectOfType<ConfigActualDetailsControllerBase_Touch>();
                 if (controllerTouch != null && controllerTouch.CommandList != null)
                 {
-                    MelonLogger.Msg($"Found Touch ConfigActualDetailsControllerBase with {controllerTouch.CommandList.Count} commands");
-
                     if (cursorIndex >= 0 && cursorIndex < controllerTouch.CommandList.Count)
                     {
                         var command = controllerTouch.CommandList[cursorIndex];
@@ -209,7 +288,6 @@ namespace FFIV_ScreenReader.Menus
                             string val = ReadTouchCommandValue(command);
                             if (val != null)
                             {
-                                MelonLogger.Msg($"Read value from Touch controller at index {cursorIndex}: '{val}'");
                                 return val;
                             }
                         }
@@ -220,8 +298,6 @@ namespace FFIV_ScreenReader.Menus
                 var controllerKeyInput = UnityEngine.Object.FindObjectOfType<ConfigActualDetailsControllerBase_KeyInput>();
                 if (controllerKeyInput != null && controllerKeyInput.CommandList != null)
                 {
-                    MelonLogger.Msg($"Found KeyInput ConfigActualDetailsControllerBase with {controllerKeyInput.CommandList.Count} commands");
-
                     if (cursorIndex >= 0 && cursorIndex < controllerKeyInput.CommandList.Count)
                     {
                         var command = controllerKeyInput.CommandList[cursorIndex];
@@ -230,7 +306,6 @@ namespace FFIV_ScreenReader.Menus
                             string val = ReadKeyInputCommandValue(command);
                             if (val != null)
                             {
-                                MelonLogger.Msg($"Read value from KeyInput controller at index {cursorIndex}: '{val}'");
                                 return val;
                             }
                         }
@@ -261,7 +336,6 @@ namespace FFIV_ScreenReader.Menus
                     if (name.Contains("popup") || name.Contains("dialog") || name.Contains("prompt") ||
                         name.Contains("message_window") || name.Contains("yesno") || name.Contains("confirm"))
                     {
-                        MelonLogger.Msg($"Cursor is inside dialog: {current.name}");
                         return true;
                     }
                     current = current.parent;
@@ -272,7 +346,7 @@ namespace FFIV_ScreenReader.Menus
             }
             catch (Exception ex)
             {
-                MelonLogger.Error($"Error checking cursor dialog context: {ex.Message}");
+                MelonLogger.Warning($"Error checking cursor dialog context: {ex.Message}");
                 return false;
             }
         }
@@ -401,15 +475,12 @@ namespace FFIV_ScreenReader.Menus
                 var configViewKeyInput = item.GetComponentInChildren<ConfigCommandView_KeyInput>();
                 if (configViewKeyInput != null)
                 {
-                    MelonLogger.Msg("Found KeyInput ConfigCommandView, checking for value properties");
-
                     // Check slider value text
                     if (configViewKeyInput.sliderValueText != null && !string.IsNullOrEmpty(configViewKeyInput.sliderValueText.text?.Trim()))
                     {
                         var val = configViewKeyInput.sliderValueText.text.Trim();
                         if (val != "new text")
                         {
-                            MelonLogger.Msg($"Found KeyInput slider value: '{val}'");
                             return val;
                         }
                     }
@@ -420,7 +491,6 @@ namespace FFIV_ScreenReader.Menus
                         var val = configViewKeyInput.arrowChangeText.text.Trim();
                         if (val != "new text")
                         {
-                            MelonLogger.Msg($"Found KeyInput arrow value: '{val}'");
                             return val;
                         }
                     }
@@ -434,7 +504,6 @@ namespace FFIV_ScreenReader.Menus
                             var val = labelText.text.Trim();
                             if (val != "new text")
                             {
-                                MelonLogger.Msg($"Found KeyInput dropdown value: '{val}'");
                                 return val;
                             }
                         }
@@ -463,9 +532,8 @@ namespace FFIV_ScreenReader.Menus
                 if (text != null && !string.IsNullOrEmpty(text.text?.Trim()))
                 {
                     var val = text.text.Trim();
-                    if (!IsPlaceholderText(val)) // Skip placeholder text
+                    if (!IsPlaceholderText(val))
                     {
-                        MelonLogger.Msg($"Found slider value: '{val}'");
                         return val;
                     }
                 }
@@ -479,9 +547,8 @@ namespace FFIV_ScreenReader.Menus
                 if (text != null && !string.IsNullOrEmpty(text.text?.Trim()))
                 {
                     var val = text.text.Trim();
-                    if (!IsPlaceholderText(val)) // Skip placeholder text
+                    if (!IsPlaceholderText(val))
                     {
-                        MelonLogger.Msg($"Found arrow value: '{val}'");
                         return val;
                     }
                 }
@@ -495,9 +562,8 @@ namespace FFIV_ScreenReader.Menus
                 if (text != null && !string.IsNullOrEmpty(text.text?.Trim()) && text.text != "Option A")
                 {
                     var val = text.text.Trim();
-                    if (!IsPlaceholderText(val)) // Skip placeholder text
+                    if (!IsPlaceholderText(val))
                     {
-                        MelonLogger.Msg($"Found dropdown value: '{val}'");
                         return val;
                     }
                 }

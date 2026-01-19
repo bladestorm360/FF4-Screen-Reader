@@ -86,10 +86,19 @@ namespace FFIV_ScreenReader.Core
             // Initialize input manager
             inputManager = new InputManager(this);
 
-            // Apply manual Harmony patches for popups, save/load dialogs, and vehicle state
+            // Initialize menu state registry (ensures all handlers are registered)
+            MenuStateRegistry.Initialize();
+
+            // Apply manual Harmony patches for popups, save/load dialogs, naming, vehicle state, main menu, and menu state transitions
             var harmony = new HarmonyLib.Harmony("FFIV_ScreenReader.ManualPatches");
             PopupPatches.ApplyPatches(harmony);
             SaveLoadPatches.ApplyPatches(harmony);
+            NamingPatches.ApplyPatches(harmony);
+            MainMenuPatches.ApplyPatches(harmony);
+            ItemMenuStatePatches.ApplyPatches(harmony);
+            AbilityMenuStatePatches.ApplyPatches(harmony);
+            ConfigMenuStatePatches.ApplyPatches(harmony);
+            StatusMenuStatePatches.ApplyPatches(harmony);
 
             // Set up callback for field ready event before applying patches
             MovementSpeechPatches.OnFieldReady = OnFieldReadyCallback;
@@ -139,8 +148,9 @@ namespace FFIV_ScreenReader.Core
                 // Reset location message tracker to prevent stale FadeMessage from blocking new locations
                 LocationMessageTracker.Reset();
 
-                // Clear save/load menu state on scene change (user backed out to title or main menu)
-                SaveLoadPatches.ClearSaveLoadMenuState();
+                // Clear ALL menu states on scene change to prevent stale state from suppressing announcements
+                // This fixes the issue where popups don't read on first game load
+                MenuState.ClearAllMenuStates();
 
                 // Try to find and cache FieldPlayerController
                 var playerController = UnityEngine.Object.FindObjectOfType<Il2CppLast.Map.FieldPlayerController>();
@@ -200,8 +210,13 @@ namespace FFIV_ScreenReader.Core
                     {
                         // Map has changed, announce the new map
                         string mapName = Field.MapNameResolver.GetCurrentMapName();
-                        SpeakText($"Entering {mapName}", interrupt: false);
+                        string fullMessage = $"Entering {mapName}";
+                        SpeakText(fullMessage, interrupt: false);
                         lastAnnouncedMapId = currentMapId;
+
+                        // Fix 4: Record this announcement for deduplication with SystemMessage
+                        // This prevents "Mysidia – Manor of Prayers" from being announced twice
+                        LocationMessageTracker.SetLastFadeMessage(fullMessage);
 
                         // Check if entering interior map - if so, switch to on-foot state
                         // (e.g., entering Lunar Whale 2F interior while in airship)

@@ -36,32 +36,10 @@ namespace FFIV_ScreenReader.Menus
             try
             {
                 // Safety checks to prevent crashes
-                if (cursor == null)
+                if (cursor == null || cursor.gameObject == null || cursor.transform == null)
                 {
-                    MelonLogger.Msg("Cursor is null, skipping");
                     yield break;
                 }
-
-                if (cursor.gameObject == null)
-                {
-                    MelonLogger.Msg("Cursor GameObject is null, skipping");
-                    yield break;
-                }
-
-                if (cursor.transform == null)
-                {
-                    MelonLogger.Msg("Cursor transform is null, skipping");
-                    yield break;
-                }
-
-                // Get scene info for debugging
-                var sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
-
-                MelonLogger.Msg($"=== {direction} called (delayed) ===");
-                MelonLogger.Msg($"Scene: {sceneName}");
-                MelonLogger.Msg($"Cursor Index: {cursor.Index}");
-                MelonLogger.Msg($"Cursor GameObject: {cursor.gameObject?.name ?? "null"}");
-                MelonLogger.Msg($"Count: {count}, IsLoop: {isLoop}");
 
                 // Try multiple strategies to find menu text
                 string menuText = TryAllStrategies(cursor);
@@ -72,7 +50,6 @@ namespace FFIV_ScreenReader.Menus
                     string configValue = ConfigMenuReader.FindConfigValueText(cursor.transform, cursor.Index);
                     if (configValue != null)
                     {
-                        MelonLogger.Msg($"Found config value: '{configValue}'");
                         // Combine option name and value
                         string fullText = $"{menuText}: {configValue}";
                         FFIV_ScreenReaderMod.SpeakText(fullText);
@@ -82,12 +59,6 @@ namespace FFIV_ScreenReader.Menus
                         FFIV_ScreenReaderMod.SpeakText(menuText);
                     }
                 }
-                else
-                {
-                    MelonLogger.Msg("No menu text found in hierarchy");
-                }
-
-                MelonLogger.Msg("========================");
             }
             catch (Exception ex)
             {
@@ -104,9 +75,9 @@ namespace FFIV_ScreenReader.Menus
 
             // CRITICAL: Check if we're in equipment slot context - if so, skip ALL strategies
             // The EquipmentInfoWindowController.SelectContent patch handles this menu
-            if (IsInEquipmentSlotContext(cursor.transform))
+            // BUT only skip if EquipmentMenuState is active (meaning we're in equipment slots, not command bar)
+            if (EquipmentMenuState.IsActive && IsInEquipmentSlotContext(cursor.transform))
             {
-                MelonLogger.Msg("In equipment slot context - skipping all fallback strategies");
                 return null;
             }
 
@@ -163,40 +134,7 @@ namespace FFIV_ScreenReader.Menus
         /// </summary>
         private static string TryReadBattleEnemyTarget(GameCursor cursor)
         {
-            try
-            {
-                // Check if we're in battle by looking for BattleEnemyEntity
-                var enemyEntities = UnityEngine.Object.FindObjectsOfType<Il2CppLast.Battle.BattleEnemyEntity>();
-                if (enemyEntities == null || enemyEntities.Length == 0)
-                {
-                    return null;
-                }
-
-                MelonLogger.Msg($"[Battle Enemy] In battle with {enemyEntities.Length} enemies, cursor at index {cursor.Index}");
-
-                // Log the cursor hierarchy to see where enemy names might be
-                Transform current = cursor.transform;
-                for (int depth = 0; depth < 10 && current != null; depth++)
-                {
-                    var texts = current.GetComponentsInChildren<UnityEngine.UI.Text>();
-                    if (texts != null && texts.Length > 0)
-                    {
-                        foreach (var text in texts)
-                        {
-                            if (text != null && !string.IsNullOrWhiteSpace(text.text))
-                            {
-                                MelonLogger.Msg($"[Battle Enemy] Depth {depth}, Text on '{text.gameObject.name}': '{text.text}'");
-                            }
-                        }
-                    }
-                    current = current.parent;
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error($"Error reading battle enemy target: {ex.Message}");
-            }
-
+            // Battle enemy targeting is handled by dedicated patches
             return null;
         }
 
@@ -209,7 +147,6 @@ namespace FFIV_ScreenReader.Menus
             {
                 if (IsCursorInDialog(cursor.transform))
                 {
-                    MelonLogger.Msg("Cursor is in dialog, skipping config controller");
                     return null;
                 }
 
@@ -219,8 +156,6 @@ namespace FFIV_ScreenReader.Menus
                 var controllerTouch = UnityEngine.Object.FindObjectOfType<ConfigActualDetailsControllerBase_Touch>();
                 if (controllerTouch != null && controllerTouch.CommandList != null)
                 {
-                    MelonLogger.Msg($"Found Touch ConfigActualDetailsControllerBase with {controllerTouch.CommandList.Count} commands");
-
                     if (cursorIndex >= 0 && cursorIndex < controllerTouch.CommandList.Count)
                     {
                         var command = controllerTouch.CommandList[cursorIndex];
@@ -229,7 +164,6 @@ namespace FFIV_ScreenReader.Menus
                             string menuText = command.view.nameText.text?.Trim();
                             if (!string.IsNullOrEmpty(menuText))
                             {
-                                MelonLogger.Msg($"Read name from Touch controller at index {cursorIndex}: '{menuText}'");
                                 return menuText;
                             }
                         }
@@ -240,8 +174,6 @@ namespace FFIV_ScreenReader.Menus
                 var controllerKeyInput = UnityEngine.Object.FindObjectOfType<ConfigActualDetailsControllerBase_KeyInput>();
                 if (controllerKeyInput != null && controllerKeyInput.CommandList != null)
                 {
-                    MelonLogger.Msg($"Found KeyInput ConfigActualDetailsControllerBase with {controllerKeyInput.CommandList.Count} commands");
-
                     if (cursorIndex >= 0 && cursorIndex < controllerKeyInput.CommandList.Count)
                     {
                         var command = controllerKeyInput.CommandList[cursorIndex];
@@ -250,7 +182,6 @@ namespace FFIV_ScreenReader.Menus
                             string menuText = command.view.nameText.text?.Trim();
                             if (!string.IsNullOrEmpty(menuText))
                             {
-                                MelonLogger.Msg($"Read name from KeyInput controller at index {cursorIndex}: '{menuText}'");
                                 return menuText;
                             }
                         }
@@ -280,7 +211,6 @@ namespace FFIV_ScreenReader.Menus
                     if (name.Contains("popup") || name.Contains("dialog") || name.Contains("prompt") ||
                         name.Contains("message_window") || name.Contains("yesno") || name.Contains("confirm"))
                     {
-                        MelonLogger.Msg($"Cursor is inside dialog: {current.name}");
                         return true;
                     }
                     current = current.parent;
@@ -291,7 +221,7 @@ namespace FFIV_ScreenReader.Menus
             }
             catch (Exception ex)
             {
-                MelonLogger.Error($"Error checking cursor dialog context: {ex.Message}");
+                MelonLogger.Warning($"Error checking cursor dialog context: {ex.Message}");
                 return false;
             }
         }
@@ -305,7 +235,6 @@ namespace FFIV_ScreenReader.Menus
             {
                 if (IsCursorInDialog(cursor.transform))
                 {
-                    MelonLogger.Msg("Cursor is in dialog, skipping keys setting controller");
                     return null;
                 }
 
@@ -317,8 +246,6 @@ namespace FFIV_ScreenReader.Menus
                     return null;
                 }
 
-                MelonLogger.Msg("Found ConfigKeysSettingController");
-
                 // Try keyboard list first
                 if (keysController.keyboardCommandList != null &&
                     cursorIndex >= 0 && cursorIndex < keysController.keyboardCommandList.Count)
@@ -329,7 +256,6 @@ namespace FFIV_ScreenReader.Menus
                         string text = ReadKeyCommandText(command);
                         if (text != null)
                         {
-                            MelonLogger.Msg($"Read from keyboard command list at index {cursorIndex}: '{text}'");
                             return text;
                         }
                     }
@@ -345,7 +271,6 @@ namespace FFIV_ScreenReader.Menus
                         string text = ReadKeyCommandText(command);
                         if (text != null)
                         {
-                            MelonLogger.Msg($"Read from gamepad command list at index {cursorIndex}: '{text}'");
                             return text;
                         }
                     }
@@ -361,7 +286,6 @@ namespace FFIV_ScreenReader.Menus
                         string text = ReadKeyCommandText(command);
                         if (text != null)
                         {
-                            MelonLogger.Msg($"Read from mouse command list at index {cursorIndex}: '{text}'");
                             return text;
                         }
                     }
@@ -396,13 +320,12 @@ namespace FFIV_ScreenReader.Menus
                             if (!string.IsNullOrWhiteSpace(localizedText))
                             {
                                 textParts.Add(localizedText.Trim());
-                                MelonLogger.Msg($"Localized MessageId '{command.MessageId}' to '{localizedText}'");
                             }
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception)
                     {
-                        MelonLogger.Warning($"Could not localize MessageId '{command.MessageId}': {ex.Message}");
+                        // Silently ignore localization failures
                     }
                 }
 
@@ -449,24 +372,20 @@ namespace FFIV_ScreenReader.Menus
                 {
                     if (current.gameObject == null)
                     {
-                        MelonLogger.Msg("Current gameObject is null, breaking hierarchy walk");
                         break;
                     }
 
                     var text = current.GetComponent<UnityEngine.UI.Text>();
                     if (text?.text != null && !string.IsNullOrEmpty(text.text.Trim()))
                     {
-                        string menuText = text.text;
-                        MelonLogger.Msg($"Found menu text: '{menuText}' from {current.name} (direct)");
-                        return menuText;
+                        return text.text;
                     }
 
                     current = current.parent;
                     hierarchyDepth++;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    MelonLogger.Error($"Error walking hierarchy at depth {hierarchyDepth}: {ex.Message}");
                     break;
                 }
             }
@@ -490,18 +409,14 @@ namespace FFIV_ScreenReader.Menus
                     var configViewTouch = current.GetComponent<ConfigCommandView_Touch>();
                     if (configViewTouch != null && configViewTouch.nameText?.text != null)
                     {
-                        string menuText = configViewTouch.nameText.text.Trim();
-                        MelonLogger.Msg($"Found menu text: '{menuText}' from Touch ConfigCommandView.nameText");
-                        return menuText;
+                        return configViewTouch.nameText.text.Trim();
                     }
 
                     // Try KeyInput version (in-game config)
                     var configViewKeyInput = current.GetComponent<ConfigCommandView_KeyInput>();
                     if (configViewKeyInput != null && configViewKeyInput.nameText?.text != null)
                     {
-                        string menuText = configViewKeyInput.nameText.text.Trim();
-                        MelonLogger.Msg($"Found menu text: '{menuText}' from KeyInput ConfigCommandView.nameText");
-                        return menuText;
+                        return configViewKeyInput.nameText.text.Trim();
                     }
 
                     // Check parent too
@@ -510,17 +425,13 @@ namespace FFIV_ScreenReader.Menus
                         configViewTouch = current.parent.GetComponent<ConfigCommandView_Touch>();
                         if (configViewTouch != null && configViewTouch.nameText?.text != null)
                         {
-                            string menuText = configViewTouch.nameText.text.Trim();
-                            MelonLogger.Msg($"Found menu text: '{menuText}' from parent Touch ConfigCommandView.nameText");
-                            return menuText;
+                            return configViewTouch.nameText.text.Trim();
                         }
 
                         configViewKeyInput = current.parent.GetComponent<ConfigCommandView_KeyInput>();
                         if (configViewKeyInput != null && configViewKeyInput.nameText?.text != null)
                         {
-                            string menuText = configViewKeyInput.nameText.text.Trim();
-                            MelonLogger.Msg($"Found menu text: '{menuText}' from parent KeyInput ConfigCommandView.nameText");
-                            return menuText;
+                            return configViewKeyInput.nameText.text.Trim();
                         }
                     }
 
@@ -549,47 +460,35 @@ namespace FFIV_ScreenReader.Menus
                 var content = configRoot.GetComponentInChildren<Transform>()?.Find("MaskObject/Scroll View/Viewport/Content");
                 if (content != null && cursorIndex >= 0 && cursorIndex < content.childCount)
                 {
-                    MelonLogger.Msg($"In-game config: Found content with {content.childCount} items, cursor at {cursorIndex}");
-
                     var configItem = content.GetChild(cursorIndex);
                     if (configItem != null && configItem.gameObject != null)
                     {
-                        MelonLogger.Msg($"Config item name: {configItem.name}");
-
                         var rootChild = configItem.Find("root");
                         if (rootChild != null)
                         {
                             var rootConfigViewTouch = rootChild.GetComponent<ConfigCommandView_Touch>();
                             if (rootConfigViewTouch != null && rootConfigViewTouch.nameText?.text != null)
                             {
-                                string menuText = rootConfigViewTouch.nameText.text.Trim();
-                                MelonLogger.Msg($"Found menu text from root Touch ConfigCommandView: '{menuText}'");
-                                return menuText;
+                                return rootConfigViewTouch.nameText.text.Trim();
                             }
 
                             var rootConfigViewKeyInput = rootChild.GetComponent<ConfigCommandView_KeyInput>();
                             if (rootConfigViewKeyInput != null && rootConfigViewKeyInput.nameText?.text != null)
                             {
-                                string menuText = rootConfigViewKeyInput.nameText.text.Trim();
-                                MelonLogger.Msg($"Found menu text from root KeyInput ConfigCommandView: '{menuText}'");
-                                return menuText;
+                                return rootConfigViewKeyInput.nameText.text.Trim();
                             }
                         }
 
                         var itemConfigViewKeyInput = configItem.GetComponentInChildren<ConfigCommandView_KeyInput>();
                         if (itemConfigViewKeyInput != null && itemConfigViewKeyInput.nameText?.text != null)
                         {
-                            string menuText = itemConfigViewKeyInput.nameText.text.Trim();
-                            MelonLogger.Msg($"Found menu text: '{menuText}' from config item KeyInput ConfigCommandView");
-                            return menuText;
+                            return itemConfigViewKeyInput.nameText.text.Trim();
                         }
 
                         var configText = configItem.GetComponentInChildren<UnityEngine.UI.Text>();
                         if (configText?.text != null && !string.IsNullOrEmpty(configText.text.Trim()))
                         {
-                            string menuText = configText.text;
-                            MelonLogger.Msg($"Found menu text (fallback): '{menuText}'");
-                            return menuText;
+                            return configText.text;
                         }
                     }
                 }
@@ -616,7 +515,6 @@ namespace FFIV_ScreenReader.Menus
                 {
                     if (current.gameObject == null)
                     {
-                        MelonLogger.Msg("Current gameObject is null in IconTextView check");
                         break;
                     }
 
@@ -626,7 +524,6 @@ namespace FFIV_ScreenReader.Menus
                         string menuText = iconTextView.nameText.text.Trim();
                         if (!string.IsNullOrEmpty(menuText))
                         {
-                            MelonLogger.Msg($"Found menu text: '{menuText}' from IconTextView.nameText");
                             return menuText;
                         }
                     }
@@ -634,7 +531,6 @@ namespace FFIV_ScreenReader.Menus
                     Transform contentList = FindContentList(current);
                     if (contentList != null && cursor.Index >= 0 && cursor.Index < contentList.childCount)
                     {
-                        MelonLogger.Msg($"Found Content list with {contentList.childCount} children, cursor at index {cursor.Index}");
                         Transform selectedChild = contentList.GetChild(cursor.Index);
 
                         if (selectedChild != null)
@@ -645,7 +541,6 @@ namespace FFIV_ScreenReader.Menus
                                 string menuText = iconTextView.nameText.text.Trim();
                                 if (!string.IsNullOrEmpty(menuText))
                                 {
-                                    MelonLogger.Msg($"Found menu text: '{menuText}' from Content[{cursor.Index}] IconTextView.nameText");
                                     return menuText;
                                 }
                             }
@@ -678,23 +573,16 @@ namespace FFIV_ScreenReader.Menus
                 {
                     if (current.name.Contains("command_list") || current.name.Contains("menu_list"))
                     {
-                        MelonLogger.Msg($"Found in-game list structure: {current.name}");
-
                         Transform contentList = FindContentList(current);
 
                         if (contentList != null && cursor.Index >= 0 && cursor.Index < contentList.childCount)
                         {
-                            MelonLogger.Msg($"Found content list with {contentList.childCount} items, cursor at {cursor.Index}");
-
                             var menuItem = contentList.GetChild(cursor.Index);
-                            MelonLogger.Msg($"Menu item at index {cursor.Index}: {menuItem.name}");
 
                             var commandViewKeyInput = menuItem.GetComponentInChildren<ConfigCommandView_KeyInput>();
                             if (commandViewKeyInput != null && commandViewKeyInput.nameText != null)
                             {
-                                string menuText = commandViewKeyInput.nameText.text.Trim();
-                                MelonLogger.Msg($"Got text from KeyInput ConfigCommandView.nameText: '{menuText}'");
-                                return menuText;
+                                return commandViewKeyInput.nameText.text.Trim();
                             }
 
                             var foundText = FindFirstText(menuItem, t =>
@@ -707,9 +595,7 @@ namespace FFIV_ScreenReader.Menus
 
                             if (foundText != null)
                             {
-                                string menuText = foundText.text.Trim();
-                                MelonLogger.Msg($"Got text from Text component: '{menuText}'");
-                                return menuText;
+                                return foundText.text.Trim();
                             }
                         }
                         break;
@@ -740,16 +626,13 @@ namespace FFIV_ScreenReader.Menus
                 {
                     if (current.gameObject == null)
                     {
-                        MelonLogger.Msg("Current gameObject is null in fallback check");
                         break;
                     }
 
                     var text = current.GetComponentInChildren<UnityEngine.UI.Text>();
                     if (text?.text != null && !string.IsNullOrEmpty(text.text.Trim()))
                     {
-                        string menuText = text.text;
-                        MelonLogger.Msg($"Found menu text: '{menuText}' from {current.name} (fallback)");
-                        return menuText;
+                        return text.text;
                     }
                     current = current.parent;
                     hierarchyDepth++;
