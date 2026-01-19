@@ -7,6 +7,7 @@ Adds NVDA output, pathfinding, sound queues and other accessibility aides to Fin
 ## Known Issues
 
 Pathfinding range is limited to roughly 31 tiles. This is a limitation within the game itself and not the mod. If a destination is out of range, it will be detected as number of steps and direction, but can not validate a step by step path to it. A guide can help if you get lost, or use teleport.
+When maps are still loading, pathfinder may become unresponsive briefly, or claim 0 destinations in all categories.
 Teleporting on the world map from a landible vehicle will leave the vehicle where it was left, meaning one will have to teleport back to that area to enter the vehicle again.
 Pathfinding    does not work through automatic movement events. If having trouble navigating a dungeon, look for events that move the character automatically and then check the possible destinations from there.
 May be an issue at certain parts of the game with item or spell targetting outside of battle where the character order is incorrect. Difficult to reproduce.
