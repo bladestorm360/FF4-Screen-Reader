@@ -2,21 +2,19 @@ using System;
 using HarmonyLib;
 using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
-using Il2CppLast.Management;
 using UnityEngine;
+using FFIV_ScreenReader.Utils;
 
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
     /// Patches for playing sound effects when player hits a wall/obstacle.
     /// Uses FieldController.OnPlayerHitCollider which fires on collision events.
+    /// Plays procedural wall bump tone via SoundPlayer (distinct from in-game audio).
     /// </summary>
     [HarmonyPatch]
     public static class WallBumpPatches
     {
-        // Sound ID for wall bump
-        private static readonly int BUMP_SOUND_ID = 4;
-
         // Cooldown to prevent sound spam when holding direction against a wall
         private static float lastBumpTime = 0f;
         private const float BUMP_COOLDOWN = 0.3f; // 300ms
@@ -35,30 +33,11 @@ namespace FFIV_ScreenReader.Patches
                     return;
 
                 lastBumpTime = currentTime;
-                PlayBumpSound();
+                SoundPlayer.PlayWallBump();
             }
             catch (Exception ex)
             {
                 MelonLoader.MelonLogger.Error($"Error in OnPlayerHitCollider_Postfix: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Plays the wall bump sound effect
-        /// </summary>
-        private static void PlayBumpSound()
-        {
-            try
-            {
-                var audioManager = AudioManager.Instance;
-                if (audioManager != null)
-                {
-                    audioManager.PlaySe(BUMP_SOUND_ID);
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLoader.MelonLogger.Error($"Error playing bump sound: {ex.Message}");
             }
         }
     }

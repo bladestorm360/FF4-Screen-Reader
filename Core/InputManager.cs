@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using Il2Cpp;
@@ -27,9 +28,37 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         public void Update()
         {
+            // ModMenu handles its own input via Windows API when open
+            if (ModMenu.IsOpen)
+            {
+                ModMenu.HandleInput();
+                return;  // Consume all input while menu is open
+            }
+
             // Early exit if no keys pressed this frame - avoids expensive FindObjectOfType calls
             if (!Input.anyKeyDown)
             {
+                return;
+            }
+
+            // F8 to open mod menu
+            if (Input.GetKeyDown(KeyCode.F8))
+            {
+                ModMenu.Open();
+                return;
+            }
+
+            // F1 toggles walk/run speed - announce after game processes it
+            if (Input.GetKeyDown(KeyCode.F1))
+            {
+                CoroutineManager.StartManaged(AnnounceWalkRunState());
+                return;
+            }
+
+            // F3 toggles encounters - announce after game processes it
+            if (Input.GetKeyDown(KeyCode.F3))
+            {
+                CoroutineManager.StartManaged(AnnounceEncounterState());
                 return;
             }
 
@@ -271,12 +300,13 @@ namespace FFIV_ScreenReader.Core
                 }
             }
 
-            // Hotkey: 0 (Alpha0) or Shift+K to reset to All category
+            // Hotkey: 0 (Alpha0) to dump untranslated entity names for current map
             if (Input.GetKeyDown(KeyCode.Alpha0))
             {
-                mod.ResetToAllCategory();
+                DumpUntranslatedEntityNames();
             }
 
+            // Hotkey: Shift+K to reset to All category
             if (Input.GetKeyDown(KeyCode.K) && IsShiftHeld())
             {
                 mod.ResetToAllCategory();
@@ -314,6 +344,24 @@ namespace FFIV_ScreenReader.Core
             {
                 AnnounceVehicleState();
             }
+
+            // Hotkey: ' (Quote) to toggle footstep sounds
+            if (Input.GetKeyDown(KeyCode.Quote))
+            {
+                mod.ToggleFootsteps();
+            }
+
+            // Hotkey: ; (Semicolon) to toggle wall tones
+            if (Input.GetKeyDown(KeyCode.Semicolon))
+            {
+                mod.ToggleWallTones();
+            }
+
+            // Hotkey: 9 to toggle audio beacons
+            if (Input.GetKeyDown(KeyCode.Alpha9))
+            {
+                mod.ToggleAudioBeacons();
+            }
         }
 
         /// <summary>
@@ -336,6 +384,23 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
+        /// Dumps untranslated entity names for the current map to EntityNames.json.
+        /// </summary>
+        private void DumpUntranslatedEntityNames()
+        {
+            try
+            {
+                string result = EntityTranslator.DumpUntranslatedNames();
+                FFIV_ScreenReaderMod.SpeakText(result, true);
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Warning($"Error dumping entity names: {ex.Message}");
+                FFIV_ScreenReaderMod.SpeakText("Failed to dump entity names", true);
+            }
+        }
+
+        /// <summary>
         /// Checks if either Shift key is held.
         /// </summary>
         private bool IsShiftHeld()
@@ -349,24 +414,6 @@ namespace FFIV_ScreenReader.Core
         private bool IsCtrlHeld()
         {
             return Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-        }
-
-        /// <summary>
-        /// Checks if the game is currently in battle.
-        /// Uses the presence of an active BattleMenuController as the indicator.
-        /// </summary>
-        private bool IsInBattle()
-        {
-            try
-            {
-                // Check if there's an active character from the battle patch
-                var activeCharacter = FFIV_ScreenReader.Patches.BattleMenuController_SetCommandSelectTarget_Patch.CurrentActiveCharacter;
-                return activeCharacter != null;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         /// <summary>
@@ -420,6 +467,52 @@ namespace FFIV_ScreenReader.Core
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Announces walk/run state after F1 toggle.
+        /// Waits 3 frames for game to fully process F1 and update dashFlag.
+        /// Note: Only affects dungeons/towns - world map uses fixed walk speed.
+        /// </summary>
+        private static IEnumerator AnnounceWalkRunState()
+        {
+            yield return null; // Frame 1
+            yield return null; // Frame 2
+            yield return null; // Frame 3
+
+            try
+            {
+                bool isDashing = MoveStateHelper.GetDashFlag();
+                string state = isDashing ? "Run" : "Walk";
+                FFIV_ScreenReaderMod.SpeakText(state, interrupt: true);
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Warning($"[F1] Error reading walk/run state: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Announces encounter state after F3 toggle.
+        /// Waits 1 frame for game to process toggle.
+        /// </summary>
+        private static IEnumerator AnnounceEncounterState()
+        {
+            yield return null;
+            try
+            {
+                var userData = Il2CppLast.Management.UserDataManager.Instance();
+                if (userData?.CheatSettingsData != null)
+                {
+                    bool enabled = userData.CheatSettingsData.IsEnableEncount;
+                    string state = enabled ? "Encounters on" : "Encounters off";
+                    FFIV_ScreenReaderMod.SpeakText(state, interrupt: true);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Warning($"[F3] Error reading encounter state: {ex.Message}");
+            }
         }
     }
 }

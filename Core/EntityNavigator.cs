@@ -27,6 +27,9 @@ namespace FFIV_ScreenReader.Core
         private MapExitGroupingStrategy mapExitGroupingStrategy;
         private bool filterMapExits = false;
 
+        // Dirty flag to avoid unnecessary re-sorting
+        private bool _navigationListDirty = true;
+
         /// <summary>
         /// Whether to filter out entities without valid paths when cycling.
         /// Since pathfinding is an OnCycle filter, toggling this doesn't require rebuilding the list.
@@ -142,6 +145,9 @@ namespace FFIV_ScreenReader.Core
             // Insert sorted by distance
             InsertSorted(entity);
 
+            // Mark list as dirty for re-sort on next cycle
+            _navigationListDirty = true;
+
             // Auto-select if no entity is currently selected
             if (selectedEntity == null)
             {
@@ -155,6 +161,9 @@ namespace FFIV_ScreenReader.Core
         private void HandleEntityRemoved(NavigableEntity entity)
         {
             navigationList.Remove(entity);
+
+            // Mark list as dirty for re-sort on next cycle
+            _navigationListDirty = true;
 
             // If removed entity was selected, auto-select first available entity
             if (selectedEntity == entity)
@@ -219,6 +228,9 @@ namespace FFIV_ScreenReader.Core
             {
                 selectedEntity = navigationList.Count > 0 ? navigationList[0] : null;
             }
+
+            // Mark as sorted after full rebuild
+            _navigationListDirty = false;
         }
 
         /// <summary>
@@ -276,13 +288,26 @@ namespace FFIV_ScreenReader.Core
         /// Re-sorts the navigation list by distance.
         /// Pre-computes distances to avoid repeated calculations during sort comparisons.
         /// Returns the new index of the currently selected entity (-1 if not found or no selection).
-        /// Call before cycling to ensure distances are current.
+        /// Only re-sorts if the list is marked dirty or player has moved significantly.
         /// </summary>
         private int ReSortNavigationList()
         {
             if (navigationList.Count == 0)
                 return -1;
 
+            // Skip re-sort if list is not dirty (no entities added/removed)
+            if (!_navigationListDirty)
+            {
+                // Just return current selected index
+                if (selectedEntity != null)
+                {
+                    int idx = navigationList.IndexOf(selectedEntity);
+                    return idx >= 0 ? idx : 0;
+                }
+                return 0;
+            }
+
+            _navigationListDirty = false;
             Vector3 playerPos = GetPlayerPosition();
 
             // Pre-compute distances once

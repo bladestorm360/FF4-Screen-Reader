@@ -20,6 +20,10 @@ namespace FFIV_ScreenReader.Field
         private IGroupingStrategy strategy;
         private EntityCategory? cachedCategory;
 
+        // Per-frame caching for GetRepresentative to avoid redundant calculations
+        private NavigableEntity _cachedRepresentative;
+        private int _lastCacheFrame = -1;
+
         /// <summary>
         /// Unique key identifying this group.
         /// </summary>
@@ -72,14 +76,25 @@ namespace FFIV_ScreenReader.Field
         /// <summary>
         /// Gets the current representative member based on the grouping strategy.
         /// Typically the closest member to the player.
+        /// Caches result per frame to avoid redundant calculations when multiple properties are accessed.
         /// </summary>
         private NavigableEntity GetRepresentative()
         {
             if (members.Count == 0)
                 return null;
 
+            // Return cached value if we're in the same frame
+            int currentFrame = Time.frameCount;
+            if (currentFrame == _lastCacheFrame && _cachedRepresentative != null)
+            {
+                return _cachedRepresentative;
+            }
+
+            // Calculate and cache
+            _lastCacheFrame = currentFrame;
             Vector3 playerPos = GetPlayerPosition();
-            return strategy.SelectRepresentative(members, playerPos);
+            _cachedRepresentative = strategy.SelectRepresentative(members, playerPos);
+            return _cachedRepresentative;
         }
 
         /// <summary>

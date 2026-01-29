@@ -9,8 +9,24 @@ namespace FFIV_ScreenReader.Utils
     /// </summary>
     public static class AnnouncementDeduplicator
     {
+        // Maximum cache size before pruning to prevent unbounded memory growth
+        private const int MaxCacheSize = 100;
+
         private static readonly Dictionary<string, string> _lastStrings = new Dictionary<string, string>();
         private static readonly Dictionary<string, int> _lastInts = new Dictionary<string, int>();
+        private static readonly Dictionary<string, object> _lastObjects = new Dictionary<string, object>();
+
+        /// <summary>
+        /// Prunes a dictionary if it exceeds MaxCacheSize.
+        /// Uses simple clear strategy since context keys are reused and will be re-added as needed.
+        /// </summary>
+        private static void PruneIfNeeded<TKey, TValue>(Dictionary<TKey, TValue> cache)
+        {
+            if (cache.Count > MaxCacheSize)
+            {
+                cache.Clear();
+            }
+        }
 
         /// <summary>
         /// Checks if a string announcement should be spoken (different from last).
@@ -28,6 +44,7 @@ namespace FFIV_ScreenReader.Utils
                 return false;
 
             _lastStrings[context] = text;
+            PruneIfNeeded(_lastStrings);
             return true;
         }
 
@@ -44,6 +61,7 @@ namespace FFIV_ScreenReader.Utils
                 return false;
 
             _lastInts[context] = index;
+            PruneIfNeeded(_lastInts);
             return true;
         }
 
@@ -68,6 +86,29 @@ namespace FFIV_ScreenReader.Utils
 
             _lastInts[intKey] = index;
             _lastStrings[context] = text ?? string.Empty;
+            PruneIfNeeded(_lastInts);
+            PruneIfNeeded(_lastStrings);
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if an object reference announcement should be spoken (different from last).
+        /// Uses reference equality for comparison - useful for battle actions where each
+        /// BattleActData instance is unique per action.
+        /// </summary>
+        /// <param name="context">Unique context key (e.g., "BattleAction")</param>
+        /// <param name="obj">The object reference</param>
+        /// <returns>True if announcement should be spoken, false if duplicate</returns>
+        public static bool ShouldAnnounce(string context, object obj)
+        {
+            if (obj == null)
+                return false;
+
+            if (_lastObjects.TryGetValue(context, out var last) && ReferenceEquals(last, obj))
+                return false;
+
+            _lastObjects[context] = obj;
+            PruneIfNeeded(_lastObjects);
             return true;
         }
 
@@ -102,6 +143,7 @@ namespace FFIV_ScreenReader.Utils
             _lastStrings.Remove(context);
             _lastInts.Remove(context);
             _lastInts.Remove(context + ".index");
+            _lastObjects.Remove(context);
         }
 
         /// <summary>
@@ -123,6 +165,7 @@ namespace FFIV_ScreenReader.Utils
         {
             _lastStrings.Clear();
             _lastInts.Clear();
+            _lastObjects.Clear();
         }
     }
 }

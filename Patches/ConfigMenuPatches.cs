@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using MelonLoader;
 using Il2CppLast.UI.KeyInput;
@@ -367,17 +368,27 @@ namespace FFIV_ScreenReader.Patches
     }
 
     /// <summary>
+    /// Wrapper class to hold string value in ConditionalWeakTable (requires reference type).
+    /// </summary>
+    internal class StringHolder
+    {
+        public string Value;
+        public StringHolder(string value) { Value = value; }
+    }
+
+    /// <summary>
     /// Patch for SetArrowChangeText (Touch) - called when arrow-select text changes.
     /// Uses controller+value tracking to filter init calls and only announce user changes.
     /// Input-agnostic: works with touch or any input method.
+    /// Uses ConditionalWeakTable to prevent memory leak when controllers are destroyed.
     /// </summary>
     [HarmonyPatch(typeof(ConfigCommandController_Touch), "SetArrowChangeText")]
     public static class ConfigCommandControllerTouch_SetArrowChangeText_Patch
     {
         private const string DEDUP_CONTEXT = "ConfigMenu.TouchArrowValue";
-        // Track last value per controller to distinguish init from user changes
-        private static readonly System.Collections.Generic.Dictionary<ConfigCommandController_Touch, string> lastValues
-            = new System.Collections.Generic.Dictionary<ConfigCommandController_Touch, string>();
+        // Track last value per controller using weak references to prevent memory leak
+        private static readonly ConditionalWeakTable<ConfigCommandController_Touch, StringHolder> lastValues
+            = new ConditionalWeakTable<ConfigCommandController_Touch, StringHolder>();
 
         [HarmonyPostfix]
         public static void Postfix(ConfigCommandController_Touch __instance, string text)
@@ -396,19 +407,19 @@ namespace FFIV_ScreenReader.Patches
                 if (string.IsNullOrEmpty(value)) return;
 
                 // Check if we've seen this controller before
-                if (lastValues.TryGetValue(__instance, out string lastValue))
+                if (lastValues.TryGetValue(__instance, out StringHolder holder))
                 {
                     // Same value = no change, don't announce
-                    if (lastValue == value) return;
+                    if (holder.Value == value) return;
 
                     // Value changed - this is a user action, announce it
-                    lastValues[__instance] = value;
+                    holder.Value = value;
                     FFIV_ScreenReaderMod.SpeakText(value, interrupt: true);
                 }
                 else
                 {
                     // First time seeing this controller - init call, just track it
-                    lastValues[__instance] = value;
+                    lastValues.Add(__instance, new StringHolder(value));
                 }
             }
             catch (Exception ex)
@@ -422,14 +433,15 @@ namespace FFIV_ScreenReader.Patches
     /// Patch for SetSliderCurrentValue (Touch) - called when slider value changes.
     /// Uses controller+value tracking to filter init calls and only announce user changes.
     /// Input-agnostic: works with touch or any input method.
+    /// Uses ConditionalWeakTable to prevent memory leak when controllers are destroyed.
     /// </summary>
     [HarmonyPatch(typeof(ConfigCommandController_Touch), "SetSliderCurrentValue")]
     public static class ConfigCommandControllerTouch_SetSliderCurrentValue_Patch
     {
         private const string DEDUP_CONTEXT = "ConfigMenu.TouchSliderValue";
-        // Track last value per controller to distinguish init from user changes
-        private static readonly System.Collections.Generic.Dictionary<ConfigCommandController_Touch, string> lastValues
-            = new System.Collections.Generic.Dictionary<ConfigCommandController_Touch, string>();
+        // Track last value per controller using weak references to prevent memory leak
+        private static readonly ConditionalWeakTable<ConfigCommandController_Touch, StringHolder> lastValues
+            = new ConditionalWeakTable<ConfigCommandController_Touch, StringHolder>();
 
         [HarmonyPostfix]
         public static void Postfix(ConfigCommandController_Touch __instance, float value)
@@ -449,19 +461,19 @@ namespace FFIV_ScreenReader.Patches
                 if (string.IsNullOrEmpty(textValue)) return;
 
                 // Check if we've seen this controller before
-                if (lastValues.TryGetValue(__instance, out string lastTextValue))
+                if (lastValues.TryGetValue(__instance, out StringHolder holder))
                 {
                     // Same value = no change, don't announce
-                    if (lastTextValue == textValue) return;
+                    if (holder.Value == textValue) return;
 
                     // Value changed - this is a user action, announce it
-                    lastValues[__instance] = textValue;
+                    holder.Value = textValue;
                     FFIV_ScreenReaderMod.SpeakText(textValue, interrupt: true);
                 }
                 else
                 {
                     // First time seeing this controller - init call, just track it
-                    lastValues[__instance] = textValue;
+                    lastValues.Add(__instance, new StringHolder(textValue));
                 }
             }
             catch (Exception ex)

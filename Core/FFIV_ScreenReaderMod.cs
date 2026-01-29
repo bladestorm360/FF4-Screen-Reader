@@ -4,8 +4,17 @@ using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Patches;
 using UnityEngine;
+using UnityEngine.Events;
+using UnityEngine.SceneManagement;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 using Il2Cpp;
 using Il2CppLast.Map;
+using Il2CppLast.Message;
+using FieldTresureBox = Il2CppLast.Entity.Field.FieldTresureBox;
+using SubSceneManagerMainGame = Il2CppLast.Management.SubSceneManagerMainGame;
 
 [assembly: MelonInfo(typeof(FFIV_ScreenReader.Core.FFIV_ScreenReaderMod), "FFIV Screen Reader", "1.0.0", "Zachary Kline")]
 [assembly: MelonGame("SQUARE ENIX, Inc.", "FINAL FANTASY IV")]
@@ -36,8 +45,11 @@ namespace FFIV_ScreenReader.Core
         private EntityCache entityCache;
         private EntityNavigator entityNavigator;
 
-        // Entity scanning
-        private const float ENTITY_SCAN_INTERVAL = 5f;
+        // Static instance for access from patches
+        internal static FFIV_ScreenReaderMod Instance { get; private set; }
+
+        // Stored delegate for proper event unsubscription (fixes memory leak)
+        private static UnityAction<Scene, LoadSceneMode> _onSceneLoadedHandler;
 
         // Category count derived from enum for safe cycling
         private static readonly int CategoryCount = System.Enum.GetValues(typeof(EntityCategory)).Length;
@@ -48,36 +60,95 @@ namespace FFIV_ScreenReader.Core
         // Map exit filter toggle
         private bool filterMapExits = false;
 
-        // Map transition tracking
-        private int lastAnnouncedMapId = -1;
+        // Audio feedback toggles
+        private bool enableWallTones = false;
+        private bool enableFootsteps = false;
+        private bool enableAudioBeacons = false;
+
+        // Coroutine-based wall tone loop
+        private IEnumerator wallToneCoroutine = null;
+        private const float WALL_TONE_LOOP_INTERVAL = 0.1f;
+
+        // Coroutine-based audio beacon loop
+        private IEnumerator beaconCoroutine = null;
+        private const float BEACON_INTERVAL = 2.0f;
+
+        // Map transition suppression for wall tones
+        private int wallToneMapId = -1;
+        private float wallToneSuppressedUntil = 0f;
+
+        // Map transition suppression for beacons
+        private float beaconSuppressedUntil = 0f;
+
+        // Reusable direction list buffer to avoid per-cycle allocations
+        private static readonly List<SoundPlayer.Direction> wallDirectionsBuffer = new List<SoundPlayer.Direction>(4);
 
         // Preferences
         private static MelonPreferences_Category prefsCategory;
         private static MelonPreferences_Entry<bool> prefPathfindingFilter;
         private static MelonPreferences_Entry<bool> prefMapExitFilter;
+        private static MelonPreferences_Entry<bool> prefWallTones;
+        private static MelonPreferences_Entry<bool> prefFootsteps;
+        private static MelonPreferences_Entry<bool> prefAudioBeacons;
+
+        // Volume controls (0-100, default 50)
+        private static MelonPreferences_Entry<int> prefWallBumpVolume;
+        private static MelonPreferences_Entry<int> prefFootstepVolume;
+        private static MelonPreferences_Entry<int> prefWallToneVolume;
+        private static MelonPreferences_Entry<int> prefBeaconVolume;
+
+        // Pre-cached direction vectors for map exit checks (avoids per-cycle Vector3 allocations)
+        private static readonly Vector3 DirNorth = new Vector3(0, 16, 0);
+        private static readonly Vector3 DirSouth = new Vector3(0, -16, 0);
+        private static readonly Vector3 DirEast = new Vector3(16, 0, 0);
+        private static readonly Vector3 DirWest = new Vector3(-16, 0, 0);
+
+        // Beacon debouncing
+        private float lastBeaconPlayedAt = 0f;
 
         public override void OnInitializeMelon()
         {
+            Instance = this;
             LoggerInstance.Msg("FFIV Screen Reader Mod loaded!");
 
             // Subscribe to scene load events for automatic component caching
-            UnityEngine.SceneManagement.SceneManager.sceneLoaded += (UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode>)OnSceneLoaded;
+            // Store delegate as field to ensure proper unsubscription
+            _onSceneLoadedHandler = (UnityAction<Scene, LoadSceneMode>)OnSceneLoaded;
+            SceneManager.sceneLoaded += _onSceneLoadedHandler;
 
             // Initialize preferences
             prefsCategory = MelonPreferences.CreateCategory("FFIV_ScreenReader");
             prefPathfindingFilter = prefsCategory.CreateEntry<bool>("PathfindingFilter", false, "Pathfinding Filter", "Only show entities with valid paths when cycling");
             prefMapExitFilter = prefsCategory.CreateEntry<bool>("MapExitFilter", false, "Map Exit Filter", "Filter multiple map exits to the same destination, showing only the closest one");
+            prefWallTones = prefsCategory.CreateEntry<bool>("WallTones", false, "Wall Tones", "Play directional tones when approaching walls");
+            prefFootsteps = prefsCategory.CreateEntry<bool>("Footsteps", false, "Footsteps", "Play click sound on each tile movement");
+            prefAudioBeacons = prefsCategory.CreateEntry<bool>("AudioBeacons", false, "Audio Beacons", "Play directional pings toward selected entity");
+
+            // Volume controls (0-100, default 50)
+            prefWallBumpVolume = prefsCategory.CreateEntry<int>("WallBumpVolume", 50, "Wall Bump Volume", "Volume for wall bump sounds (0-100)");
+            prefFootstepVolume = prefsCategory.CreateEntry<int>("FootstepVolume", 50, "Footstep Volume", "Volume for footstep sounds (0-100)");
+            prefWallToneVolume = prefsCategory.CreateEntry<int>("WallToneVolume", 50, "Wall Tone Volume", "Volume for wall proximity tones (0-100)");
+            prefBeaconVolume = prefsCategory.CreateEntry<int>("BeaconVolume", 50, "Beacon Volume", "Volume for audio beacon pings (0-100)");
 
             // Load saved preferences
             filterByPathfinding = prefPathfindingFilter.Value;
             filterMapExits = prefMapExitFilter.Value;
+            enableWallTones = prefWallTones.Value;
+            enableFootsteps = prefFootsteps.Value;
+            enableAudioBeacons = prefAudioBeacons.Value;
 
             // Initialize Tolk for screen reader support
             tolk = new TolkWrapper();
             tolk.Load();
 
-            // Initialize entity cache and navigator
-            entityCache = new EntityCache(ENTITY_SCAN_INTERVAL);
+            // Initialize external sound player for distinct audio feedback (wall bumps, tones, footsteps)
+            SoundPlayer.Initialize();
+
+            // Initialize entity name translator for Japanese-to-English entity names
+            EntityTranslator.Initialize();
+
+            // Initialize entity cache and navigator (event-driven, no timer)
+            entityCache = new EntityCache();
 
             entityNavigator = new EntityNavigator(entityCache);
             entityNavigator.FilterByPathfinding = filterByPathfinding;
@@ -85,6 +156,9 @@ namespace FFIV_ScreenReader.Core
 
             // Initialize input manager
             inputManager = new InputManager(this);
+
+            // Initialize mod menu
+            ModMenu.Initialize();
 
             // Initialize menu state registry (ensures all handlers are registered)
             MenuStateRegistry.Initialize();
@@ -103,12 +177,36 @@ namespace FFIV_ScreenReader.Core
             // Set up callback for field ready event before applying patches
             MovementSpeechPatches.OnFieldReady = OnFieldReadyCallback;
             MovementSpeechPatches.ApplyPatches(harmony);
+
+            // Patch game state transitions (map changes) - event-driven, no polling
+            GameStatePatches.ApplyPatches(harmony);
+
+            // Patch entity interactions for immediate entity refresh (treasure chest, dialogue end)
+            TryPatchEntityInteractions(harmony);
+
+            // Initialize fade detection for wall tone suppression during map transitions
+            MapTransitionPatches.Initialize(harmony);
+
+            // NOTE: Audio loops (wall tones, beacons) are NOT started here.
+            // They are started in DelayedAudioRestart after FieldPlayerController exists
+            // to avoid lag during game load.
         }
 
         public override void OnDeinitializeMelon()
         {
-            // Unsubscribe from scene load events
-            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= (UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode>)OnSceneLoaded;
+            // Unsubscribe from scene load events using stored delegate
+            if (_onSceneLoadedHandler != null)
+            {
+                SceneManager.sceneLoaded -= _onSceneLoadedHandler;
+                _onSceneLoadedHandler = null;
+            }
+
+            // Stop audio loops
+            StopWallToneLoop();
+            StopBeaconLoop();
+
+            // Shutdown sound player (closes waveOut handles, frees unmanaged memory)
+            SoundPlayer.Shutdown();
 
             CoroutineManager.CleanupAll();
             tolk?.Unload();
@@ -126,10 +224,73 @@ namespace FFIV_ScreenReader.Core
                 entityCache.ForceScan();
                 LoggerInstance.Msg($"[FieldReady] Entity scan complete, found {entityCache.Entities.Count} entities");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 LoggerInstance.Warning($"[FieldReady] Error during entity scan: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Patches entity interaction methods for immediate entity refresh.
+        /// Triggers rescan when treasure chests are opened or dialogue ends.
+        /// </summary>
+        private void TryPatchEntityInteractions(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                // Patch FieldTresureBox.Open() - triggers entity refresh when chest is opened
+                Type treasureBoxType = typeof(FieldTresureBox);
+                var openMethod = treasureBoxType.GetMethod("Open", BindingFlags.Public | BindingFlags.Instance);
+                var openPostfix = typeof(EntityInteractionPatches).GetMethod("TreasureBox_Open_Postfix", BindingFlags.Public | BindingFlags.Static);
+
+                if (openMethod != null && openPostfix != null)
+                {
+                    harmony.Patch(openMethod, postfix: new HarmonyMethod(openPostfix));
+                    LoggerInstance.Msg("Patched FieldTresureBox.Open for entity refresh");
+                }
+                else
+                {
+                    LoggerInstance.Warning($"FieldTresureBox.Open patch failed. Method: {openMethod != null}, Postfix: {openPostfix != null}");
+                }
+
+                // Patch MessageWindowManager.Close() - triggers entity refresh when dialogue ends
+                Type messageManagerType = typeof(MessageWindowManager);
+                var closeMethod = messageManagerType.GetMethod("Close", BindingFlags.Public | BindingFlags.Instance);
+                var closePostfix = typeof(EntityInteractionPatches).GetMethod("MessageWindow_Close_Postfix", BindingFlags.Public | BindingFlags.Static);
+
+                if (closeMethod != null && closePostfix != null)
+                {
+                    harmony.Patch(closeMethod, postfix: new HarmonyMethod(closePostfix));
+                    LoggerInstance.Msg("Patched MessageWindowManager.Close for entity refresh");
+                }
+                else
+                {
+                    LoggerInstance.Warning($"MessageWindowManager.Close patch failed. Method: {closeMethod != null}, Postfix: {closePostfix != null}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Error($"Error patching entity interactions: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Schedules an entity refresh after a 1-frame delay.
+        /// Called by interaction hooks (treasure chest, dialogue end) to update entity states.
+        /// </summary>
+        internal void ScheduleEntityRefresh()
+        {
+            CoroutineManager.StartManaged(EntityRefreshCoroutine());
+        }
+
+        private IEnumerator EntityRefreshCoroutine()
+        {
+            // Wait one frame for game state to fully update
+            yield return null;
+
+            // Rescan entities to pick up state changes (e.g., chest opened)
+            entityCache.ForceScan();
+            LoggerInstance.Msg("[EntityRefresh] Rescanned entities after interaction");
         }
 
         /// <summary>
@@ -151,6 +312,18 @@ namespace FFIV_ScreenReader.Core
                 // Clear ALL menu states on scene change to prevent stale state from suppressing announcements
                 // This fixes the issue where popups don't read on first game load
                 MenuState.ClearAllMenuStates();
+
+                // Clear stale object cache before scene transition to prevent lag
+                Utils.GameObjectCache.ClearAll();
+
+                // Stop audio loops during scene transition and suppress wall tones/beacons briefly
+                StopWallToneLoop();
+                StopBeaconLoop();
+                wallToneSuppressedUntil = Time.time + 1.0f;
+                beaconSuppressedUntil = Time.time + 1.0f;
+
+                // Reset footstep tracking for new map
+                FootstepPatches.ResetState();
 
                 // Try to find and cache FieldPlayerController
                 var playerController = UnityEngine.Object.FindObjectOfType<Il2CppLast.Map.FieldPlayerController>();
@@ -175,6 +348,12 @@ namespace FFIV_ScreenReader.Core
                 {
                     LoggerInstance.Msg("[ComponentCache] No FieldMap found in scene");
                 }
+
+                // Restart audio loops after scene has settled (if enabled)
+                if (enableWallTones || enableAudioBeacons)
+                {
+                    CoroutineManager.StartManaged(DelayedAudioRestart());
+                }
             }
             catch (System.Exception ex)
             {
@@ -185,61 +364,22 @@ namespace FFIV_ScreenReader.Core
 
         public override void OnUpdate()
         {
-            // Update entity cache (handles periodic rescanning)
-            entityCache.Update();
-
-            // Check for map transitions
-            CheckMapTransition();
-
             // Handle all input
             inputManager.Update();
         }
 
         /// <summary>
-        /// Checks for map transitions and announces the new map name.
+        /// Forces an entity rescan. Called from GameStatePatches on map transitions.
         /// </summary>
-        private void CheckMapTransition()
+        public void ForceEntityRescan()
         {
-            try
-            {
-                var userDataManager = Il2CppLast.Management.UserDataManager.Instance();
-                if (userDataManager != null)
-                {
-                    int currentMapId = userDataManager.CurrentMapId;
-                    if (currentMapId != lastAnnouncedMapId && lastAnnouncedMapId != -1)
-                    {
-                        // Map has changed, announce the new map
-                        string mapName = Field.MapNameResolver.GetCurrentMapName();
-                        string fullMessage = $"Entering {mapName}";
-                        SpeakText(fullMessage, interrupt: false);
-                        lastAnnouncedMapId = currentMapId;
-
-                        // Fix 4: Record this announcement for deduplication with SystemMessage
-                        // This prevents "Mysidia – Manor of Prayers" from being announced twice
-                        LocationMessageTracker.SetLastFadeMessage(fullMessage);
-
-                        // Check if entering interior map - if so, switch to on-foot state
-                        // (e.g., entering Lunar Whale 2F interior while in airship)
-                        bool isWorldMap = IsCurrentMapWorldMap();
-                        Utils.MoveStateHelper.OnMapTransition(isWorldMap);
-                    }
-                    else if (lastAnnouncedMapId == -1)
-                    {
-                        // First run, just store the current map without announcing
-                        lastAnnouncedMapId = currentMapId;
-                    }
-                }
-            }
-            catch (System.Exception ex)
-            {
-                LoggerInstance.Warning($"Error detecting map transition: {ex.Message}");
-            }
+            entityCache?.ForceScan();
         }
 
         /// <summary>
         /// Check if the current map is a world map (overworld, underworld, moon surface).
         /// </summary>
-        private bool IsCurrentMapWorldMap()
+        public bool IsCurrentMapWorldMap()
         {
             try
             {
@@ -667,6 +807,382 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
+        #region Audio Loop Management
+
+        /// <summary>
+        /// Starts the wall tone coroutine loop. Safe to call if already running (no-op).
+        /// </summary>
+        private void StartWallToneLoop()
+        {
+            if (!enableWallTones) return;  // Don't start if disabled
+            if (wallToneCoroutine != null) return;
+            wallToneCoroutine = WallToneLoop();
+            CoroutineManager.StartManaged(wallToneCoroutine);
+        }
+
+        /// <summary>
+        /// Stops the wall tone coroutine loop and silences any playing tone.
+        /// </summary>
+        private void StopWallToneLoop()
+        {
+            if (wallToneCoroutine != null)
+            {
+                CoroutineManager.StopManaged(wallToneCoroutine);
+                wallToneCoroutine = null;
+            }
+            if (SoundPlayer.IsWallTonePlaying())
+                SoundPlayer.StopWallTone();
+        }
+
+        /// <summary>
+        /// Coroutine that delays audio loop restart after scene load to let map settle.
+        /// Only starts loops if FieldPlayerController exists (valid field scene).
+        /// </summary>
+        private IEnumerator DelayedAudioRestart()
+        {
+            yield return new WaitForSeconds(0.5f);
+
+            // Only start loops if on valid field (FieldPlayerController exists)
+            var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
+            if (playerController == null)
+                playerController = Utils.GameObjectCache.Refresh<FieldPlayerController>();
+
+            if (playerController != null)
+            {
+                if (enableWallTones) StartWallToneLoop();
+                if (enableAudioBeacons) StartBeaconLoop();
+            }
+        }
+
+        /// <summary>
+        /// Starts the audio beacon coroutine loop. Safe to call if already running (no-op).
+        /// </summary>
+        private void StartBeaconLoop()
+        {
+            if (!enableAudioBeacons) return;  // Don't start if disabled
+            if (beaconCoroutine != null) return;
+            beaconCoroutine = BeaconLoop();
+            CoroutineManager.StartManaged(beaconCoroutine);
+        }
+
+        /// <summary>
+        /// Stops the audio beacon coroutine loop.
+        /// </summary>
+        private void StopBeaconLoop()
+        {
+            if (beaconCoroutine != null)
+            {
+                CoroutineManager.StopManaged(beaconCoroutine);
+                beaconCoroutine = null;
+            }
+        }
+
+        /// <summary>
+        /// Coroutine loop that pings toward the selected entity every 2 seconds.
+        /// Uses manual time-based waiting for IL2CPP compatibility.
+        /// Exits when enableAudioBeacons becomes false.
+        /// </summary>
+        private IEnumerator BeaconLoop()
+        {
+            float nextBeaconTime = Time.time + 0.3f;  // Delay first beacon by 300ms for scene stability
+
+            while (enableAudioBeacons)  // Exit when disabled
+            {
+                // Manual time-based waiting (WaitForSeconds doesn't work reliably in IL2CPP wrapper)
+                if (Time.time < nextBeaconTime)
+                {
+                    yield return null;
+                    continue;
+                }
+                nextBeaconTime = Time.time + BEACON_INTERVAL;
+
+                // Suppress beacons briefly after scene load (same pattern as wall tones)
+                if (Time.time < beaconSuppressedUntil)
+                    continue;
+
+                try
+                {
+                    var entity = entityNavigator?.CurrentEntity;
+                    if (entity == null) continue;
+
+                    var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
+                    if (playerController?.fieldPlayer == null) continue;
+
+                    Vector3 playerPos = playerController.fieldPlayer.transform.localPosition;
+                    Vector3 entityPos = entity.Position;
+
+                    // Sanity check: skip if positions look invalid (garbage data during load)
+                    if (float.IsNaN(playerPos.x) || float.IsNaN(entityPos.x) ||
+                        Mathf.Abs(playerPos.x) > 10000f || Mathf.Abs(entityPos.x) > 10000f)
+                        continue;
+
+                    float distance = Vector3.Distance(playerPos, entityPos);
+                    float maxDist = 500f;
+                    float volumeScale = Mathf.Clamp(1f - (distance / maxDist), 0.15f, 0.60f);
+
+                    float deltaX = entityPos.x - playerPos.x;
+                    float pan = Mathf.Clamp(deltaX / 100f, -1f, 1f) * 0.5f + 0.5f;
+
+                    bool isSouth = entityPos.y < playerPos.y - 8f;
+
+                    // Debounce: ensure minimum interval between beacons (protects against timing issues on first load)
+                    float timeSinceLast = Time.time - lastBeaconPlayedAt;
+                    if (timeSinceLast < BEACON_INTERVAL * 0.8f)  // 80% of interval = 1.6s minimum
+                        continue;
+
+                    SoundPlayer.PlayBeacon(isSouth, pan, volumeScale);
+                    lastBeaconPlayedAt = Time.time;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[Beacon] Error: {ex.Message}");
+                }
+            }
+
+            // Clean up when exiting
+            beaconCoroutine = null;
+        }
+
+        /// <summary>
+        /// Coroutine loop that checks for adjacent walls every 100ms and plays looping tones.
+        /// Uses manual time-based waiting for IL2CPP compatibility.
+        /// Exits when enableWallTones becomes false.
+        /// </summary>
+        private IEnumerator WallToneLoop()
+        {
+            float nextCheckTime = Time.time + 0.3f;  // Delay first check by 300ms for scene stability
+
+            while (enableWallTones)  // Exit when disabled
+            {
+                // Manual time-based waiting (WaitForSeconds doesn't work reliably in IL2CPP wrapper)
+                if (Time.time < nextCheckTime)
+                {
+                    yield return null;
+                    continue;
+                }
+                nextCheckTime = Time.time + WALL_TONE_LOOP_INTERVAL;
+
+                try
+                {
+                    float currentTime = Time.time;
+
+                    // Detect sub-map transitions and suppress tones briefly
+                    int currentMapId = GetCurrentMapId();
+                    if (currentMapId > 0 && wallToneMapId > 0 && currentMapId != wallToneMapId)
+                    {
+                        wallToneSuppressedUntil = currentTime + 1.0f;
+                        if (SoundPlayer.IsWallTonePlaying())
+                            SoundPlayer.StopWallTone();
+                    }
+                    if (currentMapId > 0)
+                        wallToneMapId = currentMapId;
+
+                    if (currentTime < wallToneSuppressedUntil)
+                    {
+                        if (SoundPlayer.IsWallTonePlaying())
+                            SoundPlayer.StopWallTone();
+                        continue;
+                    }
+
+                    if (MapTransitionPatches.IsScreenFading)
+                    {
+                        if (SoundPlayer.IsWallTonePlaying())
+                            SoundPlayer.StopWallTone();
+                        continue;
+                    }
+
+                    var player = GetFieldPlayer();
+                    if (player == null)
+                    {
+                        if (SoundPlayer.IsWallTonePlaying())
+                            SoundPlayer.StopWallTone();
+                        continue;
+                    }
+
+                    var walls = FieldNavigationHelper.GetNearbyWallsWithDistance(player);
+                    var mapExitPositions = entityCache?.GetMapExitPositions();
+                    Vector3 playerPos = player.transform.localPosition;
+
+                    // Reuse static buffer to avoid per-cycle allocations
+                    wallDirectionsBuffer.Clear();
+
+                    if (walls.NorthDist == 0 &&
+                        !FieldNavigationHelper.IsDirectionNearMapExit(playerPos, DirNorth, mapExitPositions))
+                        wallDirectionsBuffer.Add(SoundPlayer.Direction.North);
+
+                    if (walls.SouthDist == 0 &&
+                        !FieldNavigationHelper.IsDirectionNearMapExit(playerPos, DirSouth, mapExitPositions))
+                        wallDirectionsBuffer.Add(SoundPlayer.Direction.South);
+
+                    if (walls.EastDist == 0 &&
+                        !FieldNavigationHelper.IsDirectionNearMapExit(playerPos, DirEast, mapExitPositions))
+                        wallDirectionsBuffer.Add(SoundPlayer.Direction.East);
+
+                    if (walls.WestDist == 0 &&
+                        !FieldNavigationHelper.IsDirectionNearMapExit(playerPos, DirWest, mapExitPositions))
+                        wallDirectionsBuffer.Add(SoundPlayer.Direction.West);
+
+                    // Pass buffer directly (IList<Direction>) - no ToArray() allocation
+                    SoundPlayer.PlayWallTonesLooped(wallDirectionsBuffer);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[WallTones] Error: {ex.Message}");
+                }
+            }
+
+            // Clean up when exiting
+            wallToneCoroutine = null;
+            if (SoundPlayer.IsWallTonePlaying())
+                SoundPlayer.StopWallTone();
+        }
+
+        /// <summary>
+        /// Gets the current map ID from UserDataManager.
+        /// Returns -1 if unable to retrieve.
+        /// </summary>
+        private int GetCurrentMapId()
+        {
+            try
+            {
+                var userDataManager = Il2CppLast.Management.UserDataManager.Instance();
+                if (userDataManager != null)
+                    return userDataManager.CurrentMapId;
+            }
+            catch { }
+            return -1;
+        }
+
+        /// <summary>
+        /// Gets the FieldPlayer from the FieldPlayerController cache.
+        /// </summary>
+        private Il2CppLast.Entity.Field.FieldPlayer GetFieldPlayer()
+        {
+            try
+            {
+                var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
+                if (playerController?.fieldPlayer != null)
+                    return playerController.fieldPlayer;
+
+                // Fallback: try to find if cache returned null (e.g., after scene transition)
+                playerController = UnityEngine.Object.FindObjectOfType<FieldPlayerController>();
+                if (playerController?.fieldPlayer != null)
+                    return playerController.fieldPlayer;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error getting field player: {ex.Message}");
+            }
+            return null;
+        }
+
+        #endregion
+
+        #region Audio Toggle Methods
+
+        internal void ToggleWallTones()
+        {
+            enableWallTones = !enableWallTones;
+
+            if (enableWallTones)
+                StartWallToneLoop();
+            else
+                StopWallToneLoop();
+
+            // Save to preferences
+            prefWallTones.Value = enableWallTones;
+            prefsCategory.SaveToFile(false);
+
+            string status = enableWallTones ? "on" : "off";
+            SpeakText($"Wall tones {status}");
+        }
+
+        internal void ToggleFootsteps()
+        {
+            enableFootsteps = !enableFootsteps;
+
+            // Save to preferences
+            prefFootsteps.Value = enableFootsteps;
+            prefsCategory.SaveToFile(false);
+
+            string status = enableFootsteps ? "on" : "off";
+            SpeakText($"Footsteps {status}");
+        }
+
+        internal void ToggleAudioBeacons()
+        {
+            enableAudioBeacons = !enableAudioBeacons;
+
+            if (enableAudioBeacons)
+                StartBeaconLoop();
+            else
+                StopBeaconLoop();
+
+            // Save to preferences
+            prefAudioBeacons.Value = enableAudioBeacons;
+            prefsCategory.SaveToFile(false);
+
+            string status = enableAudioBeacons ? "on" : "off";
+            SpeakText($"Audio beacons {status}");
+        }
+
+        // Accessors for audio feedback state (used by FootstepPatches)
+        internal bool IsWallTonesEnabled() => enableWallTones;
+        internal bool IsFootstepsEnabled() => enableFootsteps;
+        internal bool IsAudioBeaconsEnabled() => enableAudioBeacons;
+
+        // Public static accessors for volume settings (used by SoundPlayer and ModMenu)
+        public static int WallBumpVolume => prefWallBumpVolume?.Value ?? 50;
+        public static int FootstepVolume => prefFootstepVolume?.Value ?? 50;
+        public static int WallToneVolume => prefWallToneVolume?.Value ?? 50;
+        public static int BeaconVolume => prefBeaconVolume?.Value ?? 50;
+
+        // Public static accessors for filter settings (used by ModMenu)
+        public static bool PathfindingFilterEnabled => Instance?.filterByPathfinding ?? false;
+        public static bool MapExitFilterEnabled => Instance?.filterMapExits ?? false;
+        public static bool WallTonesEnabled => Instance?.enableWallTones ?? false;
+        public static bool FootstepsEnabled => Instance?.enableFootsteps ?? false;
+        public static bool AudioBeaconsEnabled => Instance?.enableAudioBeacons ?? false;
+
+        // Public static setters for ModMenu
+        public static void SetWallBumpVolume(int value)
+        {
+            if (prefWallBumpVolume != null)
+            {
+                prefWallBumpVolume.Value = Math.Clamp(value, 0, 100);
+                prefsCategory?.SaveToFile(false);
+            }
+        }
+
+        public static void SetFootstepVolume(int value)
+        {
+            if (prefFootstepVolume != null)
+            {
+                prefFootstepVolume.Value = Math.Clamp(value, 0, 100);
+                prefsCategory?.SaveToFile(false);
+            }
+        }
+
+        public static void SetWallToneVolume(int value)
+        {
+            if (prefWallToneVolume != null)
+            {
+                prefWallToneVolume.Value = Math.Clamp(value, 0, 100);
+                prefsCategory?.SaveToFile(false);
+            }
+        }
+
+        public static void SetBeaconVolume(int value)
+        {
+            if (prefBeaconVolume != null)
+            {
+                prefBeaconVolume.Value = Math.Clamp(value, 0, 100);
+                prefsCategory?.SaveToFile(false);
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// Speak text through the screen reader.
         /// Thread-safe: TolkWrapper uses locking to prevent concurrent native calls.
@@ -676,6 +1192,36 @@ namespace FFIV_ScreenReader.Core
         public static void SpeakText(string text, bool interrupt = true)
         {
             tolk?.Speak(text, interrupt);
+        }
+    }
+
+    /// <summary>
+    /// Postfix patches for entity interaction hooks.
+    /// Triggers entity refresh when treasure chests are opened or dialogue ends.
+    /// </summary>
+    public static class EntityInteractionPatches
+    {
+        /// <summary>
+        /// Postfix for FieldTresureBox.Open - triggers entity refresh when chest is opened.
+        /// Updates the entity cache to reflect the chest's new opened state.
+        /// </summary>
+        public static void TreasureBox_Open_Postfix()
+        {
+            MelonLoader.MelonLogger.Msg("[TreasureBox] Chest opened, scheduling entity refresh");
+            FFIV_ScreenReaderMod.Instance?.ScheduleEntityRefresh();
+        }
+
+        /// <summary>
+        /// Postfix for MessageWindowManager.Close - triggers entity refresh when dialogue ends.
+        /// Also resets dialogue tracker state for clean next conversation.
+        /// </summary>
+        public static void MessageWindow_Close_Postfix()
+        {
+            // Reset dialogue tracker for next conversation
+            Patches.DialogueTracker.Reset();
+
+            // Trigger entity refresh after dialogue ends (NPC interaction complete)
+            FFIV_ScreenReaderMod.Instance?.ScheduleEntityRefresh();
         }
     }
 }

@@ -152,9 +152,9 @@ namespace FFIV_ScreenReader.Patches
                 if (string.IsNullOrWhiteSpace(attackerName))
                     return;
 
-                // Check if we already announced an action for this actor recently
-                // If so, this is likely a result message (e.g., "Prayer unanswered") - skip it
-                if (GlobalBattleMessageTracker.HasRecentActionForActor(attackerName))
+                // Use object-based deduplication so different enemies with the same name
+                // attacking in succession are both announced (each BattleActData is unique)
+                if (!AnnouncementDeduplicator.ShouldAnnounce("BattleAction", battleActData))
                 {
                     return;
                 }

@@ -36,6 +36,35 @@ namespace FFIV_ScreenReader.Field
                 return null;
             }
 
+            // CHECK VEHICLE TYPE MAP FIRST (before ObjectType check)
+            // VehicleTypeMap is populated by GetAllFieldEntities from Transportation.ModelList
+            if (FieldNavigationHelper.VehicleTypeMap.TryGetValue(fieldEntity, out var vehicleInfo))
+            {
+                // Skip non-displayable vehicle types (these are already filtered in GetAllFieldEntities,
+                // but double-check here for safety)
+                if (vehicleInfo.Type > 1 && vehicleInfo.Type != 4 && vehicleInfo.Type != 5)
+                {
+                    var vehicle = new VehicleEntity
+                    {
+                        GameEntity = fieldEntity,
+                        TransportationId = vehicleInfo.Type,
+                        MessageId = vehicleInfo.MessageId
+                    };
+
+                    // Capture the entity's Unity layer
+                    try
+                    {
+                        vehicle.Layer = fieldEntity.gameObject.layer;
+                    }
+                    catch
+                    {
+                        vehicle.Layer = 10;
+                    }
+
+                    return vehicle;
+                }
+            }
+
             // Get ObjectType from property
             Il2Cpp.MapConstants.ObjectType objectType = Il2Cpp.MapConstants.ObjectType.PointIn;
             if (fieldEntity.Property != null)

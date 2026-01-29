@@ -7,14 +7,39 @@ using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
 using MelonLoader;
 using UnityEngine;
+using FieldPlayerController = Il2CppLast.Map.FieldPlayerController;
+using MapRouteSearcher = Il2Cpp.MapRouteSearcher;
 
 namespace FFIV_ScreenReader.Field
 {
     public static class FieldNavigationHelper
     {
         /// <summary>
+        /// Maps FieldEntity to its TransportationType and MessageId for vehicle name resolution.
+        /// Populated when scanning Transportation.ModelList via pointer offsets.
+        /// Tuple: (Type = TransportationType, MessageId = localized name key)
+        /// </summary>
+        public static Dictionary<FieldEntity, (int Type, string MessageId)> VehicleTypeMap { get; }
+            = new Dictionary<FieldEntity, (int, string)>();
+
+        // Debug logging flag - logs transportation info once per map until reset
+        private static bool hasLoggedTransportation = false;
+
+        /// <summary>
+        /// Resets transportation debug logging and clears VehicleTypeMap.
+        /// Call on map change to prevent stale vehicle entries.
+        /// </summary>
+        public static void ResetVehicleTypeMap()
+        {
+            hasLoggedTransportation = false;
+            VehicleTypeMap.Clear();
+            MelonLogger.Msg("[Vehicle Debug] VehicleTypeMap cleared");
+        }
+
+        /// <summary>
         /// Gets all FieldEntity objects currently in the world (no filtering or wrapping).
         /// Returns raw game entities from both the main entity list and transportation system.
+        /// Also populates VehicleTypeMap for vehicle name resolution.
         /// </summary>
         public static List<FieldEntity> GetAllFieldEntities()
         {
@@ -38,24 +63,162 @@ namespace FFIV_ScreenReader.Field
                 }
             }
 
-            // Add transportation entities (chocobo, etc.)
+            // Check if we should log transportation debug (once per map until reset)
+            bool shouldLogTransport = !hasLoggedTransportation;
+
+            // Add transportation entities and populate VehicleTypeMap
             if (fieldMap.fieldController.transportation != null)
             {
-                var transportationEntities = fieldMap.fieldController.transportation.NeedInteractiveList();
-                if (transportationEntities != null)
-                {
-                    foreach (var interactiveEntity in transportationEntities)
-                    {
-                        if (interactiveEntity == null) continue;
+                var transportation = fieldMap.fieldController.transportation;
 
-                        // Try to cast to FieldEntity
-                        var fieldEntity = interactiveEntity.TryCast<Il2CppLast.Entity.Field.FieldEntity>();
-                        if (fieldEntity != null)
+                if (shouldLogTransport)
+                {
+                    MelonLogger.Msg($"[Vehicle Debug] Transportation controller exists, checking for vehicles...");
+                }
+
+                // Method 1: NeedInteractiveList - returns dynamic vehicle entities
+                try
+                {
+                    var transportationEntities = transportation.NeedInteractiveList();
+                    if (shouldLogTransport)
+                    {
+                        MelonLogger.Msg($"[Vehicle Debug] NeedInteractiveList returned: {(transportationEntities != null ? transportationEntities.Count.ToString() : "null")} items");
+                    }
+
+                    if (transportationEntities != null)
+                    {
+                        foreach (var interactiveEntity in transportationEntities)
                         {
-                            results.Add(fieldEntity);
+                            if (interactiveEntity == null) continue;
+
+                            if (shouldLogTransport)
+                            {
+                                MelonLogger.Msg($"[Vehicle Debug] NeedInteractiveList item: {interactiveEntity.GetType().Name}");
+                            }
+
+                            var fieldEntity = interactiveEntity.TryCast<FieldEntity>();
+                            if (fieldEntity != null && !results.Contains(fieldEntity))
+                            {
+                                if (shouldLogTransport)
+                                {
+                                    MelonLogger.Msg($"[Vehicle Debug] -> TryCast<FieldEntity> succeeded: {fieldEntity.GetType().Name}");
+                                }
+                                results.Add(fieldEntity);
+                            }
                         }
                     }
                 }
+                catch (Exception ex)
+                {
+                    if (shouldLogTransport)
+                    {
+                        MelonLogger.Msg($"[Vehicle Debug] NeedInteractiveList exception: {ex.Message}");
+                    }
+                }
+
+                // Method 2: Access Transportation.ModelList dictionary via pointer offsets
+                // TransportationController.infoData (Transportation) at offset 0x18
+                // Transportation.modelList (Dictionary<int, TransportationInfo>) at offset 0x18
+                try
+                {
+                    unsafe
+                    {
+                        IntPtr transportControllerPtr = transportation.Pointer;
+                        if (transportControllerPtr == IntPtr.Zero)
+                        {
+                            if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] TransportationController pointer is null");
+                        }
+                        else
+                        {
+                            // Get infoData (Transportation) at offset 0x18
+                            IntPtr infoDataPtr = *(IntPtr*)((byte*)transportControllerPtr + 0x18);
+                            if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] infoData pointer: 0x{infoDataPtr.ToInt64():X}");
+
+                            if (infoDataPtr != IntPtr.Zero)
+                            {
+                                // Get modelList (Dictionary) at offset 0x18 in Transportation
+                                IntPtr modelListPtr = *(IntPtr*)((byte*)infoDataPtr + 0x18);
+                                if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] modelList pointer: 0x{modelListPtr.ToInt64():X}");
+
+                                if (modelListPtr != IntPtr.Zero)
+                                {
+                                    // Try to cast to Dictionary and iterate
+                                    var modelListObj = new Il2CppSystem.Object(modelListPtr);
+                                    var modelDict = modelListObj.TryCast<Il2CppSystem.Collections.Generic.Dictionary<int, TransportationInfo>>();
+
+                                    if (modelDict != null)
+                                    {
+                                        if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] ModelList dictionary count: {modelDict.Count}");
+
+                                        foreach (var kvp in modelDict)
+                                        {
+                                            int transportId = kvp.Key;
+                                            var transportInfo = kvp.Value;
+
+                                            if (transportInfo == null) continue;
+
+                                            bool enabled = transportInfo.Enable;
+                                            int transportType = transportInfo.Type;
+
+                                            // Get MessageId for specific vehicle name (e.g., "Falcon", "Lunar Whale")
+                                            string messageId = transportInfo.MessageId ?? "";
+
+                                            if (shouldLogTransport)
+                                            {
+                                                MelonLogger.Msg($"[Vehicle Debug] Transport ID={transportId}, Type={transportType}, Enable={enabled}, MessageId={messageId}");
+                                            }
+
+                                            // Skip non-vehicle types and disabled vehicles
+                                            // Type 0 = None, Type 1 = Player, Type 4 = Symbol, Type 5 = Content (internal markers)
+                                            if (transportType == 0 || transportType == 1 || transportType == 4 || transportType == 5 || !enabled) continue;
+
+                                            var mapObject = transportInfo.MapObject;
+                                            if (mapObject != null)
+                                            {
+                                                string goName = "";
+                                                try { goName = mapObject.gameObject?.name ?? ""; } catch { }
+
+                                                if (shouldLogTransport)
+                                                {
+                                                    MelonLogger.Msg($"[Vehicle Debug] -> MapObject: {mapObject.GetType().Name}, GO: {goName}");
+                                                }
+
+                                                if (!results.Contains(mapObject))
+                                                {
+                                                    results.Add(mapObject);
+                                                }
+
+                                                // Store the transport type and messageId for EntityFactory to use
+                                                VehicleTypeMap[mapObject] = (transportType, messageId);
+                                                if (shouldLogTransport)
+                                                {
+                                                    MelonLogger.Msg($"[Vehicle Debug] -> Added vehicle to results and VehicleTypeMap (Type={transportType}, MessageId={messageId})");
+                                                }
+                                            }
+                                            else if (shouldLogTransport)
+                                            {
+                                                MelonLogger.Msg($"[Vehicle Debug] -> MapObject is null for Transport ID={transportId}");
+                                            }
+                                        }
+                                    }
+                                    else if (shouldLogTransport)
+                                    {
+                                        MelonLogger.Msg($"[Vehicle Debug] ModelList TryCast failed");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (shouldLogTransport)
+                    {
+                        MelonLogger.Msg($"[Vehicle Debug] ModelList access exception: {ex.Message}");
+                    }
+                }
+
+                hasLoggedTransportation = true;
             }
 
             return results;
@@ -342,6 +505,135 @@ namespace FFIV_ScreenReader.Field
             }
 
             return "Unknown";
+        }
+
+        /// <summary>
+        /// Result structure for wall proximity detection.
+        /// Distance values: -1 = no wall within range, 0 = adjacent/blocked
+        /// </summary>
+        public struct WallDistances
+        {
+            public int NorthDist;
+            public int SouthDist;
+            public int EastDist;
+            public int WestDist;
+
+            public WallDistances(int north, int south, int east, int west)
+            {
+                NorthDist = north;
+                SouthDist = south;
+                EastDist = east;
+                WestDist = west;
+            }
+        }
+
+        /// <summary>
+        /// Gets distance to nearest wall in each cardinal direction (in tiles).
+        /// Returns -1 for a direction if no wall adjacent (1 tile away).
+        /// </summary>
+        public static WallDistances GetNearbyWallsWithDistance(FieldPlayer player)
+        {
+            if (player == null || player.transform == null)
+                return new WallDistances(-1, -1, -1, -1);
+
+            Vector3 pos = player.transform.localPosition;
+
+            return new WallDistances(
+                GetWallDistance(player, pos, new Vector3(0, 16, 0)),
+                GetWallDistance(player, pos, new Vector3(0, -16, 0)),
+                GetWallDistance(player, pos, new Vector3(16, 0, 0)),
+                GetWallDistance(player, pos, new Vector3(-16, 0, 0))
+            );
+        }
+
+        /// <summary>
+        /// Gets the distance to a wall in a given direction using pathfinding.
+        /// Returns: 0 = adjacent/blocked, -1 = no wall adjacent
+        /// </summary>
+        private static int GetWallDistance(FieldPlayer player, Vector3 pos, Vector3 step)
+        {
+            if (IsAdjacentTileBlocked(player, pos, step))
+                return 0;
+            return -1;
+        }
+
+        /// <summary>
+        /// Checks if an adjacent tile is blocked using pathfinding.
+        /// More reliable than IsCanMoveToDestPosition for predictive checks.
+        /// </summary>
+        private static bool IsAdjacentTileBlocked(FieldPlayer player, Vector3 playerPos, Vector3 direction)
+        {
+            try
+            {
+                var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
+                if (playerController == null)
+                {
+                    // Cache miss - try refresh (FindObjectOfType)
+                    playerController = Utils.GameObjectCache.Refresh<FieldPlayerController>();
+                    if (playerController == null)
+                        return false;
+                }
+
+                var mapHandle = playerController.mapHandle;
+                if (mapHandle == null)
+                    return false;
+
+                int mapWidth = mapHandle.GetCollisionLayerWidth();
+                int mapHeight = mapHandle.GetCollisionLayerHeight();
+
+                if (mapWidth <= 0 || mapHeight <= 0 || mapWidth > 10000 || mapHeight > 10000)
+                    return false;
+
+                int pathfindZ = player.gameObject.layer >= 9 ? player.gameObject.layer - 9 : 0;
+
+                Vector3 startCell = new Vector3(
+                    Mathf.FloorToInt(mapWidth * 0.5f + playerPos.x * 0.0625f),
+                    Mathf.FloorToInt(mapHeight * 0.5f - playerPos.y * 0.0625f),
+                    pathfindZ
+                );
+
+                Vector3 targetPos = playerPos + direction;
+                Vector3 destCell = new Vector3(
+                    Mathf.FloorToInt(mapWidth * 0.5f + targetPos.x * 0.0625f),
+                    Mathf.FloorToInt(mapHeight * 0.5f - targetPos.y * 0.0625f),
+                    pathfindZ
+                );
+
+                bool useCollision = player.IsOnCollision;
+                var pathPoints = MapRouteSearcher.Search(mapHandle, startCell, destCell, useCollision);
+                return pathPoints == null || pathPoints.Count == 0;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[WallTones] IsAdjacentTileBlocked error: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Checks if a direction from the player position leads to a map exit entity.
+        /// Used to suppress wall tones at map exits, doors, and stairs where
+        /// MapRouteSearcher.Search() reports blocked but the tile is actually accessible.
+        /// </summary>
+        public static bool IsDirectionNearMapExit(Vector3 playerPos, Vector3 direction,
+            List<Vector3> mapExitPositions, float tolerance = 12.0f)
+        {
+            if (mapExitPositions == null || mapExitPositions.Count == 0)
+                return false;
+
+            Vector3 adjacentTilePos = playerPos + direction;
+
+            foreach (var exitPos in mapExitPositions)
+            {
+                float dx = adjacentTilePos.x - exitPos.x;
+                float dy = adjacentTilePos.y - exitPos.y;
+                float dist2D = Mathf.Sqrt(dx * dx + dy * dy);
+
+                if (dist2D <= tolerance)
+                    return true;
+            }
+
+            return false;
         }
 
         /// <summary>

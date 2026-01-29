@@ -38,7 +38,14 @@ namespace FFIV_ScreenReader.Field
         /// <summary>
         /// Entity name (localized if available)
         /// </summary>
-        public virtual string Name => GameEntity?.Property?.Name ?? "Unknown";
+        public virtual string Name
+        {
+            get
+            {
+                string rawName = GameEntity?.Property?.Name ?? "Unknown";
+                return Utils.EntityTranslator.Translate(rawName);
+            }
+        }
 
         /// <summary>
         /// Category for filtering purposes
@@ -429,6 +436,11 @@ namespace FFIV_ScreenReader.Field
         /// </summary>
         public int TransportationId { get; set; }
 
+        /// <summary>
+        /// Message ID for localized vehicle name (e.g., "Falcon", "Lunar Whale")
+        /// </summary>
+        public string MessageId { get; set; }
+
         public override EntityCategory Category => EntityCategory.Vehicles;
 
         public override int Priority => 10;
@@ -437,7 +449,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetDisplayName()
         {
-            return GetVehicleName(TransportationId);
+            return GetVehicleName(TransportationId, MessageId);
         }
 
         protected override string GetEntityTypeName()
@@ -445,19 +457,35 @@ namespace FFIV_ScreenReader.Field
             return "Vehicle";
         }
 
-        public static string GetVehicleName(int id)
+        /// <summary>
+        /// Gets the vehicle name, preferring the localized MessageId name if available.
+        /// Falls back to generic type-based name if MessageId is not set or lookup fails.
+        /// </summary>
+        public static string GetVehicleName(int id, string messageId = null)
         {
-            // Based on MapConstants.TransportationType enum
+            // Try MessageId first for specific name (e.g., "Falcon" vs generic "Special Airship")
+            if (!string.IsNullOrEmpty(messageId))
+            {
+                try
+                {
+                    var msg = Il2CppLast.Management.MessageManager.Instance?.GetMessage(messageId);
+                    if (!string.IsNullOrEmpty(msg))
+                        return msg;
+                }
+                catch { }
+            }
+
+            // Fall back to type-based generic name
             switch (id)
             {
                 case 1: return "Player";
                 case 2: return "Ship";
-                case 3: return "Airship";
+                case 3: return "Enterprise";  // FF4's airship is named Enterprise
                 case 4: return "Symbol";
                 case 5: return "Content";
                 case 6: return "Submarine";
                 case 7: return "Hovercraft";
-                case 8: return "Special Airship";
+                case 8: return "Special Airship";  // Fallback if MessageId fails
                 case 9: return "Yellow Chocobo";
                 case 10: return "Black Chocobo";
                 case 11: return "Boko";

@@ -16,8 +16,6 @@ namespace FFIV_ScreenReader.Core
     /// </summary>
     public class EntityCache
     {
-        private readonly float scanInterval;
-        private float lastScanTime = 0f;
         private Dictionary<FieldEntity, NavigableEntity> entityMap = new Dictionary<FieldEntity, NavigableEntity>();
         private List<IGroupingStrategy> enabledStrategies = new List<IGroupingStrategy>();
         // O(1) lookup for groups by key (avoids scanning all entities)
@@ -39,12 +37,11 @@ namespace FFIV_ScreenReader.Core
         public IReadOnlyDictionary<FieldEntity, NavigableEntity> Entities => entityMap;
 
         /// <summary>
-        /// Creates a new entity cache with the specified scan interval.
+        /// Creates a new entity cache.
+        /// Scanning is event-driven via ForceScan() calls from interaction hooks.
         /// </summary>
-        /// <param name="scanInterval">Time in seconds between automatic scans</param>
-        public EntityCache(float scanInterval = 0.1f)
+        public EntityCache()
         {
-            this.scanInterval = scanInterval;
         }
 
         /// <summary>
@@ -173,18 +170,6 @@ namespace FFIV_ScreenReader.Core
             string groupKey = strategy.GetGroupKey(firstMember);
 
             return groupKey != null && groupKey == group.GroupKey;
-        }
-
-        /// <summary>
-        /// Called every frame to handle periodic scanning.
-        /// </summary>
-        public void Update()
-        {
-            if (Time.time - lastScanTime >= scanInterval)
-            {
-                lastScanTime = Time.time;
-                Scan();
-            }
         }
 
         /// <summary>
@@ -321,12 +306,39 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
-        /// Forces an immediate scan, bypassing the scan interval timer.
+        /// Forces an immediate scan.
+        /// Called by event-driven hooks (treasure chest, dialogue end) and field ready callback.
         /// </summary>
         public void ForceScan()
         {
-            lastScanTime = Time.time;
             Scan();
+        }
+
+        /// <summary>
+        /// Returns positions of all MapExitEntity instances from the entity map.
+        /// Used by wall tone suppression to avoid false positives at map exits/doors/stairs.
+        /// </summary>
+        public List<Vector3> GetMapExitPositions()
+        {
+            var positions = new List<Vector3>();
+            foreach (var kvp in entityMap)
+            {
+                var entity = kvp.Value;
+                if (entity is Field.MapExitEntity)
+                    positions.Add(entity.Position);
+                else if (entity is GroupEntity group)
+                {
+                    // Check if group contains map exits
+                    foreach (var member in group.Members)
+                    {
+                        if (member is Field.MapExitEntity)
+                        {
+                            positions.Add(member.Position);
+                        }
+                    }
+                }
+            }
+            return positions;
         }
 
         /// <summary>

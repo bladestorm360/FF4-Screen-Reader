@@ -1,3 +1,4 @@
+using System;
 using Il2CppLast.Map;
 using Il2CppLast.Entity.Field;
 using Il2Cpp;
@@ -40,6 +41,9 @@ namespace FFIV_ScreenReader.Utils
         private static int cachedMoveState = MOVE_STATE_WALK;
         private static int cachedTransportType = TRANSPORT_NONE;
         private static int lastAnnouncedState = -1;
+
+        // Cached dash flag (set by SetDashFlag patch)
+        private static bool cachedDashFlag = false;
 
         /// <summary>
         /// Set vehicle state when boarding (called from GetOn patch).
@@ -191,6 +195,56 @@ namespace FFIV_ScreenReader.Utils
         public static int GetCurrentTransportType()
         {
             return cachedTransportType;
+        }
+
+        /// <summary>
+        /// Called from SetDashFlag patch to cache the dash toggle state.
+        /// </summary>
+        public static void SetCachedDashFlag(bool value)
+        {
+            cachedDashFlag = value;
+        }
+
+        /// <summary>
+        /// Returns the effective running state by combining AutoDash config with F1 toggle.
+        /// AutoDash XOR dashFlag gives the actual running state.
+        /// Returns true if running, false if walking.
+        /// </summary>
+        public static bool GetDashFlag()
+        {
+            try
+            {
+                // Read AutoDash from ConfigSaveData via UserDataManager
+                // UserDataManager.configSaveData at offset 0xB8
+                // ConfigSaveData.isAutoDash at offset 0x40 (int: 0=off, 1=on)
+                bool autoDash = false;
+                var userData = Il2CppLast.Management.UserDataManager.Instance();
+
+                if (userData != null)
+                {
+                    unsafe
+                    {
+                        IntPtr userDataPtr = userData.Pointer;
+                        if (userDataPtr != IntPtr.Zero)
+                        {
+                            IntPtr configPtr = *(IntPtr*)((byte*)userDataPtr.ToPointer() + 0xB8);
+                            if (configPtr != IntPtr.Zero)
+                            {
+                                int autoDashValue = *(int*)((byte*)configPtr.ToPointer() + 0x40);
+                                autoDash = autoDashValue != 0;
+                            }
+                        }
+                    }
+                }
+
+                // Effective running state: XOR of autoDash and dashFlag
+                return autoDash != cachedDashFlag;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[MoveState] Error reading dash state: {ex.Message}");
+            }
+            return false;
         }
 
         /// <summary>
