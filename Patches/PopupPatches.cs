@@ -16,6 +16,8 @@ using GameCursor = Il2CppLast.UI.Cursor;
 // Type aliases for IL2CPP types - KeyInput Popups
 using KeyInputCommonPopup = Il2CppLast.UI.KeyInput.CommonPopup;
 using KeyInputGameOverSelectPopup = Il2CppLast.UI.KeyInput.GameOverSelectPopup;
+using KeyInputGameOverLoadPopup = Il2CppLast.UI.KeyInput.GameOverLoadPopup;
+using KeyInputGameOverPopupController = Il2CppLast.UI.KeyInput.GameOverPopupController;
 using KeyInputInfomationPopup = Il2CppLast.UI.KeyInput.InfomationPopup;
 using KeyInputShopController = Il2CppLast.UI.KeyInput.ShopController;
 using KeyInputTitleWindowController = Il2CppLast.UI.KeyInput.TitleWindowController;
@@ -78,6 +80,19 @@ namespace FFIV_ScreenReader.Patches
         private const int TOUCH_COMMON_TITLE_OFFSET = 0x28;
         private const int TOUCH_COMMON_MESSAGE_OFFSET = 0x38;
 
+        // GameOverSelectPopup (KeyInput) - line 459177 in dump.cs
+        private const int GAMEOVER_SELECT_CURSOR_OFFSET = 0x38;
+        // GAMEOVER_CMDLIST_OFFSET = 0x40 (already defined above)
+
+        // GameOverLoadPopup (KeyInput) - line 459515 in dump.cs
+        private const int GAMEOVERLOAD_MESSAGE_OFFSET = 0x40;
+        private const int GAMEOVERLOAD_SELECT_CURSOR_OFFSET = 0x58;
+        private const int GAMEOVERLOAD_CMDLIST_OFFSET = 0x60;
+
+        // GameOverPopupController -> View -> LoadPopup navigation
+        private const int GAMEOVERPOPUPCTRL_VIEW_OFFSET = 0x30;
+        private const int GAMEOVERPOPUPVIEW_LOADPOPUP_OFFSET = 0x18;
+
         public static void ApplyPatches(HarmonyLib.Harmony harmony)
         {
             if (isPatched)
@@ -87,6 +102,8 @@ namespace FFIV_ScreenReader.Patches
             {
                 TryPatchBasePopup(harmony);
                 TryPatchTitleScreen(harmony);
+                TryPatchGameOverSelectPopupUpdateCommand(harmony);
+                TryPatchGameOverLoadPopup(harmony);
                 isPatched = true;
             }
             catch (Exception ex)
@@ -391,6 +408,204 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[Popup] Error in Close postfix: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region GameOver Popup Patches
+
+        /// <summary>
+        /// Patch GameOverSelectPopup.UpdateCommand to announce button navigation (Load/Title options).
+        /// </summary>
+        private static void TryPatchGameOverSelectPopupUpdateCommand(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                Type gameOverSelectType = typeof(KeyInputGameOverSelectPopup);
+                var updateCommandMethod = AccessTools.Method(gameOverSelectType, "UpdateCommand");
+
+                if (updateCommandMethod != null)
+                {
+                    var postfix = typeof(PopupPatches).GetMethod(nameof(GameOverSelectPopup_UpdateCommand_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(updateCommandMethod, postfix: new HarmonyMethod(postfix));
+                    MelonLogger.Msg("[Popup] Patched GameOverSelectPopup.UpdateCommand");
+                }
+                else
+                {
+                    MelonLogger.Warning("[Popup] GameOverSelectPopup.UpdateCommand method not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error patching GameOverSelectPopup.UpdateCommand: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Patch GameOverLoadPopup.UpdateCommand for Yes/No button navigation
+        /// and GameOverPopupController.InitSaveLoadPopup to announce the popup message.
+        /// </summary>
+        private static void TryPatchGameOverLoadPopup(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                // Patch UpdateCommand for button navigation
+                Type loadPopupType = typeof(KeyInputGameOverLoadPopup);
+                var updateCommandMethod = AccessTools.Method(loadPopupType, "UpdateCommand");
+
+                if (updateCommandMethod != null)
+                {
+                    var postfix = typeof(PopupPatches).GetMethod(nameof(GameOverLoadPopup_UpdateCommand_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(updateCommandMethod, postfix: new HarmonyMethod(postfix));
+                    MelonLogger.Msg("[Popup] Patched GameOverLoadPopup.UpdateCommand");
+                }
+                else
+                {
+                    MelonLogger.Warning("[Popup] GameOverLoadPopup.UpdateCommand method not found");
+                }
+
+                // Patch InitSaveLoadPopup to announce popup message when it opens
+                Type controllerType = typeof(KeyInputGameOverPopupController);
+                var initMethod = AccessTools.Method(controllerType, "InitSaveLoadPopup");
+
+                if (initMethod != null)
+                {
+                    var postfix = typeof(PopupPatches).GetMethod(nameof(GameOverPopupController_InitSaveLoadPopup_Postfix),
+                        BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(initMethod, postfix: new HarmonyMethod(postfix));
+                    MelonLogger.Msg("[Popup] Patched GameOverPopupController.InitSaveLoadPopup");
+                }
+                else
+                {
+                    MelonLogger.Warning("[Popup] GameOverPopupController.InitSaveLoadPopup method not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error patching GameOverLoadPopup: {ex.Message}");
+            }
+        }
+
+        private static int lastGameOverSelectIndex = -1;
+
+        public static void GameOverSelectPopup_UpdateCommand_Postfix(KeyInputGameOverSelectPopup __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+
+                IntPtr ptr = __instance.Pointer;
+                if (ptr == IntPtr.Zero) return;
+
+                // Read cursor index from offset 0x38
+                IntPtr cursorPtr = Marshal.ReadIntPtr(ptr + GAMEOVER_SELECT_CURSOR_OFFSET);
+                if (cursorPtr == IntPtr.Zero) return;
+
+                var cursor = new GameCursor(cursorPtr);
+                int index = cursor.Index;
+
+                // Deduplicate by index
+                if (index == lastGameOverSelectIndex) return;
+                lastGameOverSelectIndex = index;
+
+                // Read button text from commandList at offset 0x40
+                string buttonText = ReadButtonFromCommandList(ptr, GAMEOVER_CMDLIST_OFFSET, index);
+                if (!string.IsNullOrWhiteSpace(buttonText))
+                {
+                    buttonText = TextUtils.StripIconMarkup(buttonText);
+                    FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error in GameOverSelectPopup.UpdateCommand: {ex.Message}");
+            }
+        }
+
+        private static int lastGameOverLoadIndex = -1;
+
+        public static void GameOverLoadPopup_UpdateCommand_Postfix(KeyInputGameOverLoadPopup __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+
+                IntPtr ptr = __instance.Pointer;
+                if (ptr == IntPtr.Zero) return;
+
+                // Read cursor index from offset 0x58
+                IntPtr cursorPtr = Marshal.ReadIntPtr(ptr + GAMEOVERLOAD_SELECT_CURSOR_OFFSET);
+                if (cursorPtr == IntPtr.Zero) return;
+
+                var cursor = new GameCursor(cursorPtr);
+                int index = cursor.Index;
+
+                // Deduplicate by index
+                if (index == lastGameOverLoadIndex) return;
+                lastGameOverLoadIndex = index;
+
+                // Read button text from commandList at offset 0x60
+                string buttonText = ReadButtonFromCommandList(ptr, GAMEOVERLOAD_CMDLIST_OFFSET, index);
+                if (!string.IsNullOrWhiteSpace(buttonText))
+                {
+                    buttonText = TextUtils.StripIconMarkup(buttonText);
+                    FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error in GameOverLoadPopup.UpdateCommand: {ex.Message}");
+            }
+        }
+
+        public static void GameOverPopupController_InitSaveLoadPopup_Postfix(KeyInputGameOverPopupController __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+
+                // Reset button tracking for fresh state
+                lastGameOverLoadIndex = -1;
+
+                // Use coroutine to delay reading until UI has populated
+                CoroutineManager.StartManaged(DelayedGameOverLoadPopupRead(__instance.Pointer));
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error in GameOverPopupController.InitSaveLoadPopup: {ex.Message}");
+            }
+        }
+
+        private static IEnumerator DelayedGameOverLoadPopupRead(IntPtr controllerPtr)
+        {
+            yield return null; // Wait one frame
+
+            try
+            {
+                if (controllerPtr == IntPtr.Zero) yield break;
+
+                // Navigate: controller->view(0x30)->loadPopup(0x18)->messageText(0x40)
+                IntPtr viewPtr = Marshal.ReadIntPtr(controllerPtr + GAMEOVERPOPUPCTRL_VIEW_OFFSET);
+                if (viewPtr == IntPtr.Zero) yield break;
+
+                IntPtr loadPopupPtr = Marshal.ReadIntPtr(viewPtr + GAMEOVERPOPUPVIEW_LOADPOPUP_OFFSET);
+                if (loadPopupPtr == IntPtr.Zero) yield break;
+
+                IntPtr messageTextPtr = Marshal.ReadIntPtr(loadPopupPtr + GAMEOVERLOAD_MESSAGE_OFFSET);
+                string message = ReadTextFromPointer(messageTextPtr);
+
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    message = TextUtils.StripIconMarkup(message.Trim());
+                    FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error in DelayedGameOverLoadPopupRead: {ex.Message}");
             }
         }
 

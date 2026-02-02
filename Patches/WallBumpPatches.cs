@@ -3,6 +3,7 @@ using HarmonyLib;
 using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
 using UnityEngine;
+using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 
 namespace FFIV_ScreenReader.Patches
@@ -28,6 +29,10 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                // Suppress wall bumps during battle or dialogue
+                if (BattleState.IsInBattle || DialogueTracker.IsInDialogue)
+                    return;
+
                 float currentTime = Time.time;
                 if (currentTime - lastBumpTime < BUMP_COOLDOWN)
                     return;

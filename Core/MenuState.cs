@@ -93,12 +93,42 @@ namespace FFIV_ScreenReader.Core
         static BattleState() => MenuStateRegistry.Register("Battle", Reset);
 
         public static bool IsInBattle => MenuStateRegistry.IsActive("Battle");
-        public static void SetActive() => MenuStateRegistry.SetActiveExclusive("Battle");
+
+        // Pre-suppression navigation state storage
+        private static bool _preBattleWallTones = false;
+        private static bool _preBattleFootsteps = false;
+        private static bool _preBattleAudioBeacons = false;
+        private static bool _preBattlePathfindingFilter = false;
+        private static bool _hasStoredState = false;
+
+        public static void SetActive()
+        {
+            // Store and suppress navigation (only if not already stored)
+            if (!_hasStoredState && FFIV_ScreenReaderMod.Instance != null)
+            {
+                _preBattleWallTones = FFIV_ScreenReaderMod.Instance.IsWallTonesEnabled();
+                _preBattleFootsteps = FFIV_ScreenReaderMod.Instance.IsFootstepsEnabled();
+                _preBattleAudioBeacons = FFIV_ScreenReaderMod.Instance.IsAudioBeaconsEnabled();
+                _preBattlePathfindingFilter = FFIV_ScreenReaderMod.PathfindingFilterEnabled;
+                _hasStoredState = true;
+                FFIV_ScreenReaderMod.Instance.SuppressNavigationForBattle();
+            }
+            MenuStateRegistry.SetActiveExclusive("Battle");
+        }
 
         public static void Reset()
         {
             MenuStateRegistry.SetState("Battle", false);
             Patches.GlobalBattleMessageTracker.Reset();
+
+            // Restore navigation state
+            if (_hasStoredState && FFIV_ScreenReaderMod.Instance != null)
+            {
+                FFIV_ScreenReaderMod.Instance.RestoreNavigationAfterBattle(
+                    _preBattleWallTones, _preBattleFootsteps,
+                    _preBattleAudioBeacons, _preBattlePathfindingFilter);
+                _hasStoredState = false;
+            }
         }
 
         public static bool ShouldSuppress() => IsInBattle;

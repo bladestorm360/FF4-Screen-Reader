@@ -175,6 +175,22 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         private void HandleFieldInput()
         {
+            // Check if an entity navigation key was pressed
+            bool entityKeyPressed = Input.GetKeyDown(KeyCode.J) || Input.GetKeyDown(KeyCode.LeftBracket) ||
+                                    Input.GetKeyDown(KeyCode.K) ||
+                                    Input.GetKeyDown(KeyCode.L) || Input.GetKeyDown(KeyCode.RightBracket) ||
+                                    Input.GetKeyDown(KeyCode.P) || Input.GetKeyDown(KeyCode.Backslash);
+
+            // During battle: give feedback for entity nav keys, ignore other keys silently
+            if (BattleState.IsInBattle)
+            {
+                if (entityKeyPressed)
+                {
+                    FFIV_ScreenReaderMod.SpeakText("Not available in battle", interrupt: true);
+                }
+                return;
+            }
+
             // Hotkey: J or [ to cycle backwards
             if (Input.GetKeyDown(KeyCode.J) || Input.GetKeyDown(KeyCode.LeftBracket))
             {
@@ -300,28 +316,40 @@ namespace FFIV_ScreenReader.Core
                 }
             }
 
-            // Hotkey: 0 (Alpha0) to dump untranslated entity names for current map
-            if (Input.GetKeyDown(KeyCode.Alpha0))
+            // Entity category navigation - disabled during battle
+            if (!BattleState.IsInBattle)
             {
-                DumpUntranslatedEntityNames();
-            }
+                // Hotkey: 0 (Alpha0) to dump untranslated entity names for current map
+                if (Input.GetKeyDown(KeyCode.Alpha0))
+                {
+                    DumpUntranslatedEntityNames();
+                }
 
-            // Hotkey: Shift+K to reset to All category
-            if (Input.GetKeyDown(KeyCode.K) && IsShiftHeld())
-            {
-                mod.ResetToAllCategory();
-            }
+                // Hotkey: Shift+K to reset to All category
+                if (Input.GetKeyDown(KeyCode.K) && IsShiftHeld())
+                {
+                    mod.ResetToAllCategory();
+                }
 
-            // Hotkey: = (Equals) or Shift+L/] to cycle to next category
-            if (Input.GetKeyDown(KeyCode.Equals))
-            {
-                mod.CycleNextCategory();
-            }
+                // Hotkey: = (Equals) to cycle to next category
+                if (Input.GetKeyDown(KeyCode.Equals))
+                {
+                    mod.CycleNextCategory();
+                }
 
-            // Hotkey: - (Minus) or Shift+J/[ to cycle to previous category
-            if (Input.GetKeyDown(KeyCode.Minus))
+                // Hotkey: - (Minus) to cycle to previous category
+                if (Input.GetKeyDown(KeyCode.Minus))
+                {
+                    mod.CyclePreviousCategory();
+                }
+            }
+            else if (Input.GetKeyDown(KeyCode.Alpha0) ||
+                     (Input.GetKeyDown(KeyCode.K) && IsShiftHeld()) ||
+                     Input.GetKeyDown(KeyCode.Equals) ||
+                     Input.GetKeyDown(KeyCode.Minus))
             {
-                mod.CyclePreviousCategory();
+                // Category navigation keys and entity dump (0) get feedback during battle
+                FFIV_ScreenReaderMod.SpeakText("Not available in battle", interrupt: true);
             }
 
             // Hotkey: T to announce active timers
@@ -348,12 +376,22 @@ namespace FFIV_ScreenReader.Core
             // Hotkey: ' (Quote) to toggle footstep sounds
             if (Input.GetKeyDown(KeyCode.Quote))
             {
+                if (BattleState.IsInBattle)
+                {
+                    FFIV_ScreenReaderMod.SpeakText("Not available in battle", interrupt: true);
+                    return;
+                }
                 mod.ToggleFootsteps();
             }
 
             // Hotkey: ; (Semicolon) to toggle wall tones
             if (Input.GetKeyDown(KeyCode.Semicolon))
             {
+                if (BattleState.IsInBattle)
+                {
+                    FFIV_ScreenReaderMod.SpeakText("Not available in battle", interrupt: true);
+                    return;
+                }
                 mod.ToggleWallTones();
             }
 

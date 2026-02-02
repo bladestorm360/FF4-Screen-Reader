@@ -84,7 +84,7 @@ namespace FFIV_ScreenReader.Field
         {
             float distance = Vector3.Distance(playerPos, Position);
             string direction = GetDirection(playerPos, Position);
-            return $"{GetDisplayName()} ({FormatSteps(distance)} {direction}) - {GetEntityTypeName()}";
+            return $"{GetDisplayName()} ({GetEntityTypeName()}) ({FormatSteps(distance)} {direction})";
         }
 
         /// <summary>
@@ -145,12 +145,20 @@ namespace FFIV_ScreenReader.Field
         protected override string GetDisplayName()
         {
             string status = IsOpened ? "Opened" : "Unopened";
-            return $"{status} {Name}";
+            return $"{status} Treasure Chest";
         }
 
         protected override string GetEntityTypeName()
         {
             return "Treasure Chest";
+        }
+
+        public override string FormatDescription(Vector3 playerPos)
+        {
+            float distance = Vector3.Distance(playerPos, Position);
+            string direction = GetDirection(playerPos, Position);
+            string status = IsOpened ? "Opened" : "Unopened";
+            return $"{status} Treasure Chest ({FormatSteps(distance)} {direction})";
         }
     }
 
@@ -268,10 +276,7 @@ namespace FFIV_ScreenReader.Field
             {
                 details.Add(characterName);
             }
-            else if (!string.IsNullOrEmpty(AssetName) && AssetName != Name)
-            {
-                details.Add(AssetName);
-            }
+            // Removed: AssetName fallback (was adding internal codes like "MAN118c01" to output)
 
             // Add shop indicator
             if (IsShop)
@@ -358,6 +363,13 @@ namespace FFIV_ScreenReader.Field
         protected override string GetEntityTypeName()
         {
             return "Save Point";
+        }
+
+        public override string FormatDescription(Vector3 playerPos)
+        {
+            float distance = Vector3.Distance(playerPos, Position);
+            string direction = GetDirection(playerPos, Position);
+            return $"Save Point ({FormatSteps(distance)} {direction})";
         }
     }
 

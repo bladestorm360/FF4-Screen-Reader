@@ -40,6 +40,11 @@ namespace FFIV_ScreenReader.Patches
         private static bool isInDialogue = false;
 
         /// <summary>
+        /// Public accessor for dialogue state (used by navigation suppression).
+        /// </summary>
+        public static bool IsInDialogue => isInDialogue;
+
+        /// <summary>
         /// Known invalid speaker names (locations, menu labels, etc.)
         /// </summary>
         private static readonly string[] InvalidSpeakers = new string[]
@@ -90,6 +95,9 @@ namespace FFIV_ScreenReader.Patches
             // Reset page tracking
             lastAnnouncedPageIndex = -1;
             isInDialogue = true;
+
+            // Suppress navigation features during dialogue
+            FFIV_ScreenReaderMod.Instance?.SuppressNavigationForDialogue();
         }
 
         /// <summary>
@@ -229,6 +237,9 @@ namespace FFIV_ScreenReader.Patches
             currentSpeaker = "";
             lastAnnouncedSpeaker = "";
             isInDialogue = false;
+
+            // Restore navigation features after dialogue ends
+            FFIV_ScreenReaderMod.Instance?.RestoreNavigationAfterDialogue();
         }
 
         /// <summary>

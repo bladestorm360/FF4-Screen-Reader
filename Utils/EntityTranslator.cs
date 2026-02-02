@@ -26,6 +26,11 @@ namespace FFIV_ScreenReader.Utils
             @"^((?:SC)?\d+:)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        // Matches circled number suffix at END (① through ⑳)
+        private static readonly Regex EntitySuffixRegex = new Regex(
+            @"([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])$",
+            RegexOptions.Compiled);
+
         /// <summary>
         /// Initializes the translator by loading translations from JSON file.
         /// Creates empty file if not exists.
@@ -181,6 +186,9 @@ namespace FFIV_ScreenReader.Utils
             if (!isInitialized)
                 Initialize();
 
+            // Track the raw name for dumping (before any translation)
+            TrackNameForDump(japaneseName);
+
             // 1. Exact match first (preserves existing behavior)
             if (translations.TryGetValue(japaneseName, out string englishName))
                 return englishName;
@@ -190,17 +198,17 @@ namespace FFIV_ScreenReader.Utils
             if (prefix != null && translations.TryGetValue(baseName, out string baseTranslation))
                 return prefix + " " + baseTranslation;
 
-            // 3. Track untranslated name by current map (use base name to deduplicate)
-            string trackingName = prefix != null ? baseName : japaneseName;
-            if (ContainsJapanese(trackingName))
+            // 3. Strip circled number SUFFIX and try base name lookup
+            StripSuffix(japaneseName, out string suffix, out string baseNameNoSuffix);
+            if (suffix != null && translations.TryGetValue(baseNameNoSuffix, out string baseSuffixTranslation))
+                return baseSuffixTranslation + " " + ConvertCircledNumber(suffix);
+
+            // 4. Handle both prefix AND suffix (e.g., "SC01:白魔道士（赤）④")
+            if (prefix != null)
             {
-                string mapName = MapNameResolver.GetCurrentMapName();
-                if (!string.IsNullOrEmpty(mapName))
-                {
-                    if (!untranslatedNamesByMap.ContainsKey(mapName))
-                        untranslatedNamesByMap[mapName] = new HashSet<string>();
-                    untranslatedNamesByMap[mapName].Add(trackingName);
-                }
+                StripSuffix(baseName, out string innerSuffix, out string innerBase);
+                if (innerSuffix != null && translations.TryGetValue(innerBase, out string innerTranslation))
+                    return prefix + " " + innerTranslation + " " + ConvertCircledNumber(innerSuffix);
             }
 
             // Return original if no translation
@@ -251,6 +259,70 @@ namespace FFIV_ScreenReader.Utils
         }
 
         /// <summary>
+        /// Strips a circled number suffix from an entity name.
+        /// Returns the suffix (e.g., "④") and the base name.
+        /// If no suffix is found, suffix will be null and baseName will equal the input.
+        /// </summary>
+        private static void StripSuffix(string name, out string suffix, out string baseName)
+        {
+            Match match = EntitySuffixRegex.Match(name);
+            if (match.Success)
+            {
+                suffix = match.Groups[1].Value;
+                baseName = name.Substring(0, name.Length - suffix.Length);
+            }
+            else
+            {
+                suffix = null;
+                baseName = name;
+            }
+        }
+
+        /// <summary>
+        /// Converts circled number (①②③...) to regular digit string.
+        /// </summary>
+        private static string ConvertCircledNumber(string circled)
+        {
+            var map = new Dictionary<char, string>
+            {
+                {'①', "1"}, {'②', "2"}, {'③', "3"}, {'④', "4"}, {'⑤', "5"},
+                {'⑥', "6"}, {'⑦', "7"}, {'⑧', "8"}, {'⑨', "9"}, {'⑩', "10"},
+                {'⑪', "11"}, {'⑫', "12"}, {'⑬', "13"}, {'⑭', "14"}, {'⑮', "15"},
+                {'⑯', "16"}, {'⑰', "17"}, {'⑱', "18"}, {'⑲', "19"}, {'⑳', "20"}
+            };
+
+            if (circled.Length == 1 && map.TryGetValue(circled[0], out string num))
+                return num;
+            return circled;
+        }
+
+        /// <summary>
+        /// Tracks a name for the dump, using base name (without suffix) for deduplication.
+        /// Now tracks ALL names with Japanese characters, not just untranslated ones.
+        /// </summary>
+        private static void TrackNameForDump(string rawName)
+        {
+            if (string.IsNullOrEmpty(rawName))
+                return;
+
+            // Use base name (strip suffix) for deduplication
+            StripSuffix(rawName, out _, out string baseName);
+            string trackingName = baseName;
+
+            // Only track if contains Japanese (filter out pure English names)
+            if (!ContainsJapanese(trackingName))
+                return;
+
+            string mapName = MapNameResolver.GetCurrentMapName();
+            if (string.IsNullOrEmpty(mapName))
+                return;
+
+            if (!untranslatedNamesByMap.ContainsKey(mapName))
+                untranslatedNamesByMap[mapName] = new HashSet<string>();
+            untranslatedNamesByMap[mapName].Add(trackingName);
+        }
+
+        /// <summary>
         /// Dumps untranslated entity names for the current map to EntityNames.json.
         /// Appends by map name with duplicate detection.
         /// Returns a status string for TTS feedback.
@@ -262,6 +334,24 @@ namespace FFIV_ScreenReader.Utils
                 string currentMap = MapNameResolver.GetCurrentMapName();
                 if (string.IsNullOrEmpty(currentMap))
                     return "Could not determine current map.";
+
+                // Force-scan all entities to populate untranslated names
+                // This ensures we capture names for entities the player hasn't navigated to yet
+                var fieldEntities = FieldNavigationHelper.GetAllFieldEntities();
+                var navigableEntities = EntityFactory.CreateFromFieldEntities(
+                    fieldEntities,
+                    Vector3.zero  // Position doesn't matter for name access
+                );
+
+                // Force-access Name property on each entity to trigger Translate()
+                int scannedCount = 0;
+                foreach (var entity in navigableEntities)
+                {
+                    _ = entity.Name;  // This calls Translate() which tracks names
+                    scannedCount++;
+                }
+
+                MelonLogger.Msg($"[EntityTranslator] Scanned {scannedCount} entities for names on {currentMap}");
 
                 string dumpPath = Path.Combine(
                     Path.GetDirectoryName(translationsPath),

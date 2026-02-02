@@ -28,8 +28,10 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                // Battle is ending - clear battle state
-                BattleState.Reset();
+                // NOTE: Do NOT call BattleState.Reset() here!
+                // The victory screen is still part of the Battle scene.
+                // BattleState.Reset() is called in OnSceneLoaded when transitioning
+                // to a non-battle scene, which properly restores navigation features.
 
                 if (data == null || isReverse)
                 {

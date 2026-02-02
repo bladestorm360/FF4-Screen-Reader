@@ -65,6 +65,13 @@ namespace FFIV_ScreenReader.Core
         private bool enableFootsteps = false;
         private bool enableAudioBeacons = false;
 
+        // Dialogue navigation suppression state storage
+        private static bool _preDialogueWallTones = false;
+        private static bool _preDialogueFootsteps = false;
+        private static bool _preDialogueAudioBeacons = false;
+        private static bool _preDialoguePathfindingFilter = false;
+        private static bool _hasStoredDialogueState = false;
+
         // Coroutine-based wall tone loop
         private IEnumerator wallToneCoroutine = null;
         private const float WALL_TONE_LOOP_INTERVAL = 0.1f;
@@ -173,6 +180,7 @@ namespace FFIV_ScreenReader.Core
             AbilityMenuStatePatches.ApplyPatches(harmony);
             ConfigMenuStatePatches.ApplyPatches(harmony);
             StatusMenuStatePatches.ApplyPatches(harmony);
+            BattleCommandMessageManualPatches.ApplyManualPatches(harmony);
 
             // Set up callback for field ready event before applying patches
             MovementSpeechPatches.OnFieldReady = OnFieldReadyCallback;
@@ -325,6 +333,14 @@ namespace FFIV_ScreenReader.Core
                 // Reset footstep tracking for new map
                 FootstepPatches.ResetState();
 
+                // If we were in battle and are now loading a non-battle scene, reset battle state
+                // This restores navigation settings (wall tones, footsteps, etc.) at the correct time
+                if (BattleState.IsInBattle && !scene.name.Contains("Battle"))
+                {
+                    LoggerInstance.Msg("[BattleState] Transitioning from battle to field - resetting battle state");
+                    BattleState.Reset();
+                }
+
                 // Try to find and cache FieldPlayerController
                 var playerController = UnityEngine.Object.FindObjectOfType<Il2CppLast.Map.FieldPlayerController>();
                 if (playerController != null)
@@ -347,6 +363,12 @@ namespace FFIV_ScreenReader.Core
                 else
                 {
                     LoggerInstance.Msg("[ComponentCache] No FieldMap found in scene");
+                }
+
+                // Skip audio restart for battle scenes (belt-and-suspenders with DelayedAudioRestart check)
+                if (BattleState.IsInBattle || scene.name.Contains("Battle"))
+                {
+                    return;
                 }
 
                 // Restart audio loops after scene has settled (if enabled)
@@ -424,6 +446,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void AnnounceCurrentEntity()
         {
+            // Validate map state first
+            if (!EnsureFieldContextAndScan())
+                return;
+
             var entity = entityNavigator.CurrentEntity;
             if (entity == null)
             {
@@ -434,7 +460,7 @@ namespace FFIV_ScreenReader.Core
             var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
-                SpeakText("Not in field");
+                SpeakText("Not on map");
                 return;
             }
 
@@ -513,6 +539,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void AnnounceEntityOnly()
         {
+            // Validate map state first
+            if (!EnsureFieldContextAndScan())
+                return;
+
             var entity = entityNavigator.CurrentEntity;
             if (entity == null)
             {
@@ -521,11 +551,6 @@ namespace FFIV_ScreenReader.Core
             }
 
             var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
-            if (playerController?.fieldPlayer == null)
-            {
-                SpeakText("Not in field");
-                return;
-            }
 
             // Use localPosition for pathfinding (matches touch controller behavior)
             Vector3 playerPos = playerController.fieldPlayer.transform.localPosition;
@@ -606,6 +631,10 @@ namespace FFIV_ScreenReader.Core
 
         internal void TogglePathfindingFilter()
         {
+            // Validate map state first
+            if (!EnsureFieldContextAndScan())
+                return;
+
             filterByPathfinding = !filterByPathfinding;
 
             // Update navigator
@@ -842,6 +871,10 @@ namespace FFIV_ScreenReader.Core
         {
             yield return new WaitForSeconds(0.5f);
 
+            // Don't restart audio loops if in battle
+            if (BattleState.IsInBattle)
+                yield break;
+
             // Only start loops if on valid field (FieldPlayerController exists)
             var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
             if (playerController == null)
@@ -888,6 +921,13 @@ namespace FFIV_ScreenReader.Core
 
             while (enableAudioBeacons)  // Exit when disabled
             {
+                // Suppress during battle (belt-and-suspenders with SuppressNavigationForBattle)
+                if (BattleState.IsInBattle)
+                {
+                    yield return null;
+                    continue;
+                }
+
                 // Manual time-based waiting (WaitForSeconds doesn't work reliably in IL2CPP wrapper)
                 if (Time.time < nextBeaconTime)
                 {
@@ -954,6 +994,15 @@ namespace FFIV_ScreenReader.Core
 
             while (enableWallTones)  // Exit when disabled
             {
+                // Suppress during battle (belt-and-suspenders with SuppressNavigationForBattle)
+                if (BattleState.IsInBattle)
+                {
+                    if (SoundPlayer.IsWallTonePlaying())
+                        SoundPlayer.StopWallTone();
+                    yield return null;
+                    continue;
+                }
+
                 // Manual time-based waiting (WaitForSeconds doesn't work reliably in IL2CPP wrapper)
                 if (Time.time < nextCheckTime)
                 {
@@ -1179,6 +1228,70 @@ namespace FFIV_ScreenReader.Core
                 prefBeaconVolume.Value = Math.Clamp(value, 0, 100);
                 prefsCategory?.SaveToFile(false);
             }
+        }
+
+        #endregion
+
+        #region Battle/Dialogue Navigation Suppression
+
+        /// <summary>
+        /// Suppresses all navigation features for battle. Called when battle starts.
+        /// Does not store state - that's handled by BattleState.SetActive().
+        /// </summary>
+        internal void SuppressNavigationForBattle()
+        {
+            StopWallToneLoop();
+            StopBeaconLoop();
+            enableWallTones = false;
+            enableFootsteps = false;
+            enableAudioBeacons = false;
+            filterByPathfinding = false;
+            if (entityNavigator != null)
+                entityNavigator.FilterByPathfinding = false;
+        }
+
+        /// <summary>
+        /// Restores navigation features after battle ends. Called by BattleState.Reset().
+        /// </summary>
+        internal void RestoreNavigationAfterBattle(bool wallTones, bool footsteps, bool audioBeacons, bool pathfindingFilter)
+        {
+            enableWallTones = wallTones;
+            enableFootsteps = footsteps;
+            enableAudioBeacons = audioBeacons;
+            filterByPathfinding = pathfindingFilter;
+            if (entityNavigator != null)
+                entityNavigator.FilterByPathfinding = pathfindingFilter;
+            if (enableWallTones) StartWallToneLoop();
+            if (enableAudioBeacons) StartBeaconLoop();
+        }
+
+        /// <summary>
+        /// Suppresses all navigation features for dialogue. Stores state for restoration.
+        /// </summary>
+        internal void SuppressNavigationForDialogue()
+        {
+            if (_hasStoredDialogueState) return; // Already suppressed
+
+            _preDialogueWallTones = enableWallTones;
+            _preDialogueFootsteps = enableFootsteps;
+            _preDialogueAudioBeacons = enableAudioBeacons;
+            _preDialoguePathfindingFilter = filterByPathfinding;
+            _hasStoredDialogueState = true;
+
+            SuppressNavigationForBattle(); // Reuse same suppression logic
+        }
+
+        /// <summary>
+        /// Restores navigation features after dialogue ends.
+        /// </summary>
+        internal void RestoreNavigationAfterDialogue()
+        {
+            if (!_hasStoredDialogueState) return;
+
+            RestoreNavigationAfterBattle(
+                _preDialogueWallTones, _preDialogueFootsteps,
+                _preDialogueAudioBeacons, _preDialoguePathfindingFilter);
+            _hasStoredDialogueState = false;
         }
 
         #endregion
