@@ -68,6 +68,14 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Newtonsoft.Json (ships with MelonLoader) -->
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(GameDir)\MelonLoader\net6\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
   <!-- Il2Cpp system assemblies -->
   <ItemGroup>
     <Reference Include="Il2Cppmscorlib">

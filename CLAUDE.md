@@ -59,6 +59,7 @@ powershell -Command "& cmd /c 'D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader\bui
 | 2: No Polling | Never use per-frame checks, OnUpdate, or continuous coroutines. Find the exact Harmony hook. |
 | 3: No Timers | Never use `WaitForSeconds` or hardcoded delays. Hook the precise moment instead. Exception: game's own timing systems. |
 | 4: Update Docs | After completing a feature or during debugging, update `docs/plan.md` (feature status) and `docs/debug.md` (architecture/troubleshooting). |
+| 5: No PowerShell Edits | Never use PowerShell scripts to edit files containing non-ASCII characters (e.g., arrows →, Japanese text). They corrupt the encoding. Use the Edit tool instead. |
 
 ## dump.cs Class Discovery
 `D:\Games\Dev\Unity\FFPR\FF4\dump.cs` (~18MB, 493K lines). **Never load entirely** - use Grep:

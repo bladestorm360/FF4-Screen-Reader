@@ -99,7 +99,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch]
     public static class ShopPatches
     {
-        private const string DEDUP_CONTEXT = "Shop.Item";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.SHOP_ITEM;
 
         /// <summary>
         /// Announces shop command menu options (Buy, Sell, Equipment, Back).

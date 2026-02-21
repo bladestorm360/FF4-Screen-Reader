@@ -39,7 +39,6 @@ namespace FFIV_ScreenReader.Patches
                 {
                     var postfix = AccessTools.Method(typeof(GameStatePatches), nameof(ChangeState_Postfix));
                     harmony.Patch(changeStateMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[GameState] Patched SubSceneManagerMainGame.ChangeState (event-driven map transitions)");
                 }
                 else
                 {
@@ -68,7 +67,6 @@ namespace FFIV_ScreenReader.Patches
                     // Clear battle state when returning to field
                     if (BattleState.IsInBattle)
                     {
-                        MelonLogger.Msg($"[GameState] Clearing battle state on transition to {state}");
                         BattleState.Reset();
                     }
 
@@ -105,9 +103,6 @@ namespace FFIV_ScreenReader.Patches
                     FFIV_ScreenReaderMod.SpeakText(fullMessage, interrupt: false);
                     lastAnnouncedMapId = currentMapId;
 
-                    // Record for deduplication with SystemMessage
-                    LocationMessageTracker.SetLastFadeMessage(fullMessage);
-
                     // Check if entering interior map - if so, switch to on-foot state
                     bool isWorldMap = FFIV_ScreenReaderMod.Instance?.IsCurrentMapWorldMap() ?? false;
                     MoveStateHelper.OnMapTransition(isWorldMap);
@@ -117,8 +112,6 @@ namespace FFIV_ScreenReader.Patches
 
                     // Force entity rescan to clear stale entities from previous map
                     FFIV_ScreenReaderMod.Instance?.ForceEntityRescan();
-
-                    MelonLogger.Msg($"[GameState] Map changed to {mapName} (ID: {currentMapId}), entities rescanned");
                 }
                 else if (lastAnnouncedMapId == -1)
                 {

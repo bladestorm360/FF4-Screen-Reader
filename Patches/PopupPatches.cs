@@ -20,8 +20,6 @@ using KeyInputGameOverLoadPopup = Il2CppLast.UI.KeyInput.GameOverLoadPopup;
 using KeyInputGameOverPopupController = Il2CppLast.UI.KeyInput.GameOverPopupController;
 using KeyInputInfomationPopup = Il2CppLast.UI.KeyInput.InfomationPopup;
 using KeyInputShopController = Il2CppLast.UI.KeyInput.ShopController;
-using KeyInputTitleWindowController = Il2CppLast.UI.KeyInput.TitleWindowController;
-
 // Type aliases for IL2CPP types - Touch Popups
 using TouchCommonPopup = Il2CppLast.UI.Touch.CommonPopup;
 using TouchGameOverSelectPopup = Il2CppLast.UI.Touch.GameOverSelectPopup;
@@ -114,36 +112,18 @@ namespace FFIV_ScreenReader.Patches
 
         private static void TryPatchBasePopup(HarmonyLib.Harmony harmony)
         {
-            try
-            {
-                Type popupType = typeof(BasePopup);
+            PatchHelper.TryPatchPostfix(harmony, typeof(BasePopup), "Open",
+                typeof(PopupPatches), nameof(PopupOpen_Postfix), "[Popup]");
 
-                var openMethod = AccessTools.Method(popupType, "Open");
-                if (openMethod != null)
-                {
-                    var openPostfix = typeof(PopupPatches).GetMethod(nameof(PopupOpen_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(openMethod, postfix: new HarmonyMethod(openPostfix));
-                }
-
-                var closeMethod = AccessTools.Method(popupType, "Close");
-                if (closeMethod != null)
-                {
-                    var closePostfix = typeof(PopupPatches).GetMethod(nameof(PopupClose_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(closeMethod, postfix: new HarmonyMethod(closePostfix));
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[Popup] Error patching base Popup: {ex.Message}");
-            }
+            PatchHelper.TryPatchPostfix(harmony, typeof(BasePopup), "Close",
+                typeof(PopupPatches), nameof(PopupClose_Postfix), "[Popup]");
         }
 
         private static void TryPatchTitleScreen(HarmonyLib.Harmony harmony)
         {
             try
             {
+                // Step 1: Patch SplashController.InitializeTitle to capture the text
                 Type splashControllerType = typeof(SplashController);
                 var initTitleMethod = AccessTools.Method(splashControllerType, "InitializeTitle");
 
@@ -154,15 +134,16 @@ namespace FFIV_ScreenReader.Patches
                     harmony.Patch(initTitleMethod, postfix: new HarmonyMethod(postfix));
                 }
 
-                Type titleWindowControllerType = typeof(KeyInputTitleWindowController);
-                var setEnableStartMethod = AccessTools.Method(titleWindowControllerType, "SetEnableStartObject");
-
-                if (setEnableStartMethod != null)
+                // Step 2: Patch SystemIndicator.Hide (runtime lookup - internal class)
+                Type systemIndicatorType = PatchHelper.FindType("Il2CppLast.Systems.Indicator.SystemIndicator");
+                if (systemIndicatorType == null)
                 {
-                    var postfix = typeof(PopupPatches).GetMethod(nameof(TitleWindowController_SetEnableStartObject_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(setEnableStartMethod, postfix: new HarmonyMethod(postfix));
+                    MelonLogger.Warning("[Popup] SystemIndicator type not found");
+                    return;
                 }
+
+                PatchHelper.TryPatchPostfix(harmony, systemIndicatorType, "Hide",
+                    typeof(PopupPatches), nameof(SystemIndicator_Hide_Postfix), "[Popup]");
             }
             catch (Exception ex)
             {
@@ -418,30 +399,9 @@ namespace FFIV_ScreenReader.Patches
         /// <summary>
         /// Patch GameOverSelectPopup.UpdateCommand to announce button navigation (Load/Title options).
         /// </summary>
-        private static void TryPatchGameOverSelectPopupUpdateCommand(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type gameOverSelectType = typeof(KeyInputGameOverSelectPopup);
-                var updateCommandMethod = AccessTools.Method(gameOverSelectType, "UpdateCommand");
-
-                if (updateCommandMethod != null)
-                {
-                    var postfix = typeof(PopupPatches).GetMethod(nameof(GameOverSelectPopup_UpdateCommand_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(updateCommandMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[Popup] Patched GameOverSelectPopup.UpdateCommand");
-                }
-                else
-                {
-                    MelonLogger.Warning("[Popup] GameOverSelectPopup.UpdateCommand method not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[Popup] Error patching GameOverSelectPopup.UpdateCommand: {ex.Message}");
-            }
-        }
+        private static void TryPatchGameOverSelectPopupUpdateCommand(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverSelectPopup), "UpdateCommand",
+                typeof(PopupPatches), nameof(GameOverSelectPopup_UpdateCommand_Postfix), "[Popup]");
 
         /// <summary>
         /// Patch GameOverLoadPopup.UpdateCommand for Yes/No button navigation
@@ -449,47 +409,14 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         private static void TryPatchGameOverLoadPopup(HarmonyLib.Harmony harmony)
         {
-            try
-            {
-                // Patch UpdateCommand for button navigation
-                Type loadPopupType = typeof(KeyInputGameOverLoadPopup);
-                var updateCommandMethod = AccessTools.Method(loadPopupType, "UpdateCommand");
+            PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverLoadPopup), "UpdateCommand",
+                typeof(PopupPatches), nameof(GameOverLoadPopup_UpdateCommand_Postfix), "[Popup]");
 
-                if (updateCommandMethod != null)
-                {
-                    var postfix = typeof(PopupPatches).GetMethod(nameof(GameOverLoadPopup_UpdateCommand_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(updateCommandMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[Popup] Patched GameOverLoadPopup.UpdateCommand");
-                }
-                else
-                {
-                    MelonLogger.Warning("[Popup] GameOverLoadPopup.UpdateCommand method not found");
-                }
-
-                // Patch InitSaveLoadPopup to announce popup message when it opens
-                Type controllerType = typeof(KeyInputGameOverPopupController);
-                var initMethod = AccessTools.Method(controllerType, "InitSaveLoadPopup");
-
-                if (initMethod != null)
-                {
-                    var postfix = typeof(PopupPatches).GetMethod(nameof(GameOverPopupController_InitSaveLoadPopup_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(initMethod, postfix: new HarmonyMethod(postfix));
-                    MelonLogger.Msg("[Popup] Patched GameOverPopupController.InitSaveLoadPopup");
-                }
-                else
-                {
-                    MelonLogger.Warning("[Popup] GameOverPopupController.InitSaveLoadPopup method not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[Popup] Error patching GameOverLoadPopup: {ex.Message}");
-            }
+            PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverPopupController), "InitSaveLoadPopup",
+                typeof(PopupPatches), nameof(GameOverPopupController_InitSaveLoadPopup_Postfix), "[Popup]");
         }
 
-        private static int lastGameOverSelectIndex = -1;
+        private const string DEDUP_GAMEOVER_SELECT = AnnouncementContexts.GAMEOVER_SELECT;
 
         public static void GameOverSelectPopup_UpdateCommand_Postfix(KeyInputGameOverSelectPopup __instance)
         {
@@ -508,8 +435,7 @@ namespace FFIV_ScreenReader.Patches
                 int index = cursor.Index;
 
                 // Deduplicate by index
-                if (index == lastGameOverSelectIndex) return;
-                lastGameOverSelectIndex = index;
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_SELECT, index)) return;
 
                 // Read button text from commandList at offset 0x40
                 string buttonText = ReadButtonFromCommandList(ptr, GAMEOVER_CMDLIST_OFFSET, index);
@@ -525,7 +451,7 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        private static int lastGameOverLoadIndex = -1;
+        private const string DEDUP_GAMEOVER_LOAD = AnnouncementContexts.GAMEOVER_LOAD;
 
         public static void GameOverLoadPopup_UpdateCommand_Postfix(KeyInputGameOverLoadPopup __instance)
         {
@@ -544,8 +470,7 @@ namespace FFIV_ScreenReader.Patches
                 int index = cursor.Index;
 
                 // Deduplicate by index
-                if (index == lastGameOverLoadIndex) return;
-                lastGameOverLoadIndex = index;
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_LOAD, index)) return;
 
                 // Read button text from commandList at offset 0x60
                 string buttonText = ReadButtonFromCommandList(ptr, GAMEOVERLOAD_CMDLIST_OFFSET, index);
@@ -568,7 +493,7 @@ namespace FFIV_ScreenReader.Patches
                 if (__instance == null) return;
 
                 // Reset button tracking for fresh state
-                lastGameOverLoadIndex = -1;
+                AnnouncementDeduplicator.Reset(DEDUP_GAMEOVER_LOAD);
 
                 // Use coroutine to delay reading until UI has populated
                 CoroutineManager.StartManaged(DelayedGameOverLoadPopupRead(__instance.Pointer));
@@ -614,6 +539,7 @@ namespace FFIV_ScreenReader.Patches
         #region Title Screen
 
         private static string pendingTitleText = null;
+        private static bool isTitleScreenTextPending = false;
 
         public static void SplashController_InitializeTitle_Postfix(SplashController __instance)
         {
@@ -643,29 +569,30 @@ namespace FFIV_ScreenReader.Patches
                 pendingTitleText = !string.IsNullOrWhiteSpace(pressText)
                     ? TextUtils.StripIconMarkup(pressText.Trim())
                     : "Press any button";
+                isTitleScreenTextPending = true;
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[Popup] Error in InitializeTitle postfix: {ex.Message}");
                 pendingTitleText = "Press any button";
+                isTitleScreenTextPending = true;
             }
         }
 
-        public static void TitleWindowController_SetEnableStartObject_Postfix(bool isEnable)
+        public static void SystemIndicator_Hide_Postfix()
         {
             try
             {
-                if (!isEnable)
-                    return;
-
-                string text = !string.IsNullOrWhiteSpace(pendingTitleText) ? pendingTitleText : "Press any button";
-                FFIV_ScreenReaderMod.SpeakText(text, interrupt: false);
-                pendingTitleText = null;
+                if (isTitleScreenTextPending && !string.IsNullOrWhiteSpace(pendingTitleText))
+                {
+                    FFIV_ScreenReaderMod.SpeakText(pendingTitleText, interrupt: false);
+                    pendingTitleText = null;
+                    isTitleScreenTextPending = false;
+                }
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[Popup] Error in SetEnableStartObject postfix: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Press any button", interrupt: false);
+                MelonLogger.Warning($"[Popup] Error in SystemIndicator.Hide postfix: {ex.Message}");
             }
         }
 

@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text.RegularExpressions;
 using MelonLoader;
 using UnityEngine;
-using FFIV_ScreenReader.Field;
 
 namespace FFIV_ScreenReader.Utils
 {
@@ -17,9 +15,6 @@ namespace FFIV_ScreenReader.Utils
     {
         private static Dictionary<string, string> translations;
         private static bool isInitialized = false;
-
-        // Track untranslated names by map for dumping
-        private static Dictionary<string, HashSet<string>> untranslatedNamesByMap = new Dictionary<string, HashSet<string>>();
 
         // Matches numeric prefix (e.g., "6:") or SC prefix (e.g., "SC01:") at start of entity names
         private static readonly Regex EntityPrefixRegex = new Regex(
@@ -39,7 +34,7 @@ namespace FFIV_ScreenReader.Utils
         {
             if (isInitialized) return;
 
-            // Create dictionary with all 385 translations
+            // Create dictionary with all 559 translations
             translations = new Dictionary<string, string>
             {
                 { "城１", "Castle 1" },
@@ -420,10 +415,211 @@ namespace FFIV_ScreenReader.Utils
                 { "女の子（赤）②", "Girl (Red) 2" },
                 { "男（紫）④", "Man (Purple) 4" },
                 { "門が開く", "Gate Opens" },
-                { "ドアが開く（奥側）", "Door Opens (Back)" }
+                { "ドアが開く（奥側）", "Door Opens (Back)" },
+
+                // Consumable Items
+                { "ポーション", "Potion" },
+                { "ハイポーション", "Hi-Potion" },
+                { "エーテル", "Ether" },
+                { "エーテルドライ", "Dry Ether" },
+                { "エリクサー", "Elixir" },
+                { "テント", "Tent" },
+                { "コテージ", "Cottage" },
+                { "フェニックスのお", "Phoenix Down" },
+                { "ばんのうやく", "Remedy" },
+                { "めぐすり", "Eye Drops" },
+                { "おとめのキッス", "Maiden's Kiss" },
+                { "やまびこそう", "Echo Herbs" },
+                { "きんのはり", "Gold Needle" },
+                { "どうのすなどけい", "Hourglass" },
+                { "ぎんのすなどけい", "Silver Hourglass" },
+                { "めざましどけい", "Alarm Clock" },
+                { "バッカスのさけ", "Bacchus's Wine" },
+                { "バッカスの酒", "Bacchus's Wine" },
+                { "ソーマのしずく", "Soma Drop" },
+                { "アラーム", "Alarm" },
+                { "こびとのパン", "Gnomish Bread" },
+                { "スケープドール", "Decoy" },
+                { "くものいと", "Spider's Silk" },
+
+                // Gil Treasures
+                { "960ギル", "960 Gil" },
+                { "1000ギル", "1,000 Gil" },
+                { "2000ギル", "2,000 Gil" },
+                { "5000ギル", "5,000 Gil" },
+                { "6000ギル", "6,000 Gil" },
+                { "10000ギル", "10,000 Gil" },
+                { "50000ギル", "50,000 Gil" },
+
+                // Weapons
+                { "アイスロッド", "Ice Rod" },
+                { "アイスブランド", "Icebrand" },
+                { "フレイムソード", "Flame Sword" },
+                { "こだいのつるぎ", "Ancient Sword" },
+                { "だいちのハンマー", "Gaia Hammer" },
+                { "じごくのつめ", "Hell Claws" },
+                { "ねこのつめ", "Cat Claws" },
+                { "ようせいのつめ", "Fairy Claws" },
+                { "しゅりけん", "Shuriken" },
+                { "ふうましゅりけん", "Fuma Shuriken" },
+                { "キラーボウ", "Killer Bow" },
+                { "グレートボウ", "Great Bow" },
+                { "エルフィンボウ", "Elfin Bow" },
+                { "ポイズンアクス", "Poison Axe" },
+                { "きくいちもんじ", "Kikuichimonji" },
+                { "ディフェンダー", "Defender" },
+                { "メイジマッシャー", "Mage Masher" },
+                { "オーガキラー", "Ogrekiller" },
+                { "ブラッドランス(バトルあり)", "Blood Lance (With Battle)" },
+                { "ねむりのけん(バトルあり)", "Sleep Blade (With Battle)" },
+                { "リリスのくちづけ", "Lilith's Kiss" },
+                { "あしゅら", "Ashura" },
+                { "へんげのロッド", "Polymorph Rod" },
+                { "ほしくずのロッド", "Stardust Rod" },
+                { "ファイアビュート", "Fire Lash" },
+                { "けんじゃのつえ", "Sage's Staff" },
+                { "ミスリルの杖", "Mythril Staff" },
+                { "むらさめ", "Murasame" },
+                { "まさむね", "Masamune" },
+                { "らぐなろく", "Ragnarok" },
+                { "ほーりーらんす", "Holy Lance" },
+                { "アヴェンジャー", "Avenger" },
+                { "あかいきば", "Red Fang" },
+                { "しろいきば", "White Fang" },
+                { "あおいきば", "Blue Fang" },
+                { "えんげつりん", "Pinwheel" },
+                { "メデューサのや", "Medusa Arrow" },
+                { "くちふうじのや", "Mute Arrow" },
+
+                // Arrows
+                { "せいなるや", "Holy Arrow" },
+                { "てんしのや", "Angel Arrow" },
+                { "ほのおのや", "Fire Arrow" },
+                { "いかづちのや", "Thunder Arrow" },
+                { "こおりのや", "Ice Arrow" },
+                { "よいちのや", "Yoichi Arrow" },
+                { "よいちのゆみ", "Yoichi Bow" },
+                { "アルテミスのや", "Artemis Arrow" },
+
+                // Armor/Equipment
+                { "エルメスのくつ", "Hermes Sandals" },
+                { "グリーンベレー", "Green Beret" },
+                { "しさいのローブ", "Sage's Robe" },
+                { "くろおびどうぎ", "Black Belt Gi" },
+                { "くろしょうぞく", "Black Garb" },
+                { "ドラゴンシールド", "Dragon Shield" },
+                { "ドラゴンヘルム", "Dragon Helm" },
+                { "ドラゴンメイル", "Dragon Mail" },
+                { "ドラゴンのこて", "Dragon Gloves" },
+                { "クリスタルのたて", "Crystal Shield" },
+                { "クリスタルメイル", "Crystal Mail" },
+                { "クリスタルのこて", "Crystal Gloves" },
+                { "クリスタルヘルム", "Crystal Helm" },
+                { "まもりのゆびわ", "Protection Ring" },
+                { "リボン", "Ribbon" },
+                { "パワーリスト", "Power Armlet" },
+                { "ドワーフのおの", "Dwarf's Axe" },
+                { "げんじのこて", "Genji Gloves" },
+                { "げんじのたて", "Genji Shield" },
+                { "げんじのかぶと", "Genji Helm" },
+                { "げんじのよろい", "Genji Armor" },
+                { "ふく", "Clothing" },
+                { "フレイムメイル", "Flame Mail" },
+                { "フレイムシールド", "Flame Shield" },
+
+                // Accessories/Special Items
+                { "ボムの指輪", "Bomb Ring" },
+                { "ボムのかけら", "Bomb Fragment" },
+                { "ボムの魂", "Bomb Soul" },
+                { "ボムのたましい", "Bomb Spirit" },
+                { "ゼウスのいかり", "Zeus's Wrath" },
+                { "ゼウスの怒り", "Zeus's Wrath" },
+                { "なんきょくのかぜ", "Antarctic Wind" },
+                { "ほっきょくのかぜ", "Arctic Wind" },
+                { "ユニコーンのつの", "Unicorn Horn" },
+                { "クアールのひげ", "Coeurl Whisker" },
+                { "バンパイアのきば", "Vampire Fang" },
+                { "ネズミのしっぽ", "Rat Tail" },
+                { "ぎんのリンゴ", "Silver Apple" },
+                { "ぎんのリンゴ(バトルあり)", "Silver Apple (With Battle)" },
+                { "金のリンゴ", "Golden Apple" },
+                { "きんのリンゴ", "Golden Apple" },
+                { "きんのかみかざり", "Gold Hairpin" },
+                { "ルビーのゆびわ", "Ruby Ring" },
+                { "星の砂", "Stardust" },
+                { "月のカーテン", "Lunar Curtain" },
+                { "かいじゅうずかん", "Bestiary" },
+                { "怪獣図鑑", "Bestiary" },
+
+                // NPCs - Base Forms
+                { "神官（紫）", "Priest (Purple)" },
+                { "モンク僧（青）", "Monk (Blue)" },
+                { "ドワーフ兵（赤）", "Dwarf Soldier (Red)" },
+                { "ドワーフ王", "Dwarf King" },
+                { "兵士（青）", "Soldier (Blue)" },
+                { "倒れている兵士（青）", "Fallen Soldier (Blue)" },
+                { "女の子（赤）", "Girl (Red)" },
+                { "女の子（青）", "Girl (Blue)" },
+                { "男の子（赤）", "Boy (Red)" },
+                { "男（紫）", "Man (Purple)" },
+                { "近衛兵士（青）", "Royal Guard (Blue)" },
+                { "ボム（赤）", "Bomb (Red)" },
+                { "アサルトドアー", "Trap Door" },
+                { "黒チョコボ", "Black Chocobo" },
+
+                // NPCs - Troia Castle Positional Variants
+                { "神官（紫）右下", "Priest (Purple) Bottom Right" },
+                { "神官（紫）左下", "Priest (Purple) Bottom Left" },
+                { "神官（紫）右中", "Priest (Purple) Middle Right" },
+                { "神官（紫）左中", "Priest (Purple) Middle Left" },
+                { "神官（紫）上左", "Priest (Purple) Upper Left" },
+                { "神官（紫）上右", "Priest (Purple) Upper Right" },
+                { "神官（紫）左上", "Priest (Purple) Top Left" },
+                { "神官（紫）右上", "Priest (Purple) Top Right" },
+
+                // Named Characters/Bosses
+                { "バロン王", "King Baron" },
+                { "エッジ", "Edge" },
+                { "ゼムス", "Zemus" },
+                { "じい", "Old Man" },
+
+                // Events/Story Triggers
+                { "ミストドラゴン戦闘", "Mist Dragon Battle" },
+                { "プロローグ１（ローザイベント）", "Prologue 1 (Rosa Event)" },
+                { "プロローグ２（シドイベント）", "Prologue 2 (Cid Event)" },
+                { "ファーブル防衛戦後1", "After Fabul Defense 1" },
+                { "ローザ救出", "Rosa Rescue" },
+                { "バルバリシア戦闘", "Barbariccia Battle" },
+                { "土のクリスタルを届ける", "Deliver Earth Crystal" },
+                { "ルゲイエのカギ使用イベント", "Dr. Lugae's Key Use Event" },
+                { "大砲室から追い出される", "Expelled from Cannon Room" },
+                { "0059：ファルコン号発進", "0059: Falcon Launch" },
+                { "ファルコン号発進", "Falcon Launch" },
+                { "シド再会", "Cid Reunion" },
+                { "ドリル取り付け", "Drill Installation" },
+                { "カインの裏切り", "Kain's Betrayal" },
+                { "エッジとルビカンテ", "Edge and Rubicante" },
+                { "ゾットの塔へ", "To Tower of Zot" },
+                { "エンタープライズ号", "Enterprise" },
+                { "地下への道開通", "Underground Path Opens" },
+                { "ドリルで地上への穴をあける", "Drill to Surface" },
+                { "最後の戦い", "The Final Battle" },
+                { "幻獣神の洞窟_2戦目", "Cave of Bahamut Battle 2" },
+                { "デモンズウォール", "Demon Wall" },
+                { "幻獣1", "Eidolon 1" },
+                { "幻獣2", "Eidolon 2" },
+                { "眠りマーク", "Sleep Mark" },
+                { "OP用：近衛兵士（赤）1", "OP: Royal Guard (Red) 1" },
+
+                // Vehicles/Transportation
+                { "ファルコン号", "Falcon" },
+                { "塔（地底）", "Tower (Underground)" },
+                { "月の魔導船から降りる", "Disembark Lunar Whale" },
+                { "飛行モードにするレバー", "Flight Mode Lever" },
+                { "クリスタル（赤）デフォルト", "Crystal (Red) Default" },
+                { "月の地下渓谷入口", "Lunar Subterrane Entrance" }
             };
 
-            MelonLogger.Msg($"[EntityTranslator] Initialized with {translations.Count} embedded translations");
             isInitialized = true;
         }
 
@@ -439,9 +635,6 @@ namespace FFIV_ScreenReader.Utils
             // Ensure initialized
             if (!isInitialized)
                 Initialize();
-
-            // Track the raw name for dumping (before any translation)
-            TrackNameForDump(japaneseName);
 
             // 1. Exact match first (preserves existing behavior)
             if (translations.TryGetValue(japaneseName, out string englishName))
@@ -467,29 +660,6 @@ namespace FFIV_ScreenReader.Utils
 
             // Return original if no translation
             return japaneseName;
-        }
-
-        /// <summary>
-        /// Checks if a string contains Japanese characters (hiragana, katakana, or kanji).
-        /// </summary>
-        private static bool ContainsJapanese(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return false;
-
-            foreach (char c in text)
-            {
-                // Hiragana: U+3040 - U+309F
-                // Katakana: U+30A0 - U+30FF
-                // Kanji: U+4E00 - U+9FFF (common CJK)
-                if ((c >= '\u3040' && c <= '\u309F') ||  // Hiragana
-                    (c >= '\u30A0' && c <= '\u30FF') ||  // Katakana
-                    (c >= '\u4E00' && c <= '\u9FFF'))    // Common Kanji
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         /// <summary>
@@ -532,368 +702,22 @@ namespace FFIV_ScreenReader.Utils
             }
         }
 
+        private static readonly Dictionary<char, string> CircledNumberMap = new Dictionary<char, string>
+        {
+            {'①', "1"}, {'②', "2"}, {'③', "3"}, {'④', "4"}, {'⑤', "5"},
+            {'⑥', "6"}, {'⑦', "7"}, {'⑧', "8"}, {'⑨', "9"}, {'⑩', "10"},
+            {'⑪', "11"}, {'⑫', "12"}, {'⑬', "13"}, {'⑭', "14"}, {'⑮', "15"},
+            {'⑯', "16"}, {'⑰', "17"}, {'⑱', "18"}, {'⑲', "19"}, {'⑳', "20"}
+        };
+
         /// <summary>
         /// Converts circled number (①②③...) to regular digit string.
         /// </summary>
         private static string ConvertCircledNumber(string circled)
         {
-            var map = new Dictionary<char, string>
-            {
-                {'①', "1"}, {'②', "2"}, {'③', "3"}, {'④', "4"}, {'⑤', "5"},
-                {'⑥', "6"}, {'⑦', "7"}, {'⑧', "8"}, {'⑨', "9"}, {'⑩', "10"},
-                {'⑪', "11"}, {'⑫', "12"}, {'⑬', "13"}, {'⑭', "14"}, {'⑮', "15"},
-                {'⑯', "16"}, {'⑰', "17"}, {'⑱', "18"}, {'⑲', "19"}, {'⑳', "20"}
-            };
-
-            if (circled.Length == 1 && map.TryGetValue(circled[0], out string num))
+            if (circled.Length == 1 && CircledNumberMap.TryGetValue(circled[0], out string num))
                 return num;
             return circled;
-        }
-
-        /// <summary>
-        /// Tracks a name for the dump, using base name (without suffix) for deduplication.
-        /// Now tracks ALL names with Japanese characters, not just untranslated ones.
-        /// </summary>
-        private static void TrackNameForDump(string rawName)
-        {
-            if (string.IsNullOrEmpty(rawName))
-                return;
-
-            // Use base name (strip suffix) for deduplication
-            StripSuffix(rawName, out _, out string baseName);
-            string trackingName = baseName;
-
-            // Only track if contains Japanese (filter out pure English names)
-            if (!ContainsJapanese(trackingName))
-                return;
-
-            string mapName = MapNameResolver.GetCurrentMapName();
-            if (string.IsNullOrEmpty(mapName))
-                return;
-
-            if (!untranslatedNamesByMap.ContainsKey(mapName))
-                untranslatedNamesByMap[mapName] = new HashSet<string>();
-            untranslatedNamesByMap[mapName].Add(trackingName);
-        }
-
-        /// <summary>
-        /// Dumps untranslated entity names for the current map to EntityNames.json.
-        /// Appends by map name with duplicate detection.
-        /// Returns a status string for TTS feedback.
-        /// </summary>
-        public static string DumpUntranslatedNames()
-        {
-            try
-            {
-                string currentMap = MapNameResolver.GetCurrentMapName();
-                if (string.IsNullOrEmpty(currentMap))
-                    return "Could not determine current map.";
-
-                // Force-scan all entities to populate untranslated names
-                // This ensures we capture names for entities the player hasn't navigated to yet
-                var fieldEntities = FieldNavigationHelper.GetAllFieldEntities();
-                var navigableEntities = EntityFactory.CreateFromFieldEntities(
-                    fieldEntities,
-                    UnityEngine.Vector3.zero  // Position doesn't matter for name access
-                );
-
-                // Force-access Name property on each entity to trigger Translate()
-                int scannedCount = 0;
-                foreach (var entity in navigableEntities)
-                {
-                    _ = entity.Name;  // This calls Translate() which tracks names
-                    scannedCount++;
-                }
-
-                MelonLogger.Msg($"[EntityTranslator] Scanned {scannedCount} entities for names on {currentMap}");
-
-                // Build path: UserData/FFIV_ScreenReader/EntityNames.json
-                string gameDataPath = Application.dataPath;
-                string gameRoot = Path.GetDirectoryName(gameDataPath);
-                string userDataPath = Path.Combine(gameRoot, "UserData", "FFIV_ScreenReader");
-                string dumpPath = Path.Combine(userDataPath, "EntityNames.json");
-
-                // Create directory if needed
-                if (!Directory.Exists(userDataPath))
-                {
-                    Directory.CreateDirectory(userDataPath);
-                }
-
-                // Load existing data from file
-                var existingData = new Dictionary<string, Dictionary<string, string>>();
-                if (File.Exists(dumpPath))
-                {
-                    string existingJson = File.ReadAllText(dumpPath);
-                    existingData = ParseNestedJsonDictionary(existingJson);
-                }
-
-                // Check if map already exists in file
-                if (existingData.ContainsKey(currentMap))
-                    return "Entity data already exists for this map.";
-
-                // Check if we have untranslated names for this map
-                if (!untranslatedNamesByMap.ContainsKey(currentMap) || untranslatedNamesByMap[currentMap].Count == 0)
-                    return "No untranslated names for this map.";
-
-                // Add current map's names to data
-                var mapNames = new Dictionary<string, string>();
-                foreach (string name in untranslatedNamesByMap[currentMap])
-                {
-                    mapNames[name] = "";
-                }
-                existingData[currentMap] = mapNames;
-
-                // Write nested JSON
-                WriteNestedJson(dumpPath, existingData);
-
-                int count = mapNames.Count;
-                MelonLogger.Msg($"[EntityTranslator] Dumped {count} names for {currentMap} to: {dumpPath}");
-                return $"Dumped {count} names for {currentMap}";
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Error($"[EntityTranslator] Failed to save EntityNames.json: {ex.Message}");
-                return "Failed to dump entity names.";
-            }
-        }
-
-        /// <summary>
-        /// Parses nested JSON: { "MapName": { "Japanese": "", ... }, ... }
-        /// </summary>
-        private static Dictionary<string, Dictionary<string, string>> ParseNestedJsonDictionary(string json)
-        {
-            var result = new Dictionary<string, Dictionary<string, string>>();
-
-            if (string.IsNullOrWhiteSpace(json))
-                return result;
-
-            json = json.Trim();
-            if (!json.StartsWith("{") || !json.EndsWith("}"))
-                return result;
-
-            // Remove outer braces
-            json = json.Substring(1, json.Length - 2).Trim();
-            if (string.IsNullOrEmpty(json))
-                return result;
-
-            int pos = 0;
-            while (pos < json.Length)
-            {
-                // Find map name key
-                int keyStart = json.IndexOf('"', pos);
-                if (keyStart < 0) break;
-
-                int keyEnd = FindClosingQuote(json, keyStart + 1);
-                if (keyEnd < 0) break;
-
-                string mapKey = json.Substring(keyStart + 1, keyEnd - keyStart - 1);
-                mapKey = mapKey.Replace("\\\"", "\"").Replace("\\\\", "\\");
-
-                // Find the opening brace for this map's value
-                int braceStart = json.IndexOf('{', keyEnd);
-                if (braceStart < 0) break;
-
-                // Find matching closing brace
-                int braceEnd = FindMatchingBrace(json, braceStart);
-                if (braceEnd < 0) break;
-
-                // Parse inner dictionary
-                string innerJson = json.Substring(braceStart, braceEnd - braceStart + 1);
-                result[mapKey] = ParseJsonDictionary(innerJson);
-
-                pos = braceEnd + 1;
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Simple JSON dictionary parser for nested use.
-        /// </summary>
-        private static Dictionary<string, string> ParseJsonDictionary(string json)
-        {
-            var result = new Dictionary<string, string>();
-
-            if (string.IsNullOrWhiteSpace(json))
-                return result;
-
-            // Remove outer braces and whitespace
-            json = json.Trim();
-            if (json.StartsWith("{")) json = json.Substring(1);
-            if (json.EndsWith("}")) json = json.Substring(0, json.Length - 1);
-            json = json.Trim();
-
-            if (string.IsNullOrEmpty(json))
-                return result;
-
-            // Parse key-value pairs
-            int pos = 0;
-            while (pos < json.Length)
-            {
-                // Find opening quote for key
-                int keyStart = json.IndexOf('"', pos);
-                if (keyStart < 0) break;
-
-                // Find closing quote for key
-                int keyEnd = json.IndexOf('"', keyStart + 1);
-                if (keyEnd < 0) break;
-
-                string key = json.Substring(keyStart + 1, keyEnd - keyStart - 1);
-
-                // Find colon
-                int colonPos = json.IndexOf(':', keyEnd);
-                if (colonPos < 0) break;
-
-                // Find opening quote for value
-                int valueStart = json.IndexOf('"', colonPos);
-                if (valueStart < 0) break;
-
-                // Find closing quote for value (handle escaped quotes)
-                int valueEnd = valueStart + 1;
-                while (valueEnd < json.Length)
-                {
-                    valueEnd = json.IndexOf('"', valueEnd);
-                    if (valueEnd < 0) break;
-
-                    // Check if escaped
-                    int backslashes = 0;
-                    int checkPos = valueEnd - 1;
-                    while (checkPos >= valueStart && json[checkPos] == '\\')
-                    {
-                        backslashes++;
-                        checkPos--;
-                    }
-
-                    if (backslashes % 2 == 0)
-                        break; // Not escaped
-
-                    valueEnd++;
-                }
-
-                if (valueEnd < 0) break;
-
-                string value = json.Substring(valueStart + 1, valueEnd - valueStart - 1);
-
-                // Unescape basic sequences
-                value = value.Replace("\\\"", "\"").Replace("\\\\", "\\");
-
-                result[key] = value;
-
-                // Move to next pair
-                pos = valueEnd + 1;
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Finds the closing quote for a JSON string, handling escaped quotes.
-        /// </summary>
-        private static int FindClosingQuote(string json, int startPos)
-        {
-            int pos = startPos;
-            while (pos < json.Length)
-            {
-                pos = json.IndexOf('"', pos);
-                if (pos < 0) return -1;
-
-                // Count preceding backslashes
-                int backslashes = 0;
-                int checkPos = pos - 1;
-                while (checkPos >= startPos - 1 && json[checkPos] == '\\')
-                {
-                    backslashes++;
-                    checkPos--;
-                }
-
-                if (backslashes % 2 == 0)
-                    return pos; // Not escaped
-
-                pos++;
-            }
-            return -1;
-        }
-
-        /// <summary>
-        /// Finds the matching closing brace for an opening brace.
-        /// </summary>
-        private static int FindMatchingBrace(string json, int openPos)
-        {
-            int depth = 0;
-            bool inString = false;
-
-            for (int i = openPos; i < json.Length; i++)
-            {
-                char c = json[i];
-
-                if (inString)
-                {
-                    if (c == '\\')
-                    {
-                        i++; // Skip escaped character
-                        continue;
-                    }
-                    if (c == '"')
-                        inString = false;
-                    continue;
-                }
-
-                if (c == '"')
-                {
-                    inString = true;
-                }
-                else if (c == '{')
-                {
-                    depth++;
-                }
-                else if (c == '}')
-                {
-                    depth--;
-                    if (depth == 0)
-                        return i;
-                }
-            }
-            return -1;
-        }
-
-        /// <summary>
-        /// Writes a nested dictionary as formatted JSON to a file.
-        /// </summary>
-        private static void WriteNestedJson(string path, Dictionary<string, Dictionary<string, string>> data)
-        {
-            using (var writer = new StreamWriter(path, false, System.Text.Encoding.UTF8))
-            {
-                writer.WriteLine("{");
-                var mapKeys = new List<string>(data.Keys);
-                for (int m = 0; m < mapKeys.Count; m++)
-                {
-                    string mapKey = mapKeys[m];
-                    string escapedMapKey = mapKey.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                    writer.WriteLine($"  \"{escapedMapKey}\": {{");
-
-                    var names = new List<string>(data[mapKey].Keys);
-                    for (int n = 0; n < names.Count; n++)
-                    {
-                        string escapedName = names[n].Replace("\\", "\\\\").Replace("\"", "\\\"");
-                        string escapedValue = data[mapKey][names[n]].Replace("\\", "\\\\").Replace("\"", "\\\"");
-                        string comma = (n < names.Count - 1) ? "," : "";
-                        writer.WriteLine($"    \"{escapedName}\": \"{escapedValue}\"{comma}");
-                    }
-
-                    string mapComma = (m < mapKeys.Count - 1) ? "," : "";
-                    writer.WriteLine($"  }}{mapComma}");
-                }
-                writer.WriteLine("}");
-            }
-        }
-
-        /// <summary>
-        /// Reload is a no-op since translations are embedded at compile time.
-        /// Kept for API compatibility.
-        /// </summary>
-        public static void Reload()
-        {
-            MelonLogger.Msg("[EntityTranslator] Reload called - translations are embedded, no action needed");
         }
 
         /// <summary>

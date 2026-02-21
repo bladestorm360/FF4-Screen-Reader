@@ -155,7 +155,7 @@ namespace FFIV_ScreenReader.Patches
 
                 // Use object-based deduplication so different enemies with the same name
                 // attacking in succession are both announced (each BattleActData is unique)
-                if (!AnnouncementDeduplicator.ShouldAnnounce("BattleAction", battleActData))
+                if (!AnnouncementDeduplicator.ShouldAnnounce(AnnouncementContexts.BATTLE_ACTION, battleActData))
                 {
                     return;
                 }
@@ -350,18 +350,14 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Look up the localized message
-                var messageManager = MessageManager.Instance;
-                if (messageManager != null)
+                string message = MessageHelper.GetLocalizedMessage(messageId);
+                if (message != null)
                 {
-                    string message = messageManager.GetMessage(messageId);
-                    if (!string.IsNullOrWhiteSpace(message))
+                    string cleanMessage = message.Trim();
+                    // Use global deduplication to avoid double announcements with ScrollMessageManager.Play
+                    if (GlobalBattleMessageTracker.ShouldAnnounce(cleanMessage))
                     {
-                        string cleanMessage = message.Trim();
-                        // Use global deduplication to avoid double announcements with ScrollMessageManager.Play
-                        if (GlobalBattleMessageTracker.ShouldAnnounce(cleanMessage))
-                        {
-                            FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
-                        }
+                        FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
                     }
                 }
             }
@@ -466,7 +462,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.Battle.BattleConditionController), nameof(Il2CppLast.Battle.BattleConditionController.Add))]
     public static class BattleConditionController_Add_Patch
     {
-        private const string DEDUP_CONTEXT = "Battle.ConditionAdd";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_CONDITION_ADD;
 
         [HarmonyPostfix]
         public static void Postfix(BattleUnitData battleUnitData, int id)
@@ -579,7 +575,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleMenuController), nameof(Il2CppLast.UI.KeyInput.BattleMenuController.SetCommadnMessage))]
     public static class BattleMenuController_KeyInput_SetCommadnMessage_Patch
     {
-        private static string lastMessage = "";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_SET_COMMAND_MESSAGE;
 
         [HarmonyPostfix]
         public static void Postfix(string message)
@@ -588,11 +584,7 @@ namespace FFIV_ScreenReader.Patches
             {
                 if (string.IsNullOrWhiteSpace(message))
                 {
-                    // If message is cleared, reset tracking
-                    if (!string.IsNullOrWhiteSpace(lastMessage))
-                    {
-                        lastMessage = "";
-                    }
+                    AnnouncementDeduplicator.Reset(DEDUP_CONTEXT);
                     return;
                 }
 
@@ -600,19 +592,16 @@ namespace FFIV_ScreenReader.Patches
                 string cleanMessage = message.Trim();
 
                 // Skip if this message matches the action name just announced by CreateActFunction
-                // This prevents duplicate announcements like "Rosa uses Pray" followed by "Pray"
                 if (GlobalBattleMessageTracker.IsRedundantActionMessage(cleanMessage))
                 {
                     return;
                 }
 
-                // Skip duplicate messages (simple string equality)
-                if (cleanMessage == lastMessage)
+                // Skip duplicate messages
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, cleanMessage))
                 {
                     return;
                 }
-
-                lastMessage = cleanMessage;
 
                 FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: false);
             }
@@ -627,7 +616,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleMenuController), nameof(Il2CppLast.UI.KeyInput.BattleMenuController.SetCommandSelectTarget))]
     public static class BattleMenuController_SetCommandSelectTarget_Patch
     {
-        private const string DEDUP_CONTEXT = "Battle.Turn";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_TURN;
         public static Il2Cpp.BattlePlayerData CurrentActiveCharacter = null;
 
         [HarmonyPostfix]
@@ -679,8 +668,8 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleTargetSelectController), nameof(Il2CppLast.UI.KeyInput.BattleTargetSelectController.SelectContent), new Type[] { typeof(Il2CppSystem.Collections.Generic.IEnumerable<Il2Cpp.BattlePlayerData>), typeof(int) })]
     public static class BattleTargetSelectController_SelectContent_Player_Patch
     {
-        public const string DEDUP_CONTEXT = "Battle.Target.Player";
-        public const string DEDUP_CONTEXT_ENEMY = "Battle.Target.Enemy";
+        public const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_TARGET_PLAYER;
+        public const string DEDUP_CONTEXT_ENEMY = AnnouncementContexts.BATTLE_TARGET_ENEMY;
 
         [HarmonyPostfix]
         public static void Postfix(Il2CppSystem.Collections.Generic.IEnumerable<Il2Cpp.BattlePlayerData> list, int index)
@@ -766,7 +755,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.BattleTargetSelectController), nameof(Il2CppLast.UI.KeyInput.BattleTargetSelectController.SelectContent), new Type[] { typeof(Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.Battle.BattleEnemyData>), typeof(int) })]
     public static class BattleTargetSelectController_SelectContent_Enemy_Patch
     {
-        public const string DEDUP_CONTEXT = "Battle.Target.Enemy";
+        public const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_TARGET_ENEMY;
 
         [HarmonyPostfix]
         public static void Postfix(Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.Battle.BattleEnemyData> list, int index)
@@ -804,66 +793,59 @@ namespace FFIV_ScreenReader.Patches
                         try
                         {
                             string mesIdName = selectedEnemy.GetMesIdName();
-                            var messageManager = Il2CppLast.Management.MessageManager.Instance;
-                            if (messageManager != null && !string.IsNullOrEmpty(mesIdName))
+                            string localizedName = MessageHelper.GetLocalizedMessage(mesIdName);
+                            if (localizedName != null)
                             {
-                                string localizedName = messageManager.GetMessage(mesIdName);
-                                if (!string.IsNullOrEmpty(localizedName))
-                                {
-                                    // Build announcement with HP information
-                                    string announcement = localizedName;
+                                // Build announcement with HP information
+                                string announcement = localizedName;
 
-                                    // Check if there are multiple enemies with the same name
-                                    int sameNameCount = 0;
-                                    int positionInGroup = 0;
-                                    for (int i = 0; i < enemyList.Count; i++)
+                                // Check if there are multiple enemies with the same name
+                                int sameNameCount = 0;
+                                int positionInGroup = 0;
+                                for (int i = 0; i < enemyList.Count; i++)
+                                {
+                                    var enemy = enemyList[i];
+                                    if (enemy != null)
                                     {
-                                        var enemy = enemyList[i];
-                                        if (enemy != null)
+                                        string enemyMesId = enemy.GetMesIdName();
+                                        string enemyName = MessageHelper.GetLocalizedMessage(enemyMesId);
+                                        if (enemyName == localizedName)
                                         {
-                                            string enemyMesId = enemy.GetMesIdName();
-                                            if (!string.IsNullOrEmpty(enemyMesId))
+                                            sameNameCount++;
+                                            if (i < index)
                                             {
-                                                string enemyName = messageManager.GetMessage(enemyMesId);
-                                                if (enemyName == localizedName)
-                                                {
-                                                    sameNameCount++;
-                                                    if (i < index)
-                                                    {
-                                                        positionInGroup++;
-                                                    }
-                                                }
+                                                positionInGroup++;
                                             }
                                         }
                                     }
-
-                                    // Add positional indicator if there are multiple enemies with the same name
-                                    if (sameNameCount > 1)
-                                    {
-                                        // Use letter suffixes: A, B, C, etc.
-                                        char letter = (char)('A' + positionInGroup);
-                                        announcement += $" {letter}";
-                                    }
-
-                                    // Try to get HP from BattleUnitDataInfo
-                                    try
-                                    {
-                                        var unitDataInfo = selectedEnemy.BattleUnitDataInfo;
-                                        if (unitDataInfo != null && unitDataInfo.Parameter != null)
-                                        {
-                                            int currentHP = unitDataInfo.Parameter.CurrentHP;
-                                            int maxHP = unitDataInfo.Parameter.ConfirmedMaxHp();
-
-                                            announcement += $", HP {currentHP}/{maxHP}";
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        // Continue with just the name if HP can't be read
-                                    }
-
-                                    FFIV_ScreenReaderMod.SpeakText(announcement);
                                 }
+
+                                // Add positional indicator if there are multiple enemies with the same name
+                                if (sameNameCount > 1)
+                                {
+                                    // Use letter suffixes: A, B, C, etc.
+                                    char letter = (char)('A' + positionInGroup);
+                                    announcement += $" {letter}";
+                                }
+
+                                // Try to get HP from BattleUnitDataInfo
+                                try
+                                {
+                                    var unitDataInfo = selectedEnemy.BattleUnitDataInfo;
+                                    if (unitDataInfo != null && unitDataInfo.Parameter != null)
+                                    {
+                                        int currentHP = unitDataInfo.Parameter.CurrentHP;
+                                        int maxHP = unitDataInfo.Parameter.ConfirmedMaxHp();
+
+                                        announcement += $", HP {currentHP}/{maxHP}";
+                                    }
+                                }
+                                catch
+                                {
+                                    // Continue with just the name if HP can't be read
+                                }
+
+                                FFIV_ScreenReaderMod.SpeakText(announcement);
                             }
                         }
                         catch (Exception ex)
@@ -885,7 +867,7 @@ namespace FFIV_ScreenReader.Patches
     /// </summary>
     public static class BattleCommandMessageManualPatches
     {
-        private static string lastBattleCommandMessage = "";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_COMMAND_MESSAGE;
 
         /// <summary>
         /// Apply manual patches for battle command messages (defeat message, etc.)
@@ -894,9 +876,7 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                MelonLogger.Msg("[Battle Message] Applying BattleCommandMessage patches...");
                 PatchBattleCommandMessage(harmony);
-                MelonLogger.Msg("[Battle Message] BattleCommandMessage patches applied");
             }
             catch (Exception ex)
             {
@@ -904,27 +884,6 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        /// <summary>
-        /// Finds a type by name across all loaded assemblies.
-        /// </summary>
-        private static Type FindType(string fullName)
-        {
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    foreach (var type in assembly.GetTypes())
-                    {
-                        if (type.FullName == fullName)
-                        {
-                            return type;
-                        }
-                    }
-                }
-                catch { }
-            }
-            return null;
-        }
 
         /// <summary>
         /// Patch BattleCommandMessageController.SetMessage for system messages like "The party was defeated".
@@ -934,7 +893,7 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 // KeyInput version - uses SetMessage
-                var keyInputType = FindType("Il2CppLast.UI.KeyInput.BattleCommandMessageController");
+                var keyInputType = PatchHelper.FindType("Il2CppLast.UI.KeyInput.BattleCommandMessageController");
                 if (keyInputType != null)
                 {
                     var setMessageMethod = AccessTools.Method(keyInputType, "SetMessage");
@@ -943,7 +902,6 @@ namespace FFIV_ScreenReader.Patches
                         var postfix = typeof(BattleCommandMessageManualPatches).GetMethod(
                             nameof(SetMessage_Postfix), BindingFlags.Public | BindingFlags.Static);
                         harmony.Patch(setMessageMethod, postfix: new HarmonyMethod(postfix));
-                        MelonLogger.Msg("[Battle Message] Patched KeyInput.BattleCommandMessageController.SetMessage");
                     }
                     else
                     {
@@ -956,7 +914,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Touch version - uses SetCommandMessage and SetSystemMessage
-                var touchType = FindType("Il2CppLast.UI.Touch.BattleCommandMessageController");
+                var touchType = PatchHelper.FindType("Il2CppLast.UI.Touch.BattleCommandMessageController");
                 if (touchType != null)
                 {
                     // Patch SetCommandMessage
@@ -966,7 +924,6 @@ namespace FFIV_ScreenReader.Patches
                         var postfix = typeof(BattleCommandMessageManualPatches).GetMethod(
                             nameof(SetMessage_Postfix), BindingFlags.Public | BindingFlags.Static);
                         harmony.Patch(setCommandMsgMethod, postfix: new HarmonyMethod(postfix));
-                        MelonLogger.Msg("[Battle Message] Patched Touch.BattleCommandMessageController.SetCommandMessage");
                     }
 
                     // Patch SetSystemMessage
@@ -976,7 +933,6 @@ namespace FFIV_ScreenReader.Patches
                         var postfix = typeof(BattleCommandMessageManualPatches).GetMethod(
                             nameof(SetMessage_Postfix), BindingFlags.Public | BindingFlags.Static);
                         harmony.Patch(setSystemMsgMethod, postfix: new HarmonyMethod(postfix));
-                        MelonLogger.Msg("[Battle Message] Patched Touch.BattleCommandMessageController.SetSystemMessage");
                     }
                 }
                 else
@@ -1003,14 +959,10 @@ namespace FFIV_ScreenReader.Patches
                 if (string.IsNullOrEmpty(message)) return;
 
                 // Deduplicate
-                if (message == lastBattleCommandMessage) return;
-                lastBattleCommandMessage = message;
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, message)) return;
 
                 // Clean up the message
-                string cleanMessage = TextUtils.StripIconMarkup(message);
-                cleanMessage = cleanMessage.Replace("\n", " ").Replace("\r", " ").Trim();
-                while (cleanMessage.Contains("  "))
-                    cleanMessage = cleanMessage.Replace("  ", " ");
+                string cleanMessage = TextUtils.NormalizeWhitespace(TextUtils.StripIconMarkup(message));
 
                 if (string.IsNullOrEmpty(cleanMessage)) return;
 
@@ -1023,7 +975,6 @@ namespace FFIV_ScreenReader.Patches
                 // Use interrupt for defeat message so it's heard immediately
                 bool isDefeatMessage = cleanMessage.Contains("defeated", StringComparison.OrdinalIgnoreCase);
 
-                MelonLogger.Msg($"[Battle Command Message] {cleanMessage}");
                 FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: isDefeatMessage);
             }
             catch (Exception ex)
@@ -1037,7 +988,7 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         public static void ResetState()
         {
-            lastBattleCommandMessage = "";
+            AnnouncementDeduplicator.Reset(DEDUP_CONTEXT);
         }
     }
 }

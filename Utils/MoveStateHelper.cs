@@ -214,37 +214,15 @@ namespace FFIV_ScreenReader.Utils
         {
             try
             {
-                // Read AutoDash from ConfigSaveData via UserDataManager
-                // UserDataManager.configSaveData at offset 0xB8
-                // ConfigSaveData.isAutoDash at offset 0x40 (int: 0=off, 1=on)
-                bool autoDash = false;
                 var userData = Il2CppLast.Management.UserDataManager.Instance();
-
-                if (userData != null)
-                {
-                    unsafe
-                    {
-                        IntPtr userDataPtr = userData.Pointer;
-                        if (userDataPtr != IntPtr.Zero)
-                        {
-                            IntPtr configPtr = *(IntPtr*)((byte*)userDataPtr.ToPointer() + 0xB8);
-                            if (configPtr != IntPtr.Zero)
-                            {
-                                int autoDashValue = *(int*)((byte*)configPtr.ToPointer() + 0x40);
-                                autoDash = autoDashValue != 0;
-                            }
-                        }
-                    }
-                }
-
-                // Effective running state: XOR of autoDash and dashFlag
+                bool autoDash = (userData?.Config?.IsAutoDash ?? 0) != 0;
                 return autoDash != cachedDashFlag;
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[MoveState] Error reading dash state: {ex.Message}");
+                MelonLogger.Warning($"Error reading dash state: {ex.Message}");
+                return false;
             }
-            return false;
         }
 
         /// <summary>
@@ -320,6 +298,66 @@ namespace FFIV_ScreenReader.Utils
                 case MOVE_STATE_CHOCOBO: return "Chocobo";
                 case MOVE_STATE_GIMMICK: return "Gimmick";
                 default: return "Unknown";
+            }
+        }
+
+        /// <summary>
+        /// Set vehicle state from MoveState value (used for state sync).
+        /// This is a failsafe when hooks don't fire properly.
+        /// </summary>
+        public static void SetVehicleStateFromMoveState(int moveState)
+        {
+            cachedMoveState = moveState;
+            cachedTransportType = MoveStateToTransportType(moveState);
+            lastAnnouncedState = moveState;
+        }
+
+        /// <summary>
+        /// Convert MoveState to approximate TransportationType.
+        /// </summary>
+        private static int MoveStateToTransportType(int moveState)
+        {
+            switch (moveState)
+            {
+                case MOVE_STATE_SHIP: return TRANSPORT_SHIP;
+                case MOVE_STATE_AIRSHIP: return TRANSPORT_PLANE;
+                case MOVE_STATE_LOWFLYING: return TRANSPORT_LOWFLYING;
+                case MOVE_STATE_CHOCOBO: return TRANSPORT_YELLOW_CHOCOBO;
+                default: return TRANSPORT_NONE;
+            }
+        }
+
+        /// <summary>
+        /// Reads the actual moveState from the game's FieldPlayer and syncs the cached state.
+        /// Called as a failsafe when V key is pressed, in case patches didn't fire.
+        /// </summary>
+        public static void SyncWithActualGameState()
+        {
+            try
+            {
+                var playerController = GameObjectCache.Get<Il2CppLast.Map.FieldPlayerController>();
+                var player = playerController?.fieldPlayer;
+                if (player == null) return;
+
+                int actualMoveState = (int)player.moveState;
+
+                // If actual state differs from cached, update cache
+                if (actualMoveState != cachedMoveState)
+                {
+                    if (actualMoveState == MOVE_STATE_WALK || actualMoveState == MOVE_STATE_DUSH)
+                    {
+                        SetOnFoot();
+                    }
+                    else
+                    {
+                        // Map moveState to rough transport type
+                        SetVehicleStateFromMoveState(actualMoveState);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[MoveState] SyncWithActualGameState error: {ex.Message}");
             }
         }
     }

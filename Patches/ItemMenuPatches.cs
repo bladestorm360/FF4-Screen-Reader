@@ -271,7 +271,7 @@ namespace FFIV_ScreenReader.Patches
     /// </summary>
     public static class EquipmentAnnouncementDeduplicator
     {
-        private const string DEDUP_CONTEXT = "EquipmentMenu.Announcement";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.EQUIPMENT_ANNOUNCEMENT;
 
         public static bool ShouldAnnounce(string message)
         {
@@ -299,7 +299,7 @@ namespace FFIV_ScreenReader.Patches
     })]
     public static class ItemListController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "ItemMenu.List";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.ITEM_LIST;
 
         [HarmonyPostfix]
         public static void Postfix(
@@ -400,7 +400,7 @@ namespace FFIV_ScreenReader.Patches
     })]
     public static class EquipmentSelectWindowController_SetCursor_Patch
     {
-        private const string DEDUP_CONTEXT = "EquipmentMenu.Select";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.EQUIPMENT_SELECT;
 
         [HarmonyPostfix]
         public static void Postfix(
@@ -577,7 +577,7 @@ namespace FFIV_ScreenReader.Patches
     })]
     public static class ItemUseController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "ItemMenu.UseTarget";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.ITEM_USE_TARGET;
 
         [HarmonyPostfix]
         public static void Postfix(Il2CppLast.UI.KeyInput.ItemUseController __instance, Il2CppSystem.Collections.Generic.IEnumerable<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController> targetContents, Il2CppLast.UI.Cursor targetCursor)

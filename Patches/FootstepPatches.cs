@@ -18,7 +18,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch]
     public static class FootstepPatches
     {
-        private const float TILE_SIZE = 16f;
+        private const float TILE_SIZE = Constants.CellSize;
         private const float FOOTSTEP_COOLDOWN = 0.15f;
 
         private static float lastFootstepTime = 0f;
@@ -109,7 +109,7 @@ namespace FFIV_ScreenReader.Patches
                 {
                     lastTilePosition = currentTile;
 
-                    if (FFIV_ScreenReaderMod.Instance != null && FFIV_ScreenReaderMod.Instance.IsFootstepsEnabled())
+                    if (AudioLoopManager.FootstepsEnabled)
                     {
                         float currentTime = Time.time;
                         if (currentTime - lastFootstepTime >= FOOTSTEP_COOLDOWN)

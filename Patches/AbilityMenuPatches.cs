@@ -7,13 +7,10 @@ using Il2CppSerial.FF4.UI.KeyInput;
 using Il2CppLast.UI;
 using Il2CppLast.Data.Master;
 using Il2CppLast.Data.User;
-using Il2CppLast.Management;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
 
-// Import MenuState classes
-using AbilityMenuState = FFIV_ScreenReader.Core.AbilityMenuState;
 
 // Type alias for window controller (FF4-specific namespace)
 using AbilityWindowController = Il2CppSerial.FF4.UI.KeyInput.AbilityWindowController;
@@ -64,9 +61,9 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         public static void AbilityWindow_SetActive_Postfix(AbilityWindowController __instance, bool isActive)
         {
-            if (!isActive && AbilityMenuState.IsActive)
+            if (!isActive && MenuStates.Ability.IsActive)
             {
-                AbilityMenuState.Reset();
+                MenuStates.Ability.Reset();
             }
         }
     }
@@ -89,7 +86,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(AbilityCommandController), nameof(AbilityCommandController.SelectContent))]
     public static class AbilityCommandController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "AbilityMenu.Command";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.ABILITY_COMMAND;
 
         [HarmonyPostfix]
         public static void Postfix(AbilityCommandController __instance, int index)
@@ -125,7 +122,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Set ability menu state active
-                AbilityMenuState.SetActive();
+                MenuStates.Ability.SetActive();
 
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
@@ -144,7 +141,7 @@ namespace FFIV_ScreenReader.Patches
         new Type[] { typeof(Cursor), typeof(CustomScrollView.WithinRangeType), typeof(bool) })]
     public static class AbilityContentListController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "AbilityMenu.Content";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.ABILITY_CONTENT;
 
         [HarmonyPostfix]
         public static void Postfix(AbilityContentListController __instance, Cursor targetCursor)
@@ -170,20 +167,9 @@ namespace FFIV_ScreenReader.Patches
                 string mesIdName = abilityData.MesIdName;
                 string mesIdDescription = abilityData.MesIdDescription;
 
-                if (string.IsNullOrWhiteSpace(mesIdName))
-                {
-                    return;
-                }
-
-                var messageManager = MessageManager.Instance;
-                if (messageManager == null)
-                {
-                    return;
-                }
-
                 // Get localized name
-                string abilityName = messageManager.GetMessage(mesIdName);
-                if (string.IsNullOrWhiteSpace(abilityName))
+                string abilityName = MessageHelper.GetLocalizedMessage(mesIdName);
+                if (string.IsNullOrEmpty(abilityName))
                 {
                     return;
                 }
@@ -224,7 +210,8 @@ namespace FFIV_ScreenReader.Patches
                 // Add description if available
                 if (!string.IsNullOrWhiteSpace(mesIdDescription))
                 {
-                    string description = StripIconMarkup(messageManager.GetMessage(mesIdDescription));
+                    string rawDesc = MessageHelper.GetLocalizedMessage(mesIdDescription);
+                    string description = rawDesc != null ? StripIconMarkup(rawDesc) : null;
 
                     if (!string.IsNullOrWhiteSpace(description))
                     {
@@ -239,7 +226,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Set ability menu state active
-                AbilityMenuState.SetActive();
+                MenuStates.Ability.SetActive();
 
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
@@ -260,7 +247,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(AbilityUseContentListController), "SelectContent", new Type[] { typeof(Il2CppSystem.Collections.Generic.IEnumerable<ItemTargetSelectContentController>), typeof(Il2CppLast.UI.Cursor) })]
     public static class AbilityUseContentListController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "AbilityMenu.UseTarget";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.ABILITY_USE_TARGET;
 
         [HarmonyPostfix]
         public static void Postfix(AbilityUseContentListController __instance, Il2CppSystem.Collections.Generic.IEnumerable<ItemTargetSelectContentController> targetContents, Il2CppLast.UI.Cursor targetCursor)
@@ -293,7 +280,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Set ability menu state active
-                AbilityMenuState.SetActive();
+                MenuStates.Ability.SetActive();
 
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }

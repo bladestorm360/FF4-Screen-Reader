@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Core.Filters;
+using FFIV_ScreenReader.Utils;
 using Il2Cpp;
 using Il2CppLast.Map;
 
@@ -24,6 +25,7 @@ namespace FFIV_ScreenReader.Core
 
         private CategoryFilter categoryFilter;
         private PathfindingFilter pathfindingFilter;
+        private ToLayerFilter toLayerFilter;
         private MapExitGroupingStrategy mapExitGroupingStrategy;
         private bool filterMapExits = false;
 
@@ -65,6 +67,23 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
+        /// Whether to filter out ToLayer (layer transition) entities.
+        /// Since this is an OnAdd filter, toggling requires rebuilding the navigation list.
+        /// </summary>
+        public bool FilterToLayer
+        {
+            get => toLayerFilter.IsEnabled;
+            set
+            {
+                if (toLayerFilter.IsEnabled != value)
+                {
+                    toLayerFilter.IsEnabled = value;
+                    RebuildNavigationList();
+                }
+            }
+        }
+
+        /// <summary>
         /// Current category filter.
         /// </summary>
         public EntityCategory Category => categoryFilter.TargetCategory;
@@ -99,11 +118,13 @@ namespace FFIV_ScreenReader.Core
             // Initialize filters
             categoryFilter = new CategoryFilter();
             pathfindingFilter = new PathfindingFilter();
+            toLayerFilter = new ToLayerFilter();
             mapExitGroupingStrategy = new MapExitGroupingStrategy();
 
             // Register entity filters
             entityFilters.Add(categoryFilter);
             entityFilters.Add(pathfindingFilter);
+            entityFilters.Add(toLayerFilter);
 
             // Subscribe to cache events
             cache.OnEntityAdded += HandleEntityAdded;
@@ -238,7 +259,7 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         private void InsertSorted(NavigableEntity entity)
         {
-            Vector3 playerPos = GetPlayerPosition();
+            Vector3 playerPos = PlayerPositionHelper.GetWorldPosition();
             float distance = Vector3.Distance(entity.Position, playerPos);
 
             // Find insertion point using linear search
@@ -263,7 +284,7 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         private List<NavigableEntity> SortByDistance(List<NavigableEntity> entities)
         {
-            Vector3 playerPos = GetPlayerPosition();
+            Vector3 playerPos = PlayerPositionHelper.GetWorldPosition();
 
             // Pre-compute distances once (O(n)) instead of during each comparison (O(n log n))
             var withDistances = new List<(NavigableEntity entity, float distance)>(entities.Count);
@@ -308,7 +329,7 @@ namespace FFIV_ScreenReader.Core
             }
 
             _navigationListDirty = false;
-            Vector3 playerPos = GetPlayerPosition();
+            Vector3 playerPos = PlayerPositionHelper.GetWorldPosition();
 
             // Pre-compute distances once
             var withDistances = new List<(NavigableEntity entity, float distance)>(navigationList.Count);
@@ -425,18 +446,6 @@ namespace FFIV_ScreenReader.Core
                 }
             }
             return true;
-        }
-
-        /// <summary>
-        /// Gets the player's current world position.
-        /// </summary>
-        private Vector3 GetPlayerPosition()
-        {
-            var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
-            if (playerController?.fieldPlayer == null)
-                return Vector3.zero;
-
-            return playerController.fieldPlayer.transform.position;
         }
 
         /// <summary>

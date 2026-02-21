@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Core.Filters;
+using FFIV_ScreenReader.Utils;
 using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
 
@@ -201,7 +202,7 @@ namespace FFIV_ScreenReader.Core
             }
 
             // ADD phase: Find new entities and wrap them
-            Vector3 playerPos = GetPlayerPosition();
+            Vector3 playerPos = PlayerPositionHelper.GetWorldPosition();
 
             foreach (var fieldEntity in currentFieldEntities)
             {
@@ -341,16 +342,5 @@ namespace FFIV_ScreenReader.Core
             return positions;
         }
 
-        /// <summary>
-        /// Gets the player's current world position.
-        /// </summary>
-        private Vector3 GetPlayerPosition()
-        {
-            var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
-            if (playerController?.fieldPlayer == null)
-                return Vector3.zero;
-
-            return playerController.fieldPlayer.transform.position;
-        }
     }
 }

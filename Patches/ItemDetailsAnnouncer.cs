@@ -17,9 +17,9 @@ namespace FFIV_ScreenReader.Patches
     /// </summary>
     public static class ItemDetailsAnnouncer
     {
-        // ContentType values from dump.cs
-        private const int CONTENT_TYPE_WEAPON = 2;
-        private const int CONTENT_TYPE_ARMOR = 3;
+        // ContentType values - centralized in Constants
+        private const int CONTENT_TYPE_WEAPON = Constants.ItemContentTypes.WEAPON;
+        private const int CONTENT_TYPE_ARMOR = Constants.ItemContentTypes.ARMOR;
 
         /// <summary>
         /// Announces which party members can equip the currently selected item.

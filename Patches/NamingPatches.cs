@@ -19,7 +19,7 @@ namespace FFIV_ScreenReader.Patches
     /// </summary>
     public static class NamingPatches
     {
-        private const string DEDUP_CONTEXT = "Naming.Select";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.NAMING_SELECT;
         private static bool isPatched = false;
 
         // Memory offsets from dump.cs (KeyInput versions)

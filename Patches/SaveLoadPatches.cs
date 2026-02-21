@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 using System.Reflection;
-using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 using MelonLoader;
 using FFIV_ScreenReader.Core;
@@ -14,6 +14,7 @@ using MainMenuLoadController = Il2CppLast.UI.KeyInput.LoadWindowController;   //
 using MainMenuSaveController = Il2CppLast.UI.KeyInput.SaveWindowController;   // Main menu save (savePopup at 0x28)
 using InterruptionController = Il2CppLast.UI.KeyInput.InterruptionWindowController;  // QuickSave (savePopup at 0x38)
 using SaveListController = Il2CppLast.UI.KeyInput.SaveListController;  // Save slot list navigation
+using SavePopup = Il2CppLast.UI.KeyInput.SavePopup;
 using GameCursor = Il2CppLast.UI.Cursor;
 
 namespace FFIV_ScreenReader.Patches
@@ -61,10 +62,17 @@ namespace FFIV_ScreenReader.Patches
         private const int SAVE_POPUP_MESSAGE_TEXT_OFFSET = 0x40;
         private const int SAVE_POPUP_COMMAND_LIST_OFFSET = 0x60;
 
+        // SavePopup button navigation offsets (from dump.cs)
+        // selectCursor: 0x58 (Cursor), commandList: 0x60 (List<CommonCommand>)
+        private const int SAVE_POPUP_SELECT_CURSOR_OFFSET = 0x58;
+        private const int COMMON_COMMAND_TEXT_OFFSET = 0x18;
+
         // Controller-specific savePopup field offsets
         private const int TITLE_LOAD_SAVE_POPUP_OFFSET = 0x58;   // LoadGameWindowController.savePopup
         private const int MAIN_MENU_SAVE_POPUP_OFFSET = 0x28;    // Both LoadWindowController and SaveWindowController
         private const int INTERRUPTION_SAVE_POPUP_OFFSET = 0x38; // InterruptionWindowController.savePopup
+
+        private const string DEDUP_SAVE_POPUP_BUTTON = AnnouncementContexts.SAVE_LOAD_POPUP_BUTTON;
 
         public static void ApplyPatches(HarmonyLib.Harmony harmony)
         {
@@ -81,6 +89,9 @@ namespace FFIV_ScreenReader.Patches
                 // Patch SaveListController.SelectContent for slot navigation
                 TryPatchSaveListSelectContent(harmony);
 
+                // Patch SavePopup.UpdateCommand for button navigation (covers ALL save/load popups)
+                TryPatchSavePopupUpdateCommand(harmony);
+
                 // Patch SetActive(bool) on window controllers to clear state when windows close
                 TryPatchTitleLoadSetActive(harmony);
                 TryPatchMainMenuLoadSetActive(harmony);
@@ -93,221 +104,39 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        /// <summary>
-        /// Patches SaveListController.SelectContent for save slot navigation.
-        /// </summary>
-        private static void TryPatchSaveListSelectContent(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(SaveListController);
-                var method = AccessTools.Method(controllerType, "SelectContent");
+        private static void TryPatchSaveListSelectContent(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(SaveListController), "SelectContent",
+                typeof(SaveLoadPatches), nameof(SaveListSelectContent_Postfix), "[SaveLoad]");
 
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(SaveListSelectContent_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] SaveListController.SelectContent not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch SaveListController.SelectContent: {ex.Message}");
-            }
-        }
+        private static void TryPatchTitleLoad(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(TitleLoadController), "SetPopupActive",
+                typeof(SaveLoadPatches), nameof(TitleLoadSetPopupActive_Postfix), "[SaveLoad]");
 
-        /// <summary>
-        /// Patches LoadGameWindowController.SetPopupActive (title screen load).
-        /// </summary>
-        private static void TryPatchTitleLoad(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(TitleLoadController);
-                var method = AccessTools.Method(controllerType, "SetPopupActive");
+        private static void TryPatchMainMenuLoad(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(MainMenuLoadController), "SetPopupActive",
+                typeof(SaveLoadPatches), nameof(MainMenuLoadSetPopupActive_Postfix), "[SaveLoad]");
 
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(TitleLoadSetPopupActive_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] TitleLoadController.SetPopupActive not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch TitleLoadController: {ex.Message}");
-            }
-        }
+        private static void TryPatchMainMenuSave(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(MainMenuSaveController), "SetPopupActive",
+                typeof(SaveLoadPatches), nameof(MainMenuSaveSetPopupActive_Postfix), "[SaveLoad]");
 
-        /// <summary>
-        /// Patches LoadWindowController.SetPopupActive (main menu load).
-        /// </summary>
-        private static void TryPatchMainMenuLoad(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(MainMenuLoadController);
-                var method = AccessTools.Method(controllerType, "SetPopupActive");
+        private static void TryPatchInterruption(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(InterruptionController), "SetEnablePopup",
+                typeof(SaveLoadPatches), nameof(InterruptionSetEnablePopup_Postfix), "[SaveLoad]");
 
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuLoadSetPopupActive_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] MainMenuLoadController.SetPopupActive not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch MainMenuLoadController: {ex.Message}");
-            }
-        }
+        private static readonly Type[] BoolParamTypes = new[] { typeof(bool) };
 
-        /// <summary>
-        /// Patches SaveWindowController.SetPopupActive (main menu save).
-        /// </summary>
-        private static void TryPatchMainMenuSave(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(MainMenuSaveController);
-                var method = AccessTools.Method(controllerType, "SetPopupActive");
+        private static void TryPatchTitleLoadSetActive(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(TitleLoadController), "SetActive",
+                typeof(SaveLoadPatches), nameof(WindowSetActive_Postfix), "[SaveLoad]", BoolParamTypes);
 
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuSaveSetPopupActive_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] MainMenuSaveController.SetPopupActive not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch MainMenuSaveController: {ex.Message}");
-            }
-        }
+        private static void TryPatchMainMenuLoadSetActive(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(MainMenuLoadController), "SetActive",
+                typeof(SaveLoadPatches), nameof(WindowSetActive_Postfix), "[SaveLoad]", BoolParamTypes);
 
-        /// <summary>
-        /// Patches InterruptionWindowController.SetEnablePopup (QuickSave).
-        /// </summary>
-        private static void TryPatchInterruption(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(InterruptionController);
-                var method = AccessTools.Method(controllerType, "SetEnablePopup");
-
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(InterruptionSetEnablePopup_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] InterruptionController.SetEnablePopup not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch InterruptionController: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Patches LoadGameWindowController.SetActive (title screen load) to clear state when window closes.
-        /// </summary>
-        private static void TryPatchTitleLoadSetActive(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(TitleLoadController);
-                var method = AccessTools.Method(controllerType, "SetActive", new Type[] { typeof(bool) });
-
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(TitleLoadSetActive_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] TitleLoadController.SetActive not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch TitleLoadController.SetActive: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Patches LoadWindowController.SetActive (main menu load) to clear state when window closes.
-        /// </summary>
-        private static void TryPatchMainMenuLoadSetActive(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(MainMenuLoadController);
-                var method = AccessTools.Method(controllerType, "SetActive", new Type[] { typeof(bool) });
-
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuLoadSetActive_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] MainMenuLoadController.SetActive not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch MainMenuLoadController.SetActive: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Patches SaveWindowController.SetActive (main menu save) to clear state when window closes.
-        /// </summary>
-        private static void TryPatchMainMenuSaveSetActive(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                Type controllerType = typeof(MainMenuSaveController);
-                var method = AccessTools.Method(controllerType, "SetActive", new Type[] { typeof(bool) });
-
-                if (method != null)
-                {
-                    var postfix = typeof(SaveLoadPatches).GetMethod(nameof(MainMenuSaveSetActive_Postfix),
-                        BindingFlags.Public | BindingFlags.Static);
-                    harmony.Patch(method, postfix: new HarmonyMethod(postfix));
-                }
-                else
-                {
-                    MelonLogger.Warning("[SaveLoad] MainMenuSaveController.SetActive not found");
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Failed to patch MainMenuSaveController.SetActive: {ex.Message}");
-            }
-        }
+        private static void TryPatchMainMenuSaveSetActive(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(MainMenuSaveController), "SetActive",
+                typeof(SaveLoadPatches), nameof(WindowSetActive_Postfix), "[SaveLoad]", BoolParamTypes);
 
         // SaveContentView field offsets (from dump.cs line 454468)
         private const int SAVE_CONTENT_VIEW_SLOT_NAME_TEXT = 0x28;    // Text - "File", "Autosave", etc.
@@ -561,7 +390,7 @@ namespace FFIV_ScreenReader.Patches
 
                     if (string.IsNullOrWhiteSpace(text)) return null;
 
-                    return StripRichTextTags(text.Trim());
+                    return TextUtils.StripRichTextTags(text.Trim());
                 }
             }
             catch
@@ -663,9 +492,9 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
-        /// Postfix for LoadGameWindowController.SetActive - clears state when window is deactivated.
+        /// Shared postfix for all save/load window SetActive - clears state when window is deactivated.
         /// </summary>
-        public static void TitleLoadSetActive_Postfix(bool isActive)
+        public static void WindowSetActive_Postfix(bool isActive)
         {
             try
             {
@@ -676,43 +505,7 @@ namespace FFIV_ScreenReader.Patches
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[SaveLoad] Error in TitleLoadSetActive_Postfix: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Postfix for LoadWindowController.SetActive - clears state when window is deactivated.
-        /// </summary>
-        public static void MainMenuLoadSetActive_Postfix(bool isActive)
-        {
-            try
-            {
-                if (!isActive && SaveLoadMenuState.IsActive)
-                {
-                    SaveLoadMenuState.ResetState();
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Error in MainMenuLoadSetActive_Postfix: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Postfix for SaveWindowController.SetActive - clears state when window is deactivated.
-        /// </summary>
-        public static void MainMenuSaveSetActive_Postfix(bool isActive)
-        {
-            try
-            {
-                if (!isActive && SaveLoadMenuState.IsActive)
-                {
-                    SaveLoadMenuState.ResetState();
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Error in MainMenuSaveSetActive_Postfix: {ex.Message}");
+                MelonLogger.Warning($"[SaveLoad] Error in WindowSetActive_Postfix: {ex.Message}");
             }
         }
 
@@ -741,7 +534,7 @@ namespace FFIV_ScreenReader.Patches
                     // Set state for button navigation immediately
                     SaveLoadMenuState.IsActive = true;
                     SaveLoadMenuState.IsInConfirmation = true;
-                    PopupState.SetActive($"{context}Popup", popupPtr, SAVE_POPUP_COMMAND_LIST_OFFSET);
+                    AnnouncementDeduplicator.Reset(DEDUP_SAVE_POPUP_BUTTON);
 
                     // Start coroutine to read text after delay (allows UI to populate)
                     CoroutineManager.StartManaged(ReadPopupTextDelayed(popupPtr, context));
@@ -782,7 +575,7 @@ namespace FFIV_ScreenReader.Patches
                         // Still try to announce title if we have it
                         if (!string.IsNullOrWhiteSpace(title))
                         {
-                            title = StripRichTextTags(title);
+                            title = TextUtils.StripRichTextTags(title);
                             FFIV_ScreenReaderMod.SpeakText(title);
                         }
                         yield break;
@@ -794,13 +587,13 @@ namespace FFIV_ScreenReader.Patches
                     if (!string.IsNullOrWhiteSpace(message))
                     {
                         // Strip Unity rich text tags (like <color=#ff4040>...</color>)
-                        message = StripRichTextTags(message);
+                        message = TextUtils.StripRichTextTags(message);
 
                         // Combine title and message if both exist
                         string announcement;
                         if (!string.IsNullOrWhiteSpace(title))
                         {
-                            title = StripRichTextTags(title);
+                            title = TextUtils.StripRichTextTags(title);
                             announcement = $"{title}. {message}";
                         }
                         else
@@ -819,16 +612,80 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
-        /// Strips Unity rich text tags from a string.
-        /// Removes tags like <color=#xxxxxx>, </color>, <b>, </b>, etc.
+        /// Patches SavePopup.UpdateCommand for button navigation.
+        /// This single patch handles ALL popup button navigation since all controllers use the same SavePopup class.
         /// </summary>
-        private static string StripRichTextTags(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return text;
+        private static void TryPatchSavePopupUpdateCommand(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(SavePopup), "UpdateCommand",
+                typeof(SaveLoadPatches), nameof(SavePopupUpdateCommand_Postfix), "[SaveLoad]");
 
-            // Remove all XML-style tags: <tagname>, </tagname>, <tagname=value>, etc.
-            return Regex.Replace(text, @"<[^>]+>", string.Empty);
+        /// <summary>
+        /// Postfix for SavePopup.UpdateCommand - reads button text when navigating Yes/No.
+        /// </summary>
+        public static void SavePopupUpdateCommand_Postfix(SavePopup __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+
+                IntPtr ptr = __instance.Pointer;
+                if (ptr == IntPtr.Zero) return;
+
+                // Read cursor from offset 0x58
+                unsafe
+                {
+                    IntPtr cursorPtr = *(IntPtr*)((byte*)ptr.ToPointer() + SAVE_POPUP_SELECT_CURSOR_OFFSET);
+                    if (cursorPtr == IntPtr.Zero) return;
+
+                    var cursor = new GameCursor(cursorPtr);
+                    int index = cursor.Index;
+
+                    // Deduplicate
+                    if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_SAVE_POPUP_BUTTON, index)) return;
+
+                    // Read button text from commandList
+                    string buttonText = ReadPopupButton(ptr, SAVE_POPUP_COMMAND_LIST_OFFSET, index);
+                    if (!string.IsNullOrWhiteSpace(buttonText))
+                    {
+                        FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Error in SavePopupUpdateCommand: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reads button text from popup's commandList at the given index.
+        /// </summary>
+        private static string ReadPopupButton(IntPtr popupPtr, int cmdListOffset, int index)
+        {
+            try
+            {
+                unsafe
+                {
+                    IntPtr listPtr = *(IntPtr*)((byte*)popupPtr.ToPointer() + cmdListOffset);
+                    if (listPtr == IntPtr.Zero) return null;
+
+                    int size = *(int*)((byte*)listPtr.ToPointer() + 0x18);
+                    if (index < 0 || index >= size) return null;
+
+                    IntPtr itemsPtr = *(IntPtr*)((byte*)listPtr.ToPointer() + 0x10);
+                    if (itemsPtr == IntPtr.Zero) return null;
+
+                    IntPtr commandPtr = *(IntPtr*)((byte*)itemsPtr.ToPointer() + 0x20 + (index * 8));
+                    if (commandPtr == IntPtr.Zero) return null;
+
+                    IntPtr textPtr = *(IntPtr*)((byte*)commandPtr.ToPointer() + COMMON_COMMAND_TEXT_OFFSET);
+                    if (textPtr == IntPtr.Zero) return null;
+
+                    var text = new UnityEngine.UI.Text(textPtr);
+                    return text?.text;
+                }
+            }
+            catch { return null; }
         }
 
         private static void ClearPopupState()

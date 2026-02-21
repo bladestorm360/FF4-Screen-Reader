@@ -22,18 +22,13 @@ namespace FFIV_ScreenReader.Field
         public static Dictionary<FieldEntity, (int Type, string MessageId)> VehicleTypeMap { get; }
             = new Dictionary<FieldEntity, (int, string)>();
 
-        // Debug logging flag - logs transportation info once per map until reset
-        private static bool hasLoggedTransportation = false;
-
         /// <summary>
-        /// Resets transportation debug logging and clears VehicleTypeMap.
+        /// Clears VehicleTypeMap.
         /// Call on map change to prevent stale vehicle entries.
         /// </summary>
         public static void ResetVehicleTypeMap()
         {
-            hasLoggedTransportation = false;
             VehicleTypeMap.Clear();
-            MelonLogger.Msg("[Vehicle Debug] VehicleTypeMap cleared");
         }
 
         /// <summary>
@@ -63,27 +58,15 @@ namespace FFIV_ScreenReader.Field
                 }
             }
 
-            // Check if we should log transportation debug (once per map until reset)
-            bool shouldLogTransport = !hasLoggedTransportation;
-
             // Add transportation entities and populate VehicleTypeMap
             if (fieldMap.fieldController.transportation != null)
             {
                 var transportation = fieldMap.fieldController.transportation;
 
-                if (shouldLogTransport)
-                {
-                    MelonLogger.Msg($"[Vehicle Debug] Transportation controller exists, checking for vehicles...");
-                }
-
                 // Method 1: NeedInteractiveList - returns dynamic vehicle entities
                 try
                 {
                     var transportationEntities = transportation.NeedInteractiveList();
-                    if (shouldLogTransport)
-                    {
-                        MelonLogger.Msg($"[Vehicle Debug] NeedInteractiveList returned: {(transportationEntities != null ? transportationEntities.Count.ToString() : "null")} items");
-                    }
 
                     if (transportationEntities != null)
                     {
@@ -91,30 +74,15 @@ namespace FFIV_ScreenReader.Field
                         {
                             if (interactiveEntity == null) continue;
 
-                            if (shouldLogTransport)
-                            {
-                                MelonLogger.Msg($"[Vehicle Debug] NeedInteractiveList item: {interactiveEntity.GetType().Name}");
-                            }
-
                             var fieldEntity = interactiveEntity.TryCast<FieldEntity>();
                             if (fieldEntity != null && !results.Contains(fieldEntity))
                             {
-                                if (shouldLogTransport)
-                                {
-                                    MelonLogger.Msg($"[Vehicle Debug] -> TryCast<FieldEntity> succeeded: {fieldEntity.GetType().Name}");
-                                }
                                 results.Add(fieldEntity);
                             }
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    if (shouldLogTransport)
-                    {
-                        MelonLogger.Msg($"[Vehicle Debug] NeedInteractiveList exception: {ex.Message}");
-                    }
-                }
+                catch { }
 
                 // Method 2: Access Transportation.ModelList dictionary via pointer offsets
                 // TransportationController.infoData (Transportation) at offset 0x18
@@ -124,21 +92,15 @@ namespace FFIV_ScreenReader.Field
                     unsafe
                     {
                         IntPtr transportControllerPtr = transportation.Pointer;
-                        if (transportControllerPtr == IntPtr.Zero)
-                        {
-                            if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] TransportationController pointer is null");
-                        }
-                        else
+                        if (transportControllerPtr != IntPtr.Zero)
                         {
                             // Get infoData (Transportation) at offset 0x18
                             IntPtr infoDataPtr = *(IntPtr*)((byte*)transportControllerPtr + 0x18);
-                            if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] infoData pointer: 0x{infoDataPtr.ToInt64():X}");
 
                             if (infoDataPtr != IntPtr.Zero)
                             {
                                 // Get modelList (Dictionary) at offset 0x18 in Transportation
                                 IntPtr modelListPtr = *(IntPtr*)((byte*)infoDataPtr + 0x18);
-                                if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] modelList pointer: 0x{modelListPtr.ToInt64():X}");
 
                                 if (modelListPtr != IntPtr.Zero)
                                 {
@@ -148,8 +110,6 @@ namespace FFIV_ScreenReader.Field
 
                                     if (modelDict != null)
                                     {
-                                        if (shouldLogTransport) MelonLogger.Msg($"[Vehicle Debug] ModelList dictionary count: {modelDict.Count}");
-
                                         foreach (var kvp in modelDict)
                                         {
                                             int transportId = kvp.Key;
@@ -163,11 +123,6 @@ namespace FFIV_ScreenReader.Field
                                             // Get MessageId for specific vehicle name (e.g., "Falcon", "Lunar Whale")
                                             string messageId = transportInfo.MessageId ?? "";
 
-                                            if (shouldLogTransport)
-                                            {
-                                                MelonLogger.Msg($"[Vehicle Debug] Transport ID={transportId}, Type={transportType}, Enable={enabled}, MessageId={messageId}");
-                                            }
-
                                             // Skip non-vehicle types and disabled vehicles
                                             // Type 0 = None, Type 1 = Player, Type 4 = Symbol, Type 5 = Content (internal markers)
                                             if (transportType == 0 || transportType == 1 || transportType == 4 || transportType == 5 || !enabled) continue;
@@ -175,14 +130,6 @@ namespace FFIV_ScreenReader.Field
                                             var mapObject = transportInfo.MapObject;
                                             if (mapObject != null)
                                             {
-                                                string goName = "";
-                                                try { goName = mapObject.gameObject?.name ?? ""; } catch { }
-
-                                                if (shouldLogTransport)
-                                                {
-                                                    MelonLogger.Msg($"[Vehicle Debug] -> MapObject: {mapObject.GetType().Name}, GO: {goName}");
-                                                }
-
                                                 if (!results.Contains(mapObject))
                                                 {
                                                     results.Add(mapObject);
@@ -190,35 +137,15 @@ namespace FFIV_ScreenReader.Field
 
                                                 // Store the transport type and messageId for EntityFactory to use
                                                 VehicleTypeMap[mapObject] = (transportType, messageId);
-                                                if (shouldLogTransport)
-                                                {
-                                                    MelonLogger.Msg($"[Vehicle Debug] -> Added vehicle to results and VehicleTypeMap (Type={transportType}, MessageId={messageId})");
-                                                }
-                                            }
-                                            else if (shouldLogTransport)
-                                            {
-                                                MelonLogger.Msg($"[Vehicle Debug] -> MapObject is null for Transport ID={transportId}");
                                             }
                                         }
-                                    }
-                                    else if (shouldLogTransport)
-                                    {
-                                        MelonLogger.Msg($"[Vehicle Debug] ModelList TryCast failed");
                                     }
                                 }
                             }
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    if (shouldLogTransport)
-                    {
-                        MelonLogger.Msg($"[Vehicle Debug] ModelList access exception: {ex.Message}");
-                    }
-                }
-
-                hasLoggedTransportation = true;
+                catch { }
             }
 
             return results;
@@ -233,7 +160,7 @@ namespace FFIV_ScreenReader.Field
                 return "Cannot check directions";
 
             Vector3 currentPos = player.transform.position;
-            float stepSize = 16f; // One cell = 16 units
+            float stepSize = Core.Constants.CellSize;
 
             // Check cardinal directions
             var directions = new List<string>();
@@ -605,7 +532,7 @@ namespace FFIV_ScreenReader.Field
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[WallTones] IsAdjacentTileBlocked error: {ex.Message}");
+                MelonLogger.Warning($"[FieldNavigationHelper] IsAdjacentTileBlocked error: {ex.Message}");
                 return false;
             }
         }
@@ -634,32 +561,6 @@ namespace FFIV_ScreenReader.Field
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Gets cardinal direction from player to target (uses WORLD coordinates)
-        /// </summary>
-        private static string GetDirection(Vector3 from, Vector3 to)
-        {
-            Vector3 diff = to - from;
-            float angle = Mathf.Atan2(diff.x, diff.y) * Mathf.Rad2Deg;
-
-            // Normalize to 0-360
-            if (angle < 0) angle += 360;
-
-            // Convert to cardinal/intercardinal directions
-            string result;
-            if (angle >= 337.5 || angle < 22.5) result = "North";
-            else if (angle >= 22.5 && angle < 67.5) result = "Northeast";
-            else if (angle >= 67.5 && angle < 112.5) result = "East";
-            else if (angle >= 112.5 && angle < 157.5) result = "Southeast";
-            else if (angle >= 157.5 && angle < 202.5) result = "South";
-            else if (angle >= 202.5 && angle < 247.5) result = "Southwest";
-            else if (angle >= 247.5 && angle < 292.5) result = "West";
-            else if (angle >= 292.5 && angle < 337.5) result = "Northwest";
-            else result = "Unknown";
-
-            return result;
         }
 
     }

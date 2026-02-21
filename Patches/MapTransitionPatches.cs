@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using MelonLoader;
+using FFIV_ScreenReader.Utils;
 
 namespace FFIV_ScreenReader.Patches
 {
@@ -82,8 +83,6 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                MelonLogger.Msg($"[MapTransition] Found FadeManager: {fadeManagerType.FullName}");
-
                 // Cache Instance property (inherited from SingletonMonoBehaviour<T>)
                 instanceProperty = AccessTools.Property(fadeManagerType, "Instance");
                 if (instanceProperty == null)
@@ -93,10 +92,7 @@ namespace FFIV_ScreenReader.Patches
                         BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
                 }
 
-                bool hasInstance = instanceProperty != null;
-                MelonLogger.Msg($"[MapTransition] Instance property: {(hasInstance ? "found" : "NOT FOUND")}");
-
-                if (!hasInstance)
+                if (instanceProperty == null)
                 {
                     MelonLogger.Warning("[MapTransition] Cannot poll FadeManager without Instance property");
                     return;
@@ -104,28 +100,14 @@ namespace FFIV_ScreenReader.Patches
 
                 // Cache IsFadeFinish method
                 isFadeFinishMethod = AccessTools.Method(fadeManagerType, "IsFadeFinish");
-                bool hasFadeFinish = isFadeFinishMethod != null;
-                MelonLogger.Msg($"[MapTransition] IsFadeFinish method: {(hasFadeFinish ? "found" : "NOT FOUND")}");
 
-                if (!hasFadeFinish)
+                if (isFadeFinishMethod == null)
                 {
                     MelonLogger.Warning("[MapTransition] IsFadeFinish not found - fade detection disabled");
                     return;
                 }
 
                 isInitialized = true;
-
-                // Log initial state
-                try
-                {
-                    object instance = instanceProperty.GetValue(null);
-                    bool initialState = instance != null && (bool)isFadeFinishMethod.Invoke(instance, null);
-                    MelonLogger.Msg($"[MapTransition] Cached reflection initialized - IsFadeFinish={initialState}");
-                }
-                catch
-                {
-                    MelonLogger.Msg("[MapTransition] Cached reflection initialized - IsFadeFinish=(no instance yet)");
-                }
             }
             catch (Exception ex)
             {
@@ -135,51 +117,13 @@ namespace FFIV_ScreenReader.Patches
 
         /// <summary>
         /// Find the FadeManager type via assembly scanning.
-        /// The System.Fade namespace maps to Il2CppSystem.Fade in unhollowed assemblies.
+        /// Tries specific full names first, then falls back to simple name search.
         /// </summary>
         private static Type FindFadeManagerType()
         {
-            string[] typeNames = new[]
-            {
-                "Il2CppSystem.Fade.FadeManager",
-                "System.Fade.FadeManager"
-            };
-
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    foreach (var name in typeNames)
-                    {
-                        var type = asm.GetType(name);
-                        if (type != null)
-                        {
-                            MelonLogger.Msg($"[MapTransition] Found FadeManager in {asm.GetName().Name} as {name}");
-                            return type;
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            // Broader search: look for any type named FadeManager
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    foreach (var type in asm.GetTypes())
-                    {
-                        if (type.Name == "FadeManager" && !type.IsNested)
-                        {
-                            MelonLogger.Msg($"[MapTransition] Found FadeManager via broad search: {type.FullName} in {asm.GetName().Name}");
-                            return type;
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            return null;
+            return PatchHelper.FindType("Il2CppSystem.Fade.FadeManager")
+                ?? PatchHelper.FindType("System.Fade.FadeManager")
+                ?? PatchHelper.FindTypeByName("FadeManager");
         }
     }
 }

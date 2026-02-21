@@ -1,9 +1,8 @@
-using System;
-using System.Collections.Generic;
 using Il2Cpp;
 using Il2CppLast.Entity.Field;
 using UnityEngine;
 using FFIV_ScreenReader.Core;
+using FFIV_ScreenReader.Utils;
 
 namespace FFIV_ScreenReader.Field
 {
@@ -78,46 +77,18 @@ namespace FFIV_ScreenReader.Field
         protected abstract string GetEntityTypeName();
 
         /// <summary>
+        /// Public accessor for entity type name (used by GroupEntity delegation).
+        /// </summary>
+        public string EntityTypeName => GetEntityTypeName();
+
+        /// <summary>
         /// Formats this entity for screen reader announcement
         /// </summary>
         public virtual string FormatDescription(Vector3 playerPos)
         {
             float distance = Vector3.Distance(playerPos, Position);
-            string direction = GetDirection(playerPos, Position);
-            return $"{GetDisplayName()} ({GetEntityTypeName()}) ({FormatSteps(distance)} {direction})";
-        }
-
-        /// <summary>
-        /// Gets cardinal/intercardinal direction from one position to another
-        /// </summary>
-        protected string GetDirection(Vector3 from, Vector3 to)
-        {
-            Vector3 diff = to - from;
-            float angle = Mathf.Atan2(diff.x, diff.y) * Mathf.Rad2Deg;
-
-            // Normalize to 0-360
-            if (angle < 0) angle += 360;
-
-            // Convert to cardinal/intercardinal directions
-            if (angle >= 337.5 || angle < 22.5) return "North";
-            else if (angle >= 22.5 && angle < 67.5) return "Northeast";
-            else if (angle >= 67.5 && angle < 112.5) return "East";
-            else if (angle >= 112.5 && angle < 157.5) return "Southeast";
-            else if (angle >= 157.5 && angle < 202.5) return "South";
-            else if (angle >= 202.5 && angle < 247.5) return "Southwest";
-            else if (angle >= 247.5 && angle < 292.5) return "West";
-            else if (angle >= 292.5 && angle < 337.5) return "Northwest";
-            else return "Unknown";
-        }
-
-        /// <summary>
-        /// Helper to format distance in steps
-        /// </summary>
-        protected string FormatSteps(float distance)
-        {
-            float steps = distance / 16f;
-            string stepLabel = Math.Abs(steps - 1f) < 0.1f ? "step" : "steps";
-            return $"{steps:F1} {stepLabel}";
+            string direction = PlayerPositionHelper.GetDirection(playerPos, Position);
+            return $"{GetDisplayName()} ({GetEntityTypeName()}) ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
         }
     }
 
@@ -145,7 +116,7 @@ namespace FFIV_ScreenReader.Field
         protected override string GetDisplayName()
         {
             string status = IsOpened ? "Opened" : "Unopened";
-            return $"{status} Treasure Chest";
+            return $"{status} {GetEntityTypeName()}";
         }
 
         protected override string GetEntityTypeName()
@@ -156,156 +127,9 @@ namespace FFIV_ScreenReader.Field
         public override string FormatDescription(Vector3 playerPos)
         {
             float distance = Vector3.Distance(playerPos, Position);
-            string direction = GetDirection(playerPos, Position);
+            string direction = PlayerPositionHelper.GetDirection(playerPos, Position);
             string status = IsOpened ? "Opened" : "Unopened";
-            return $"{status} Treasure Chest ({FormatSteps(distance)} {direction})";
-        }
-    }
-
-    /// <summary>
-    /// Represents an NPC entity
-    /// </summary>
-    public class NPCEntity : NavigableEntity
-    {
-        /// <summary>
-        /// Asset name used by the game (e.g., "P002" for Kain)
-        /// </summary>
-        public string AssetName => GameEntity?.Property?.TryCast<Il2CppLast.Map.PropertyNpc>()?.AssetName ?? "";
-
-        /// <summary>
-        /// Whether this NPC is a shop
-        /// </summary>
-        public bool IsShop => GameEntity?.Property?.TryCast<Il2CppLast.Map.PropertyNpc>()?.ProductGroupId > 0;
-
-        /// <summary>
-        /// NPC movement behavior
-        /// </summary>
-        public Il2Cpp.FieldEntityConstants.MoveType MovementType =>
-            GameEntity?.Property?.TryCast<Il2CppLast.Map.PropertyNpc>()?.MoveType ?? Il2Cpp.FieldEntityConstants.MoveType.None;
-
-        /// <summary>
-        /// Character name if this is a playable character NPC
-        /// </summary>
-        public string CharacterName => GetCharacterName(AssetName);
-
-        public override EntityCategory Category => EntityCategory.NPCs;
-
-        public override int Priority => 4;
-
-        public override bool BlocksPathing => true;
-
-        /// <summary>
-        /// Gets friendly character name from asset name.
-        /// Checks P-codes for playable characters, then queries NPC master data.
-        /// </summary>
-        public static string GetCharacterName(string assetName)
-        {
-            if (string.IsNullOrEmpty(assetName))
-                return null;
-
-            // Check P-codes for playable characters (FF4 characters)
-            var characterMap = new Dictionary<string, string>
-            {
-                { "P001", "Cecil" },
-                { "P002", "Kain" },
-                { "P003", "Rosa" },
-                { "P004", "Cid" },
-                { "P005", "Rydia" },
-                { "P006", "Tellah" },
-                { "P007", "Edward" },
-                { "P008", "Yang" },
-                { "P009", "Palom" },
-                { "P010", "Porom" },
-                { "P011", "Edge" },
-                { "P012", "FuSoYa" },
-                { "P013", "Golbez" }
-            };
-
-            // Check if asset name contains a P-code
-            foreach (var kvp in characterMap)
-            {
-                if (assetName.Contains(kvp.Key))
-                {
-                    return kvp.Value;
-                }
-            }
-
-            // Try NPC master data
-            try
-            {
-                var npcTemplateList = Il2CppLast.Data.Master.Npc.templateList;
-                if (npcTemplateList != null && npcTemplateList.Count > 0)
-                {
-                    foreach (var kvp in npcTemplateList)
-                    {
-                        if (kvp.Value == null) continue;
-
-                        var npcData = kvp.Value.TryCast<Il2CppLast.Data.Master.Npc>();
-                        if (npcData != null &&
-                            !string.IsNullOrEmpty(npcData.AssetName) &&
-                            npcData.AssetName == assetName)
-                        {
-                            if (!string.IsNullOrEmpty(npcData.NpcName))
-                            {
-                                return npcData.NpcName;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception)
-            {
-                // Master data not available yet
-            }
-
-            return null;
-        }
-
-        protected override string GetDisplayName()
-        {
-            var details = new List<string>();
-
-            // Add character name if available (recalculate from asset name if not set)
-            string characterName = CharacterName;
-            if (string.IsNullOrEmpty(characterName) && !string.IsNullOrEmpty(AssetName))
-            {
-                characterName = GetCharacterName(AssetName);
-            }
-
-            if (!string.IsNullOrEmpty(characterName))
-            {
-                details.Add(characterName);
-            }
-            // Removed: AssetName fallback (was adding internal codes like "MAN118c01" to output)
-
-            // Add shop indicator
-            if (IsShop)
-            {
-                details.Add("shop");
-            }
-
-            // Add movement type
-            if (MovementType == Il2Cpp.FieldEntityConstants.MoveType.None)
-            {
-                details.Add("stationary");
-            }
-            else if (MovementType == Il2Cpp.FieldEntityConstants.MoveType.Stamp)
-            {
-                details.Add("wandering");
-            }
-            else if (MovementType == Il2Cpp.FieldEntityConstants.MoveType.Area ||
-                     MovementType == Il2Cpp.FieldEntityConstants.MoveType.Route)
-            {
-                details.Add("patrolling");
-            }
-
-            string detailStr = details.Count > 0 ? $" ({string.Join(", ", details)})" : "";
-            return $"{Name}{detailStr}";
-        }
-
-        protected override string GetEntityTypeName()
-        {
-            return "NPC";
+            return $"{status} {GetEntityTypeName()} ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
         }
     }
 
@@ -368,8 +192,8 @@ namespace FFIV_ScreenReader.Field
         public override string FormatDescription(Vector3 playerPos)
         {
             float distance = Vector3.Distance(playerPos, Position);
-            string direction = GetDirection(playerPos, Position);
-            return $"Save Point ({FormatSteps(distance)} {direction})";
+            string direction = PlayerPositionHelper.GetDirection(playerPos, Position);
+            return $"Save Point ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
         }
     }
 
@@ -438,72 +262,4 @@ namespace FFIV_ScreenReader.Field
         }
     }
 
-    /// <summary>
-    /// Represents a vehicle (chocobo, etc.)
-    /// </summary>
-    public class VehicleEntity : NavigableEntity
-    {
-        /// <summary>
-        /// Transportation type ID
-        /// </summary>
-        public int TransportationId { get; set; }
-
-        /// <summary>
-        /// Message ID for localized vehicle name (e.g., "Falcon", "Lunar Whale")
-        /// </summary>
-        public string MessageId { get; set; }
-
-        public override EntityCategory Category => EntityCategory.Vehicles;
-
-        public override int Priority => 10;
-
-        public override bool BlocksPathing => false;
-
-        protected override string GetDisplayName()
-        {
-            return GetVehicleName(TransportationId, MessageId);
-        }
-
-        protected override string GetEntityTypeName()
-        {
-            return "Vehicle";
-        }
-
-        /// <summary>
-        /// Gets the vehicle name, preferring the localized MessageId name if available.
-        /// Falls back to generic type-based name if MessageId is not set or lookup fails.
-        /// </summary>
-        public static string GetVehicleName(int id, string messageId = null)
-        {
-            // Try MessageId first for specific name (e.g., "Falcon" vs generic "Special Airship")
-            if (!string.IsNullOrEmpty(messageId))
-            {
-                try
-                {
-                    var msg = Il2CppLast.Management.MessageManager.Instance?.GetMessage(messageId);
-                    if (!string.IsNullOrEmpty(msg))
-                        return msg;
-                }
-                catch { }
-            }
-
-            // Fall back to type-based generic name
-            switch (id)
-            {
-                case 1: return "Player";
-                case 2: return "Ship";
-                case 3: return "Enterprise";  // FF4's airship is named Enterprise
-                case 4: return "Symbol";
-                case 5: return "Content";
-                case 6: return "Submarine";
-                case 7: return "Hovercraft";
-                case 8: return "Special Airship";  // Fallback if MessageId fails
-                case 9: return "Yellow Chocobo";
-                case 10: return "Black Chocobo";
-                case 11: return "Boko";
-                case 12: return "Magical Armor";
-                default: return $"Vehicle {id}";
-            }
-        }
-    }
 }

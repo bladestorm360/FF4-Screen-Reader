@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using Il2Cpp;
 using Il2CppLast.Entity.Field;
-using Il2CppLast.Management;
 using Il2CppLast.Map;
 using MelonLoader;
 using UnityEngine;
@@ -223,7 +222,6 @@ namespace FFIV_ScreenReader.Field
         {
             // Filter out visual/effect entities, area constraints, hazards, and automatic triggers
             return objectType == Il2Cpp.MapConstants.ObjectType.PointIn ||
-                   objectType == Il2Cpp.MapConstants.ObjectType.ToLayer ||  // Layer transitions work automatically with pathfinding
                    objectType == Il2Cpp.MapConstants.ObjectType.OpenTrigger ||  // Door triggers activate automatically when walked over
                    objectType == Il2Cpp.MapConstants.ObjectType.CollisionEntity ||
                    objectType == Il2Cpp.MapConstants.ObjectType.EffectEntity ||
@@ -278,6 +276,7 @@ namespace FFIV_ScreenReader.Field
                 case Il2Cpp.MapConstants.ObjectType.OpenTrigger:
                     return new DoorTriggerEntity { GameEntity = fieldEntity };
 
+                case Il2Cpp.MapConstants.ObjectType.ToLayer:
                 case Il2Cpp.MapConstants.ObjectType.TelepoPoint:
                 case Il2Cpp.MapConstants.ObjectType.Event:
                 case Il2Cpp.MapConstants.ObjectType.TransportationEventAction:
@@ -296,23 +295,6 @@ namespace FFIV_ScreenReader.Field
                     if (IsPlaceholderEntity(defaultName))
                         return null;
                     return new EventEntity { GameEntity = fieldEntity };
-            }
-        }
-
-        /// <summary>
-        /// Gets the current map ID from UserDataManager.
-        /// </summary>
-        /// <returns>Current map ID, or -1 if unable to determine</returns>
-        private static int GetCurrentMapId()
-        {
-            try
-            {
-                var userDataManager = UserDataManager.Instance();
-                return userDataManager?.CurrentMapId ?? -1;
-            }
-            catch
-            {
-                return -1;
             }
         }
 

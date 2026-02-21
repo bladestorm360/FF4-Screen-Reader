@@ -14,8 +14,6 @@ using Il2CppSystem.Collections.Generic;
 using UnityEngine;
 using StatusDetailsController = Il2CppSerial.FF4.UI.KeyInput.StatusDetailsController;
 
-// Import MenuState classes
-using StatusMenuState = FFIV_ScreenReader.Core.StatusMenuState;
 
 // StatusWindowController is in base namespace
 using FF4StatusWindowController = Il2CppLast.UI.KeyInput.StatusWindowController;
@@ -64,9 +62,9 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         public static void StatusWindowController_SetActive_Postfix(FF4StatusWindowController __instance, bool isActive)
         {
-            if (!isActive && StatusMenuState.IsActive)
+            if (!isActive && MenuStates.Status.IsActive)
             {
-                StatusMenuState.Reset();
+                MenuStates.Status.Reset();
                 StatusMenuTracker.Reset();
             }
         }
@@ -255,7 +253,7 @@ namespace FFIV_ScreenReader.Patches
                 StatusMenuTracker.MarkUserOpened();
 
                 // Set status menu state active
-                StatusMenuState.SetActive();
+                MenuStates.Status.SetActive();
 
                 // Use coroutine for one-frame delay to ensure UI has updated
                 CoroutineManager.StartManaged(DelayedCharacterAnnouncement(contents, index));

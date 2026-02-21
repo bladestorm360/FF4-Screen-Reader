@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Core.Filters;
+using FFIV_ScreenReader.Utils;
 using Il2Cpp;
 using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
@@ -92,23 +93,9 @@ namespace FFIV_ScreenReader.Field
 
             // Calculate and cache
             _lastCacheFrame = currentFrame;
-            Vector3 playerPos = GetPlayerPosition();
+            Vector3 playerPos = PlayerPositionHelper.GetWorldPosition();
             _cachedRepresentative = strategy.SelectRepresentative(members, playerPos);
             return _cachedRepresentative;
-        }
-
-        /// <summary>
-        /// Gets the player's current world position.
-        /// Uses GameObjectCache to avoid expensive FindObjectOfType calls.
-        /// </summary>
-        private Vector3 GetPlayerPosition()
-        {
-            var playerController = Utils.GameObjectCache.Get<FieldPlayerController>();
-
-            if (playerController?.fieldPlayer == null)
-                return Vector3.zero;
-
-            return playerController.fieldPlayer.transform.position;
         }
 
         // Delegate all NavigableEntity properties to the representative member
@@ -166,25 +153,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            var rep = GetRepresentative();
-            if (rep == null)
-                return "Group";
-
-            // Delegate to representative's type name
-            if (rep is MapExitEntity)
-                return "Map Exit";
-            else if (rep is NPCEntity)
-                return "NPC";
-            else if (rep is TreasureChestEntity)
-                return "Treasure Chest";
-            else if (rep is SavePointEntity)
-                return "Save Point";
-            else if (rep is EventEntity)
-                return "Event";
-            else if (rep is VehicleEntity)
-                return "Vehicle";
-            else
-                return "Group";
+            return GetRepresentative()?.EntityTypeName ?? "Group";
         }
     }
 }

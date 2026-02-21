@@ -26,7 +26,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(BattleCommandSelectController), nameof(BattleCommandSelectController.SetCursor))]
     public static class BattleCommandSelectController_SetCursor_Patch
     {
-        private const string DEDUP_CONTEXT = "BattleCommand.Select";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_COMMAND_SELECT;
 
         [HarmonyPostfix]
         public static void Postfix(BattleCommandSelectController __instance, int index)
@@ -96,7 +96,7 @@ namespace FFIV_ScreenReader.Patches
         new Type[] { typeof(Cursor), typeof(CustomScrollView.WithinRangeType) })]
     public static class BattleItemInfomationController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "BattleItem.Select";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_ITEM_SELECT;
 
         [HarmonyPostfix]
         public static void Postfix(BattleItemInfomationController __instance, Cursor targetCursor)
@@ -220,7 +220,7 @@ namespace FFIV_ScreenReader.Patches
         new Type[] { typeof(Cursor), typeof(CustomScrollView.WithinRangeType) })]
     public static class BattleQuantityAbilityInfomationController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "BattleAbility.Select";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_ABILITY_SELECT;
 
         [HarmonyPostfix]
         public static void Postfix(BattleQuantityAbilityInfomationController __instance, Cursor targetCursor)

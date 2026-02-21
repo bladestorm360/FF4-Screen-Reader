@@ -11,8 +11,6 @@ using FFIV_ScreenReader.Utils;
 using ConfigKeysSettingController = Il2CppLast.UI.KeyInput.ConfigKeysSettingController;
 using ConfigControllCommandController = Il2CppLast.UI.KeyInput.ConfigControllCommandController;
 
-// Import MenuState classes
-using ConfigMenuState = FFIV_ScreenReader.Core.ConfigMenuState;
 
 // ConfigController is in base namespace
 using FF4ConfigController = Il2CppLast.UI.KeyInput.ConfigController;
@@ -64,9 +62,9 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         public static void ConfigController_SetActive_Postfix(FF4ConfigController __instance, bool isActive)
         {
-            if (!isActive && ConfigMenuState.IsActive)
+            if (!isActive && MenuStates.Config.IsActive)
             {
-                ConfigMenuState.Reset();
+                MenuStates.Config.Reset();
             }
         }
     }
@@ -79,7 +77,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(ConfigCommandController), nameof(ConfigCommandController.SetFocus))]
     public static class ConfigCommandController_SetFocus_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.Command";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_COMMAND;
 
         [HarmonyPostfix]
         public static void Postfix(ConfigCommandController __instance, bool isFocus, bool isSelectable)
@@ -135,7 +133,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Set config menu state active
-                ConfigMenuState.SetActive();
+                MenuStates.Config.SetActive();
 
                 // Also try to get the current value for this config option
                 string configValue = ConfigMenuReader.FindConfigValueFromController(__instance);
@@ -165,7 +163,7 @@ namespace FFIV_ScreenReader.Patches
                      typeof(Il2CppLast.UI.CustomScrollView.WithinRangeType) })]
     public static class ConfigKeysSettingController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.KeysSetting";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_KEYS_SETTING;
 
         [HarmonyPostfix]
         public static void Postfix(ConfigKeysSettingController __instance, int index,
@@ -243,7 +241,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Set config menu state active
-                ConfigMenuState.SetActive();
+                MenuStates.Config.SetActive();
 
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
@@ -261,7 +259,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(ConfigCommandController), nameof(ConfigCommandController.SetNextSelect))]
     public static class ConfigCommandController_SetNextSelect_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.ArrowValue";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_ARROW_VALUE;
 
         [HarmonyPostfix]
         public static void Postfix(ConfigCommandController __instance)
@@ -296,7 +294,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(ConfigCommandController), nameof(ConfigCommandController.SetPrevSelect))]
     public static class ConfigCommandController_SetPrevSelect_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.ArrowValue";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_ARROW_VALUE;
 
         [HarmonyPostfix]
         public static void Postfix(ConfigCommandController __instance)
@@ -332,7 +330,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(ConfigCommandController), nameof(ConfigCommandController.SetSliderValue))]
     public static class ConfigCommandController_SetSliderValue_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.SliderValue";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_SLIDER_VALUE;
 
         [HarmonyPostfix]
         public static void Postfix(ConfigCommandController __instance, float value)
@@ -385,7 +383,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(ConfigCommandController_Touch), "SetArrowChangeText")]
     public static class ConfigCommandControllerTouch_SetArrowChangeText_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.TouchArrowValue";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_TOUCH_ARROW_VALUE;
         // Track last value per controller using weak references to prevent memory leak
         private static readonly ConditionalWeakTable<ConfigCommandController_Touch, StringHolder> lastValues
             = new ConditionalWeakTable<ConfigCommandController_Touch, StringHolder>();
@@ -438,7 +436,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(ConfigCommandController_Touch), "SetSliderCurrentValue")]
     public static class ConfigCommandControllerTouch_SetSliderCurrentValue_Patch
     {
-        private const string DEDUP_CONTEXT = "ConfigMenu.TouchSliderValue";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_TOUCH_SLIDER_VALUE;
         // Track last value per controller using weak references to prevent memory leak
         private static readonly ConditionalWeakTable<ConfigCommandController_Touch, StringHolder> lastValues
             = new ConditionalWeakTable<ConfigCommandController_Touch, StringHolder>();

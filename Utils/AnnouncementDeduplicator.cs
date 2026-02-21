@@ -9,24 +9,9 @@ namespace FFIV_ScreenReader.Utils
     /// </summary>
     public static class AnnouncementDeduplicator
     {
-        // Maximum cache size before pruning to prevent unbounded memory growth
-        private const int MaxCacheSize = 100;
-
         private static readonly Dictionary<string, string> _lastStrings = new Dictionary<string, string>();
         private static readonly Dictionary<string, int> _lastInts = new Dictionary<string, int>();
         private static readonly Dictionary<string, object> _lastObjects = new Dictionary<string, object>();
-
-        /// <summary>
-        /// Prunes a dictionary if it exceeds MaxCacheSize.
-        /// Uses simple clear strategy since context keys are reused and will be re-added as needed.
-        /// </summary>
-        private static void PruneIfNeeded<TKey, TValue>(Dictionary<TKey, TValue> cache)
-        {
-            if (cache.Count > MaxCacheSize)
-            {
-                cache.Clear();
-            }
-        }
 
         /// <summary>
         /// Checks if a string announcement should be spoken (different from last).
@@ -44,7 +29,6 @@ namespace FFIV_ScreenReader.Utils
                 return false;
 
             _lastStrings[context] = text;
-            PruneIfNeeded(_lastStrings);
             return true;
         }
 
@@ -61,7 +45,6 @@ namespace FFIV_ScreenReader.Utils
                 return false;
 
             _lastInts[context] = index;
-            PruneIfNeeded(_lastInts);
             return true;
         }
 
@@ -86,8 +69,6 @@ namespace FFIV_ScreenReader.Utils
 
             _lastInts[intKey] = index;
             _lastStrings[context] = text ?? string.Empty;
-            PruneIfNeeded(_lastInts);
-            PruneIfNeeded(_lastStrings);
             return true;
         }
 
@@ -108,7 +89,6 @@ namespace FFIV_ScreenReader.Utils
                 return false;
 
             _lastObjects[context] = obj;
-            PruneIfNeeded(_lastObjects);
             return true;
         }
 
@@ -131,6 +111,30 @@ namespace FFIV_ScreenReader.Utils
         public static int GetLastIndex(string context)
         {
             return _lastInts.TryGetValue(context, out var last) ? last : -1;
+        }
+
+        /// <summary>
+        /// Convenience: checks dedup and speaks if new. Combines the common two-line pattern.
+        /// Returns true if the announcement was made.
+        /// </summary>
+        public static bool AnnounceIfNew(string context, string text, bool interrupt = true)
+        {
+            if (!ShouldAnnounce(context, text))
+                return false;
+            FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText(text, interrupt);
+            return true;
+        }
+
+        /// <summary>
+        /// Convenience: checks dedup with index+text and speaks if new.
+        /// Returns true if the announcement was made.
+        /// </summary>
+        public static bool AnnounceIfNew(string context, int index, string text, bool interrupt = true)
+        {
+            if (!ShouldAnnounce(context, index, text))
+                return false;
+            FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText(text, interrupt);
+            return true;
         }
 
         /// <summary>

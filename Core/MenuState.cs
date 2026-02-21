@@ -25,6 +25,17 @@ namespace FFIV_ScreenReader.Core
 
         public static bool IsActive(string menu) => _states.TryGetValue(menu, out var v) && v;
 
+        /// <summary>
+        /// Returns true if any registered menu state is currently active.
+        /// Used by CursorSuppressionCheck to replace per-state ShouldSuppress cascade.
+        /// </summary>
+        public static bool IsAnyActive()
+        {
+            foreach (var kvp in _states)
+                if (kvp.Value) return true;
+            return false;
+        }
+
         public static void SetState(string menu, bool active) => _states[menu] = active;
 
         /// <summary>
@@ -77,11 +88,13 @@ namespace FFIV_ScreenReader.Core
             _ = ShopState.IsActive;
             _ = ItemMenuState.IsActive;
             _ = EquipmentMenuState.IsActive;
-            _ = AbilityMenuState.IsActive;
-            _ = ConfigMenuState.IsActive;
-            _ = StatusMenuState.IsActive;
-            _ = PartyMenuState.IsActive;
-            _ = TitleMenuState.IsActive;
+
+            // SimpleMenuState instances - access to ensure construction and registration
+            _ = MenuStates.Ability.IsActive;
+            _ = MenuStates.Config.IsActive;
+            _ = MenuStates.Status.IsActive;
+            _ = MenuStates.Party.IsActive;
+            _ = MenuStates.Title.IsActive;
         }
     }
 
@@ -106,12 +119,12 @@ namespace FFIV_ScreenReader.Core
             // Store and suppress navigation (only if not already stored)
             if (!_hasStoredState && FFIV_ScreenReaderMod.Instance != null)
             {
-                _preBattleWallTones = FFIV_ScreenReaderMod.Instance.IsWallTonesEnabled();
-                _preBattleFootsteps = FFIV_ScreenReaderMod.Instance.IsFootstepsEnabled();
-                _preBattleAudioBeacons = FFIV_ScreenReaderMod.Instance.IsAudioBeaconsEnabled();
+                _preBattleWallTones = AudioLoopManager.WallTonesEnabled;
+                _preBattleFootsteps = AudioLoopManager.FootstepsEnabled;
+                _preBattleAudioBeacons = AudioLoopManager.AudioBeaconsEnabled;
                 _preBattlePathfindingFilter = FFIV_ScreenReaderMod.PathfindingFilterEnabled;
                 _hasStoredState = true;
-                FFIV_ScreenReaderMod.Instance.SuppressNavigationForBattle();
+                FFIV_ScreenReaderMod.NavigationState?.SuppressNavigationForBattle();
             }
             MenuStateRegistry.SetActiveExclusive("Battle");
         }
@@ -122,9 +135,9 @@ namespace FFIV_ScreenReader.Core
             Patches.GlobalBattleMessageTracker.Reset();
 
             // Restore navigation state
-            if (_hasStoredState && FFIV_ScreenReaderMod.Instance != null)
+            if (_hasStoredState && FFIV_ScreenReaderMod.NavigationState != null)
             {
-                FFIV_ScreenReaderMod.Instance.RestoreNavigationAfterBattle(
+                FFIV_ScreenReaderMod.NavigationState.RestoreNavigationAfterBattle(
                     _preBattleWallTones, _preBattleFootsteps,
                     _preBattleAudioBeacons, _preBattlePathfindingFilter);
                 _hasStoredState = false;
@@ -219,54 +232,37 @@ namespace FFIV_ScreenReader.Core
         public static bool ShouldSuppress() => IsActive;
     }
 
-    public static class AbilityMenuState
+    /// <summary>
+    /// Reusable menu state wrapper that replaces identical boilerplate static classes.
+    /// Each instance registers with MenuStateRegistry on construction.
+    /// </summary>
+    public class SimpleMenuState
     {
-        static AbilityMenuState() => MenuStateRegistry.Register("Ability", Reset);
+        public string Name { get; }
 
-        public static bool IsActive => MenuStateRegistry.IsActive("Ability");
-        public static void SetActive() => MenuStateRegistry.SetActiveExclusive("Ability");
-        public static void Reset() => MenuStateRegistry.SetState("Ability", false);
-        public static bool ShouldSuppress() => IsActive;
+        public SimpleMenuState(string name)
+        {
+            Name = name;
+            MenuStateRegistry.Register(name, Reset);
+        }
+
+        public bool IsActive => MenuStateRegistry.IsActive(Name);
+        public void SetActive() => MenuStateRegistry.SetActiveExclusive(Name);
+        public void Reset() => MenuStateRegistry.SetState(Name, false);
+        public bool ShouldSuppress() => IsActive;
     }
 
-    public static class ConfigMenuState
+    /// <summary>
+    /// Holds all simple menu state instances (Ability, Config, Status, Party, Title).
+    /// These replaced the identical boilerplate static wrapper classes.
+    /// </summary>
+    public static class MenuStates
     {
-        static ConfigMenuState() => MenuStateRegistry.Register("Config", Reset);
-
-        public static bool IsActive => MenuStateRegistry.IsActive("Config");
-        public static void SetActive() => MenuStateRegistry.SetActiveExclusive("Config");
-        public static void Reset() => MenuStateRegistry.SetState("Config", false);
-        public static bool ShouldSuppress() => IsActive;
-    }
-
-    public static class StatusMenuState
-    {
-        static StatusMenuState() => MenuStateRegistry.Register("Status", Reset);
-
-        public static bool IsActive => MenuStateRegistry.IsActive("Status");
-        public static void SetActive() => MenuStateRegistry.SetActiveExclusive("Status");
-        public static void Reset() => MenuStateRegistry.SetState("Status", false);
-        public static bool ShouldSuppress() => IsActive;
-    }
-
-    public static class PartyMenuState
-    {
-        static PartyMenuState() => MenuStateRegistry.Register("Party", Reset);
-
-        public static bool IsActive => MenuStateRegistry.IsActive("Party");
-        public static void SetActive() => MenuStateRegistry.SetActiveExclusive("Party");
-        public static void Reset() => MenuStateRegistry.SetState("Party", false);
-        public static bool ShouldSuppress() => IsActive;
-    }
-
-    public static class TitleMenuState
-    {
-        static TitleMenuState() => MenuStateRegistry.Register("Title", Reset);
-
-        public static bool IsActive => MenuStateRegistry.IsActive("Title");
-        public static void SetActive() => MenuStateRegistry.SetActiveExclusive("Title");
-        public static void Reset() => MenuStateRegistry.SetState("Title", false);
-        public static bool ShouldSuppress() => IsActive;
+        public static readonly SimpleMenuState Ability = new SimpleMenuState("Ability");
+        public static readonly SimpleMenuState Config = new SimpleMenuState("Config");
+        public static readonly SimpleMenuState Status = new SimpleMenuState("Status");
+        public static readonly SimpleMenuState Party = new SimpleMenuState("Party");
+        public static readonly SimpleMenuState Title = new SimpleMenuState("Title");
     }
 
     /// <summary>

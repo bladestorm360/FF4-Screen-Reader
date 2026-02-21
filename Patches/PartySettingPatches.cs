@@ -10,8 +10,6 @@ using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Menus;
 using GameCursor = Il2CppLast.UI.Cursor;
 
-// Import MenuState classes
-using PartyMenuState = FFIV_ScreenReader.Core.PartyMenuState;
 
 namespace FFIV_ScreenReader.Patches
 {
@@ -24,7 +22,7 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(PartySettingMenuBaseController), nameof(PartySettingMenuBaseController.SelectContent))]
     public static class PartySettingMenuBaseController_SelectContent_Patch
     {
-        private const string DEDUP_CONTEXT = "PartySetting.Select";
+        private const string DEDUP_CONTEXT = AnnouncementContexts.PARTY_SETTING_SELECT;
         private static PartySettingMenuBaseController.State lastState = PartySettingMenuBaseController.State.None;
 
         [HarmonyPostfix]
@@ -42,7 +40,7 @@ namespace FFIV_ScreenReader.Patches
                 CheckAndAnnounceStateTransition(__instance);
 
                 // Set party menu state active
-                PartyMenuState.SetActive();
+                MenuStates.Party.SetActive();
 
                 // Check which section we're in
                 bool isCharacterList = IsNavigatingCharacterList(__instance, index);
