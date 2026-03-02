@@ -45,10 +45,10 @@ namespace FFIV_ScreenReader.Core
             // --- Status screen: navigation ---
             registry.Register(KeyCode.UpArrow, KeyContext.Status, StatusNavigationReader.NavigatePrevious, "Previous stat");
             registry.Register(KeyCode.DownArrow, KeyContext.Status, StatusNavigationReader.NavigateNext, "Next stat");
-            registry.Register(KeyCode.PageUp, KeyContext.Status, StatusNavigationReader.JumpToPreviousGroup, "Jump to previous stat group");
-            registry.Register(KeyCode.PageDown, KeyContext.Status, StatusNavigationReader.JumpToNextGroup, "Jump to next stat group");
-            registry.Register(KeyCode.Home, KeyContext.Status, StatusNavigationReader.JumpToTop, "Jump to first stat");
-            registry.Register(KeyCode.End, KeyContext.Status, StatusNavigationReader.JumpToBottom, "Jump to last stat");
+            registry.Register(KeyCode.UpArrow, KeyModifier.Shift, KeyContext.Status, StatusNavigationReader.JumpToPreviousGroup, "Jump to previous stat group");
+            registry.Register(KeyCode.DownArrow, KeyModifier.Shift, KeyContext.Status, StatusNavigationReader.JumpToNextGroup, "Jump to next stat group");
+            registry.Register(KeyCode.UpArrow, KeyModifier.Ctrl, KeyContext.Status, StatusNavigationReader.JumpToTop, "Jump to first stat");
+            registry.Register(KeyCode.DownArrow, KeyModifier.Ctrl, KeyContext.Status, StatusNavigationReader.JumpToBottom, "Jump to last stat");
 
             // --- Field: entity navigation (brackets + backslash) — with battle feedback ---
             RegisterFieldWithBattleFeedback(KeyCode.LeftBracket, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category");

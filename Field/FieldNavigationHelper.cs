@@ -217,8 +217,7 @@ namespace FFIV_ScreenReader.Field
         /// <param name="targetWorldPos">Target's world position</param>
         /// <param name="mapHandle">Map accessor for collision data</param>
         /// <param name="player">Player entity (for layer info)</param>
-        /// <param name="destinationLayer">Unity layer of the destination entity (default 10 = GroundLayer)</param>
-        public static PathInfo FindPathTo(Vector3 playerWorldPos, Vector3 targetWorldPos, IMapAccessor mapHandle, FieldPlayer player = null, int destinationLayer = 10)
+        public static PathInfo FindPathTo(Vector3 playerWorldPos, Vector3 targetWorldPos, IMapAccessor mapHandle, FieldPlayer player = null)
         {
             var pathInfo = new PathInfo { Success = false };
 
@@ -268,7 +267,6 @@ namespace FFIV_ScreenReader.Field
 
                 // Set Z coordinates for pathfinding
                 startCell.z = pathfindZ;
-                destCell.z = pathfindZ;
 
                 Il2CppSystem.Collections.Generic.List<Vector3> pathPoints = null;
 
@@ -277,10 +275,20 @@ namespace FFIV_ScreenReader.Field
                     // Use player's actual collision state for pathfinding
                     bool useCollision = player.IsOnCollision;
 
-                    // Pathfind on the SAME layer (elevation check already passed above)
-                    pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, destCell, useCollision);
+                    // Try multiple destination layers (FF5/FF6 pattern)
+                    // Start from highest layer down — first success wins
+                    for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
+                    {
+                        destCell.z = tryDestZ;
+                        pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, destCell, useCollision);
+                        if (pathPoints != null && pathPoints.Count > 0)
+                        {
+                            pathInfo.DestinationZ = tryDestZ;
+                            break;
+                        }
+                    }
 
-                    // If direct path failed, try adjacent tiles (still on same layer)
+                    // If direct path failed, try adjacent tiles with multi-layer search
                     if (pathPoints == null || pathPoints.Count == 0)
                     {
                         Vector3[] adjacentOffsets = new Vector3[] {
@@ -294,18 +302,29 @@ namespace FFIV_ScreenReader.Field
                             new Vector3(-16, 16, 0)   // northwest
                         };
 
+                        bool found = false;
                         foreach (var offset in adjacentOffsets)
                         {
                             Vector3 adjacentTargetWorld = targetWorldPos + offset;
                             Vector3 adjacentDestCell = new Vector3(
                                 Mathf.FloorToInt(mapWidth * 0.5f + adjacentTargetWorld.x * 0.0625f),
                                 Mathf.FloorToInt(mapHeight * 0.5f - adjacentTargetWorld.y * 0.0625f),
-                                pathfindZ  // Use same Z as pathfinding
+                                0
                             );
 
-                            pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, adjacentDestCell, useCollision);
+                            for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
+                            {
+                                adjacentDestCell.z = tryDestZ;
+                                pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, adjacentDestCell, useCollision);
+                                if (pathPoints != null && pathPoints.Count > 0)
+                                {
+                                    pathInfo.DestinationZ = tryDestZ;
+                                    found = true;
+                                    break;
+                                }
+                            }
 
-                            if (pathPoints != null && pathPoints.Count > 0)
+                            if (found)
                                 break;
                         }
                     }

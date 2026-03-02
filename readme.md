@@ -28,20 +28,55 @@ FFIV\_screenreader.dll   goes in MelonLoader/mods folder.
 
 ## Keys
 
-J and L or \[ and ]: cycle destinations in pathfinder
-Shift+J and L or - and =: change destination categories
-\\ or p: get directions to selected destination
-Shift+\\ or P: Toggle pathfinding filter so that not all destinations are visible, just ones with a valid path.
+### Game Keys
+
 WASD or arrow keys: movement
 Enter: Confirm
 Backspace: cancel
+F1: Toggle walk or run.
+F3: Toggle random encounters.
+
+### Announcements
+
 G: Announce current Gil
 M: Announce current map.
+Shift+M: Toggle map exit filter.
 H: In battle, announce character hp, mp, status effects.
-I: In configuration  menu accessible from tab menu, read description of highlighted setting. In shop menus, reads description of highlighted item.
+I: In configuration menu accessible from tab menu, read description of highlighted setting. In shop menus, reads description of highlighted item.
+V: Announce current vehicle.
+T: Announce active timers.
+Shift+T: Toggle timer freeze.
 
-When on a character's status screen:
+### Pathfinding
+
+J and L or \[ and ]: cycle destinations in pathfinder
+Shift+J and L or - and =: change destination categories
+K: Announce name of currently selected destination.
+Shift+K: Reset destination category to All.
+\\ or p: get directions to selected destination
+Shift+\\ or P: Toggle pathfinding filter so that not all destinations are visible, just ones with a valid path.
+Ctrl+\\: Toggle layer filter to show only destinations on same layer.
+Ctrl+Arrow keys: Teleport one tile in that direction.
+
+### Audio
+
+': Toggle footstep sounds.
+;: Toggle wall tones.
+9: Toggle audio beacons.
+F8: Open mod menu.
+
+### Status Screen
 
 up and down arrows read through statistics.
 Shift plus arrows: jumps between groups, character info, vitals, statistics, combat statistics, progression.
 control plus arrows: jump to beginning or end of statistics screen.
+
+### Waypoints
+
+, and .: cycle waypoints
+Shift+, and Shift+.: change waypoint categories
+/: get directions to selected waypoint
+Shift+/: add new waypoint at current location
+Ctrl+/: remove current waypoint
+Ctrl+Shift+/: clear all waypoints for current map
+Ctrl+.: rename current waypoint
