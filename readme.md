@@ -80,3 +80,8 @@ Shift+/: add new waypoint at current location
 Ctrl+/: remove current waypoint
 Ctrl+Shift+/: clear all waypoints for current map
 Ctrl+.: rename current waypoint
+
+## Credits
+
+Stirlock and Unexplained Entity for testing.
+G-rad for testing and collecting entity names for translation.
