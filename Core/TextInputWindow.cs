@@ -5,6 +5,7 @@ using System.Text;
 using MelonLoader;
 using UnityEngine;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Core
 {
@@ -118,7 +119,7 @@ namespace FFIV_ScreenReader.Core
             cancelCallback?.Invoke();
         }
 
-        private static readonly Dictionary<char, string> CharacterNames = new Dictionary<char, string>
+        private static readonly Dictionary<char, string> CharacterNameKeys = new Dictionary<char, string>
         {
             [' '] = "space", ['.'] = "period", [','] = "comma",
             ['\''] = "apostrophe", ['"'] = "quote", ['-'] = "dash",
@@ -136,7 +137,7 @@ namespace FFIV_ScreenReader.Core
         /// Letters and numbers are returned as-is; punctuation gets descriptive names.
         /// </summary>
         private static string GetCharacterName(char c)
-            => CharacterNames.TryGetValue(c, out var name) ? name : c.ToString();
+            => CharacterNameKeys.TryGetValue(c, out var key) ? T(key) : c.ToString();
 
         /// <summary>
         /// Inserts a character at the current cursor position and advances the cursor.
@@ -195,18 +196,18 @@ namespace FFIV_ScreenReader.Core
                 string finalText = inputBuffer.ToString().Trim();
                 if (string.IsNullOrEmpty(finalText))
                 {
-                    FFIV_ScreenReaderMod.SpeakText("Name cannot be empty", interrupt: true);
+                    FFIV_ScreenReaderMod.SpeakText(T("Name cannot be empty"), interrupt: true);
                     return true;
                 }
 
-                CloseWithDelayedAnnouncement($"Confirmed: {finalText}", onConfirmCallback, finalText);
+                CloseWithDelayedAnnouncement(string.Format(T("Confirmed: {0}"), finalText), onConfirmCallback, finalText);
                 return true;
             }
 
             // Escape - cancel
             if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_ESCAPE))
             {
-                CloseWithDelayedAnnouncement("Cancelled", cancelCallback: onCancelCallback);
+                CloseWithDelayedAnnouncement(T("Cancelled"), cancelCallback: onCancelCallback);
                 return true;
             }
 
@@ -248,7 +249,7 @@ namespace FFIV_ScreenReader.Core
             // Up Arrow - read full text
             if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_UP))
             {
-                string text = inputBuffer.Length > 0 ? inputBuffer.ToString() : "empty";
+                string text = inputBuffer.Length > 0 ? inputBuffer.ToString() : T("empty");
                 FFIV_ScreenReaderMod.SpeakText(text, interrupt: true);
                 return true;
             }
@@ -256,7 +257,7 @@ namespace FFIV_ScreenReader.Core
             // Down Arrow - read full text
             if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_DOWN))
             {
-                string text = inputBuffer.Length > 0 ? inputBuffer.ToString() : "empty";
+                string text = inputBuffer.Length > 0 ? inputBuffer.ToString() : T("empty");
                 FFIV_ScreenReaderMod.SpeakText(text, interrupt: true);
                 return true;
             }

@@ -6,6 +6,7 @@ using Il2CppLast.Management;
 using Il2CppLast.UI.KeyInput;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using BattlePlayerData = Il2Cpp.BattlePlayerData;
 
 namespace FFIV_ScreenReader.Patches
@@ -55,7 +56,7 @@ namespace FFIV_ScreenReader.Patches
             // Reset individual target tracking
             AnnouncementDeduplicator.Reset(BattleTargetSelectController_SelectContent_Player_Patch.DEDUP_CONTEXT);
 
-            FFIV_ScreenReaderMod.SpeakText("All allies");
+            FFIV_ScreenReaderMod.SpeakText(T("All allies"));
         }
 
         /// <summary>
@@ -70,7 +71,7 @@ namespace FFIV_ScreenReader.Patches
             // Reset individual target tracking
             AnnouncementDeduplicator.Reset(BattleTargetSelectController_SelectContent_Enemy_Patch.DEDUP_CONTEXT);
 
-            FFIV_ScreenReaderMod.SpeakText("All enemies");
+            FFIV_ScreenReaderMod.SpeakText(T("All enemies"));
         }
     }
 

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using MelonLoader;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Core
 {
@@ -43,7 +44,7 @@ namespace FFIV_ScreenReader.Core
                 this.toggle = toggle;
             }
 
-            public override string GetValueString() => getter() ? "On" : "Off";
+            public override string GetValueString() => getter() ? T("On") : T("Off");
             public override void Adjust(int delta) => toggle();
             public override void Toggle() => toggle();
         }
@@ -115,46 +116,46 @@ namespace FFIV_ScreenReader.Core
             items = new List<MenuItem>
             {
                 // Audio Feedback section
-                new SectionHeader("Audio Feedback"),
-                new ToggleItem("Wall Tones",
+                new SectionHeader(T("Audio Feedback")),
+                new ToggleItem(T("Wall Tones"),
                     () => AudioLoopManager.WallTonesEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.ToggleWallTones()),
-                new ToggleItem("Footsteps",
+                new ToggleItem(T("Footsteps"),
                     () => AudioLoopManager.FootstepsEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.ToggleFootsteps()),
-                new ToggleItem("Audio Beacons",
+                new ToggleItem(T("Audio Beacons"),
                     () => AudioLoopManager.AudioBeaconsEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.ToggleAudioBeacons()),
 
                 // Volume Controls section
-                new SectionHeader("Volume Controls"),
-                new VolumeItem("Wall Bump Volume",
+                new SectionHeader(T("Volume Controls")),
+                new VolumeItem(T("Wall Bump Volume"),
                     () => PreferencesManager.WallBumpVolume,
                     PreferencesManager.SetWallBumpVolume),
-                new VolumeItem("Footstep Volume",
+                new VolumeItem(T("Footstep Volume"),
                     () => PreferencesManager.FootstepVolume,
                     PreferencesManager.SetFootstepVolume),
-                new VolumeItem("Wall Tone Volume",
+                new VolumeItem(T("Wall Tone Volume"),
                     () => PreferencesManager.WallToneVolume,
                     PreferencesManager.SetWallToneVolume),
-                new VolumeItem("Beacon Volume",
+                new VolumeItem(T("Beacon Volume"),
                     () => PreferencesManager.BeaconVolume,
                     PreferencesManager.SetBeaconVolume),
 
                 // Navigation Filters section
-                new SectionHeader("Navigation Filters"),
-                new ToggleItem("Pathfinding Filter",
+                new SectionHeader(T("Navigation Filters")),
+                new ToggleItem(T("Pathfinding Filter"),
                     () => FFIV_ScreenReaderMod.PathfindingFilterEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.TogglePathfindingFilter()),
-                new ToggleItem("Map Exit Filter",
+                new ToggleItem(T("Map Exit Filter"),
                     () => EntityNavigationFacade.MapExitFilterEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleMapExitFilter()),
-                new ToggleItem("Layer Transition Filter",
+                new ToggleItem(T("Layer Transition Filter"),
                     () => EntityNavigationFacade.ToLayerFilterEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleToLayerFilter()),
 
                 // Close Menu action
-                new ActionItem("Close Menu", Close)
+                new ActionItem(T("Close Menu"), Close)
             };
         }
 
@@ -178,7 +179,7 @@ namespace FFIV_ScreenReader.Core
             WindowsFocusHelper.StealFocus("FFIV_ModMenu");
 
             // Announce "Mod menu" then first item after a short delay
-            FFIV_ScreenReaderMod.SpeakText("Mod menu", interrupt: true);
+            FFIV_ScreenReaderMod.SpeakText(T("Mod menu"), interrupt: true);
             CoroutineManager.StartManaged(AnnounceFirstItemDelayed());
         }
 

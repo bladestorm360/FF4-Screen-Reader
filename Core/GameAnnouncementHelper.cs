@@ -2,6 +2,7 @@ using System;
 using MelonLoader;
 using FFIV_ScreenReader.Patches;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FFIV_ScreenReader.Field;
 
 namespace FFIV_ScreenReader.Core
@@ -22,7 +23,7 @@ namespace FFIV_ScreenReader.Core
                 var activeCharacter = BattleMenuController_SetCommandSelectTarget_Patch.CurrentActiveCharacter;
                 if (activeCharacter?.ownedCharacterData == null)
                 {
-                    FFIV_ScreenReaderMod.SpeakText("Not in battle or no active character");
+                    FFIV_ScreenReaderMod.SpeakText(T("Not in battle or no active character"));
                     return;
                 }
 
@@ -37,7 +38,7 @@ namespace FFIV_ScreenReader.Core
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error announcing character status: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Error reading character status");
+                FFIV_ScreenReaderMod.SpeakText(T("Error reading character status"));
             }
         }
 
@@ -52,19 +53,19 @@ namespace FFIV_ScreenReader.Core
 
                 if (userDataManager == null)
                 {
-                    FFIV_ScreenReaderMod.SpeakText("User data not available");
+                    FFIV_ScreenReaderMod.SpeakText(T("User data not available"));
                     return;
                 }
 
                 int gil = userDataManager.OwendGil;
-                string gilMessage = $"{gil:N0} gil";
+                string gilMessage = string.Format(T("{0} gil"), gil.ToString("N0"));
 
                 FFIV_ScreenReaderMod.SpeakText(gilMessage);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error announcing gil amount: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Error reading gil amount");
+                FFIV_ScreenReaderMod.SpeakText(T("Error reading gil amount"));
             }
         }
 
@@ -81,7 +82,7 @@ namespace FFIV_ScreenReader.Core
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error announcing current map: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Error reading map name");
+                FFIV_ScreenReaderMod.SpeakText(T("Error reading map name"));
             }
         }
     }

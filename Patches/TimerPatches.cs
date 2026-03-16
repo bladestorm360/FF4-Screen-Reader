@@ -6,6 +6,7 @@ using Il2CppLast.UI;
 using Il2CppLast.UI.Common.Map;
 using Il2CppLast.Timer;
 using FFIV_ScreenReader.Core;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Patches
@@ -47,13 +48,13 @@ namespace FFIV_ScreenReader.Patches
             {
                 timersFrozen = !timersFrozen;
 
-                string message = timersFrozen ? "Timers frozen" : "Timers resumed";
+                string message = timersFrozen ? T("Timers frozen") : T("Timers resumed");
                 FFIV_ScreenReaderMod.SpeakText(message, interrupt: true);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error toggling timer freeze: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Error toggling timer freeze", interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(T("Error toggling timer freeze"), interrupt: true);
             }
         }
         /// <summary>
@@ -127,14 +128,14 @@ namespace FFIV_ScreenReader.Patches
                 }
                 else
                 {
-                    FFIV_ScreenReaderMod.SpeakText("No active timers", interrupt: true);
+                    FFIV_ScreenReaderMod.SpeakText(T("No active timers"), interrupt: true);
                     return false;
                 }
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error announcing timers: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Error reading timers", interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(T("Error reading timers"), interrupt: true);
                 return false;
             }
         }
@@ -168,7 +169,8 @@ namespace FFIV_ScreenReader.Patches
             if (!string.IsNullOrEmpty(minutes) && int.TryParse(minutes, out int min) && min > 0)
             {
                 result.Append(min);
-                result.Append(min == 1 ? " minute" : " minutes");
+                result.Append(" ");
+                result.Append(min == 1 ? T("minute") : T("minutes"));
             }
 
             // Parse seconds
@@ -178,7 +180,8 @@ namespace FFIV_ScreenReader.Patches
                     result.Append(" ");
 
                 result.Append(sec);
-                result.Append(sec == 1 ? " second" : " seconds");
+                result.Append(" ");
+                result.Append(sec == 1 ? T("second") : T("seconds"));
             }
 
             // If we couldn't parse anything, return the raw text
@@ -212,7 +215,7 @@ namespace FFIV_ScreenReader.Patches
             }
 
             // If we can't parse it, just return it as-is
-            return "Timer: " + timerText;
+            return string.Format(T("Timer: {0}"), timerText);
         }
     }
 }

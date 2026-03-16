@@ -2,6 +2,7 @@ using System;
 using UnityEngine;
 using Il2CppLast.Map;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FFIV_ScreenReader.Field;
 
 namespace FFIV_ScreenReader.Core
@@ -58,14 +59,14 @@ namespace FFIV_ScreenReader.Core
             var fieldMap = GameObjectCache.Get<Il2Cpp.FieldMap>();
             if (fieldMap == null || !fieldMap.gameObject.activeInHierarchy)
             {
-                FFIV_ScreenReaderMod.SpeakText("Not on map");
+                FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
                 return false;
             }
 
             var playerController = GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("Not on map");
+                FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
                 return false;
             }
 
@@ -80,14 +81,14 @@ namespace FFIV_ScreenReader.Core
             var entity = entityNavigator.CurrentEntity;
             if (entity == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No entities nearby");
+                FFIV_ScreenReaderMod.SpeakText(T("No entities nearby"));
                 return;
             }
 
             var playerController = GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("Not on map");
+                FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
                 return;
             }
 
@@ -98,7 +99,7 @@ namespace FFIV_ScreenReader.Core
                 playerPos, targetPos,
                 playerController.mapHandle, playerController.fieldPlayer);
 
-            string announcement = pathInfo.Success ? $"{pathInfo.Description}" : "no path";
+            string announcement = pathInfo.Success ? $"{pathInfo.Description}" : T("no path");
             FFIV_ScreenReaderMod.SpeakText(announcement);
         }
 
@@ -114,7 +115,7 @@ namespace FFIV_ScreenReader.Core
             else
             {
                 FFIV_ScreenReaderMod.SpeakText(entityNavigator.EntityCount == 0
-                    ? "No entities nearby" : "No pathable entities found");
+                    ? T("No entities nearby") : T("No pathable entities found"));
             }
         }
 
@@ -130,7 +131,7 @@ namespace FFIV_ScreenReader.Core
             else
             {
                 FFIV_ScreenReaderMod.SpeakText(entityNavigator.EntityCount == 0
-                    ? "No entities nearby" : "No pathable entities found");
+                    ? T("No entities nearby") : T("No pathable entities found"));
             }
         }
 
@@ -142,7 +143,7 @@ namespace FFIV_ScreenReader.Core
             var entity = entityNavigator.CurrentEntity;
             if (entity == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No entities nearby");
+                FFIV_ScreenReaderMod.SpeakText(T("No entities nearby"));
                 return;
             }
 
@@ -157,8 +158,8 @@ namespace FFIV_ScreenReader.Core
                 playerPos, targetPos,
                 playerController.mapHandle, playerController.fieldPlayer);
 
-            string countSuffix = $", {entityNavigator.CurrentIndex + 1} of {entityNavigator.EntityCount}";
-            string pathStatus = pathInfo.Success ? "" : ", no path";
+            string countSuffix = $", {string.Format(T("{0} of {1}"), entityNavigator.CurrentIndex + 1, entityNavigator.EntityCount)}";
+            string pathStatus = pathInfo.Success ? "" : $", {T("no path")}";
             FFIV_ScreenReaderMod.SpeakText($"{formatted}{pathStatus}{countSuffix}");
         }
 
@@ -190,7 +191,7 @@ namespace FFIV_ScreenReader.Core
 
             if (entityNavigator.CurrentCategory == EntityCategory.All)
             {
-                FFIV_ScreenReaderMod.SpeakText("Already in All category");
+                FFIV_ScreenReaderMod.SpeakText(T("Already in All category"));
                 return;
             }
 
@@ -210,7 +211,7 @@ namespace FFIV_ScreenReader.Core
 
             PreferencesManager.SavePathfindingFilter(filterByPathfinding);
 
-            FFIV_ScreenReaderMod.SpeakText($"Pathfinding filter {(filterByPathfinding ? "on" : "off")}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Pathfinding filter {0}"), filterByPathfinding ? T("on") : T("off")));
         }
 
         public void ToggleMapExitFilter()
@@ -222,7 +223,7 @@ namespace FFIV_ScreenReader.Core
 
             PreferencesManager.SaveMapExitFilter(filterMapExits);
 
-            FFIV_ScreenReaderMod.SpeakText($"Map exit filter {(filterMapExits ? "on" : "off")}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Map exit filter {0}"), filterMapExits ? T("on") : T("off")));
         }
 
         public void ToggleToLayerFilter()
@@ -233,14 +234,15 @@ namespace FFIV_ScreenReader.Core
 
             PreferencesManager.SaveToLayerFilter(filterToLayer);
 
-            FFIV_ScreenReaderMod.SpeakText($"Layer transition filter {(filterToLayer ? "on" : "off")}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Layer transition filter {0}"), filterToLayer ? T("on") : T("off")));
         }
 
         private void AnnounceCategoryChange()
         {
             string categoryName = EntityNavigator.GetCategoryName(entityNavigator.CurrentCategory);
             int entityCount = entityNavigator.EntityCount;
-            FFIV_ScreenReaderMod.SpeakText($"Category: {categoryName}, {entityCount} {(entityCount == 1 ? "entity" : "entities")}");
+            string countUnit = entityCount == 1 ? T("entity") : T("entities");
+            FFIV_ScreenReaderMod.SpeakText($"{string.Format(T("Category: {0}"), categoryName)}, {entityCount} {countUnit}");
         }
 
         public void TeleportInDirection(Vector2 offset)
@@ -248,14 +250,14 @@ namespace FFIV_ScreenReader.Core
             var entity = entityNavigator.CurrentEntity;
             if (entity == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No entity selected");
+                FFIV_ScreenReaderMod.SpeakText(T("No entity selected"));
                 return;
             }
 
             var playerController = GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("Player not available");
+                FFIV_ScreenReaderMod.SpeakText(T("Player not available"));
                 return;
             }
 
@@ -264,16 +266,16 @@ namespace FFIV_ScreenReader.Core
             playerController.fieldPlayer.transform.localPosition = newPos;
 
             string direction = GetDirectionName(offset);
-            FFIV_ScreenReaderMod.SpeakText($"Teleported {direction} of {entity.Name}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Teleported {0} of {1}"), direction, entity.Name));
         }
 
         private static string GetDirectionName(Vector2 offset)
         {
-            if (offset.y > 0) return "north";
-            if (offset.y < 0) return "south";
-            if (offset.x < 0) return "west";
-            if (offset.x > 0) return "east";
-            return "unknown";
+            if (offset.y > 0) return T("north");
+            if (offset.y < 0) return T("south");
+            if (offset.x < 0) return T("west");
+            if (offset.x > 0) return T("east");
+            return T("unknown");
         }
     }
 }

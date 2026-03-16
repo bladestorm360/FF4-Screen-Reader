@@ -3,6 +3,7 @@ using Il2CppLast.Map;
 using Il2CppLast.Entity.Field;
 using Il2Cpp;
 using MelonLoader;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Utils
 {
@@ -95,7 +96,7 @@ namespace FFIV_ScreenReader.Utils
                 // Sync the patches tracking to on-foot as well
                 FFIV_ScreenReader.Patches.MovementSpeechPatches.SyncToOnFoot();
 
-                FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText("On foot", interrupt: false);
+                FFIV_ScreenReader.Core.FFIV_ScreenReaderMod.SpeakText(T("On foot"), interrupt: false);
                 return true;
             }
             return false;
@@ -125,24 +126,24 @@ namespace FFIV_ScreenReader.Utils
             // Transitioning TO a vehicle state
             if (newState == MOVE_STATE_SHIP)
             {
-                announcement = "On hovercraft";
+                announcement = string.Format(T("On {0}"), "hovercraft");
                 cachedMoveState = MOVE_STATE_SHIP;
             }
             else if (newState == MOVE_STATE_CHOCOBO)
             {
-                announcement = "On chocobo";
+                announcement = string.Format(T("On {0}"), "chocobo");
                 cachedMoveState = MOVE_STATE_CHOCOBO;
             }
             else if (newState == MOVE_STATE_AIRSHIP || newState == MOVE_STATE_LOWFLYING)
             {
-                announcement = "On airship";
+                announcement = string.Format(T("On {0}"), "airship");
                 cachedMoveState = newState;
             }
             // Transitioning FROM vehicle TO on-foot
             else if (IsVehicleState(previousState) &&
                      (newState == MOVE_STATE_WALK || newState == MOVE_STATE_DUSH))
             {
-                announcement = "On foot";
+                announcement = T("On foot");
                 cachedMoveState = newState;
                 cachedTransportType = TRANSPORT_NONE;
             }
@@ -290,14 +291,14 @@ namespace FFIV_ScreenReader.Utils
         {
             switch (moveState)
             {
-                case MOVE_STATE_WALK: return "Walking";
-                case MOVE_STATE_DUSH: return "Dashing";
-                case MOVE_STATE_SHIP: return "Hovercraft";
-                case MOVE_STATE_AIRSHIP: return "Airship";
-                case MOVE_STATE_LOWFLYING: return "Low Flying";
-                case MOVE_STATE_CHOCOBO: return "Chocobo";
-                case MOVE_STATE_GIMMICK: return "Gimmick";
-                default: return "Unknown";
+                case MOVE_STATE_WALK: return T("Walking");
+                case MOVE_STATE_DUSH: return T("Dashing");
+                case MOVE_STATE_SHIP: return T("Hovercraft");
+                case MOVE_STATE_AIRSHIP: return T("Airship");
+                case MOVE_STATE_LOWFLYING: return T("Low Flying");
+                case MOVE_STATE_CHOCOBO: return T("Chocobo");
+                case MOVE_STATE_GIMMICK: return T("Gimmick");
+                default: return T("Unknown");
             }
         }
 

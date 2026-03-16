@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using MelonLoader;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FFIV_ScreenReader.Menus;
 using FFIV_ScreenReader.Patches;
 using ConfigActualDetailsControllerBase_KeyInput = Il2CppLast.UI.KeyInput.ConfigActualDetailsControllerBase;
@@ -37,7 +38,7 @@ namespace FFIV_ScreenReader.Core
 
         private static void NotAvailableInBattle()
         {
-            FFIV_ScreenReaderMod.SpeakText("Not available in battle", interrupt: true);
+            FFIV_ScreenReaderMod.SpeakText(T("Not available in battle"), interrupt: true);
         }
 
         private void InitializeBindings()
@@ -93,7 +94,8 @@ namespace FFIV_ScreenReader.Core
             registry.Register(KeyCode.T, KeyModifier.Shift, KeyContext.Global, TimerHelper.ToggleTimerFreeze, "Toggle timer freeze");
             registry.Register(KeyCode.T, KeyModifier.None, KeyContext.Global, () => TimerHelper.AnnounceActiveTimers(), "Announce active timers");
             registry.Register(KeyCode.V, KeyContext.Global, AnnounceVehicleState, "Announce vehicle state");
-            registry.Register(KeyCode.I, KeyContext.Global, HandleItemDetailsKey, "Item details");
+            registry.Register(KeyCode.I, KeyModifier.Shift, KeyContext.Global, KeyHelpReader.AnnounceKeyHelp, "Announce controls");
+            registry.Register(KeyCode.I, KeyModifier.None, KeyContext.Global, HandleItemDetailsKey, "Item details");
 
             // --- Field-only toggles (blocked in battle with feedback) ---
             RegisterFieldWithBattleFeedback(KeyCode.Quote, KeyModifier.None, mod.ToggleFootsteps, "Toggle footsteps");
@@ -204,7 +206,7 @@ namespace FFIV_ScreenReader.Core
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[Vehicle State] Error: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Unable to detect vehicle state", interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(T("Unable to detect vehicle state"), interrupt: true);
             }
         }
 
@@ -274,7 +276,7 @@ namespace FFIV_ScreenReader.Core
             try
             {
                 bool isDashing = MoveStateHelper.GetDashFlag();
-                string state = isDashing ? "Run" : "Walk";
+                string state = isDashing ? T("Run") : T("Walk");
                 FFIV_ScreenReaderMod.SpeakText(state, interrupt: true);
             }
             catch (Exception ex)
@@ -292,7 +294,7 @@ namespace FFIV_ScreenReader.Core
                 if (userData?.CheatSettingsData != null)
                 {
                     bool enabled = userData.CheatSettingsData.IsEnableEncount;
-                    string state = enabled ? "Encounters on" : "Encounters off";
+                    string state = enabled ? T("Encounters on") : T("Encounters off");
                     FFIV_ScreenReaderMod.SpeakText(state, interrupt: true);
                 }
             }

@@ -3,6 +3,7 @@ using MelonLoader;
 using UnityEngine;
 using Il2CppLast.Map;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FFIV_ScreenReader.Field;
 using UserDataManager = Il2CppLast.Management.UserDataManager;
 
@@ -49,7 +50,7 @@ namespace FFIV_ScreenReader.Core
         {
             if (BattleState.IsInBattle)
             {
-                FFIV_ScreenReaderMod.SpeakText("Not available in battle", interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(T("Not available in battle"), interrupt: true);
                 return null;
             }
             return GetCurrentMapIdString();
@@ -64,7 +65,7 @@ namespace FFIV_ScreenReader.Core
 
             if (waypointNavigator.Count == 0)
             {
-                FFIV_ScreenReaderMod.SpeakText("No waypoints on this map");
+                FFIV_ScreenReaderMod.SpeakText(T("No waypoints on this map"));
                 return;
             }
 
@@ -81,7 +82,7 @@ namespace FFIV_ScreenReader.Core
 
             if (waypointNavigator.Count == 0)
             {
-                FFIV_ScreenReaderMod.SpeakText("No waypoints on this map");
+                FFIV_ScreenReaderMod.SpeakText(T("No waypoints on this map"));
                 return;
             }
 
@@ -115,14 +116,14 @@ namespace FFIV_ScreenReader.Core
             var waypoint = waypointNavigator.SelectedWaypoint;
             if (waypoint == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No waypoint selected");
+                FFIV_ScreenReaderMod.SpeakText(T("No waypoint selected"));
                 return;
             }
 
             var playerController = GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("Not on map");
+                FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
                 return;
             }
 
@@ -135,7 +136,7 @@ namespace FFIV_ScreenReader.Core
 
             FFIV_ScreenReaderMod.SpeakText(pathInfo.Success
                 ? $"{waypoint.Name}: {pathInfo.Description}"
-                : $"{waypoint.Name}: no path");
+                : $"{waypoint.Name}: {T("no path")}");
         }
 
         public void AddNewWaypointWithNaming()
@@ -146,19 +147,19 @@ namespace FFIV_ScreenReader.Core
             var playerController = GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("Not on map");
+                FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
                 return;
             }
 
             TextInputWindow.Open(
-                "Enter waypoint name",
+                T("Enter waypoint name"),
                 "",
                 (name) =>
                 {
                     Vector3 position = playerController.fieldPlayer.transform.localPosition;
                     waypointManager.AddWaypoint(name, position, mapId, WaypointCategory.Miscellaneous);
                     waypointNavigator.RefreshList(mapId);
-                    FFIV_ScreenReaderMod.SpeakText($"Waypoint created: {name}");
+                    FFIV_ScreenReaderMod.SpeakText(string.Format(T("Waypoint created: {0}"), name));
                 }
             );
         }
@@ -171,23 +172,23 @@ namespace FFIV_ScreenReader.Core
             var waypoint = waypointNavigator.SelectedWaypoint;
             if (waypoint == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No waypoint selected");
+                FFIV_ScreenReaderMod.SpeakText(T("No waypoint selected"));
                 return;
             }
 
             TextInputWindow.Open(
-                $"Rename {waypoint.Name}",
+                string.Format(T("Rename {0}"), waypoint.Name),
                 waypoint.Name,
                 (newName) =>
                 {
                     if (waypointManager.RenameWaypoint(waypoint.WaypointId, newName))
                     {
                         waypointNavigator.RefreshList(GetCurrentMapIdString());
-                        FFIV_ScreenReaderMod.SpeakText($"Renamed to {newName}");
+                        FFIV_ScreenReaderMod.SpeakText(string.Format(T("Renamed to {0}"), newName));
                     }
                     else
                     {
-                        FFIV_ScreenReaderMod.SpeakText("Failed to rename waypoint");
+                        FFIV_ScreenReaderMod.SpeakText(T("Failed to rename waypoint"));
                     }
                 }
             );
@@ -201,12 +202,12 @@ namespace FFIV_ScreenReader.Core
             var waypoint = waypointNavigator.SelectedWaypoint;
             if (waypoint == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No waypoint selected");
+                FFIV_ScreenReaderMod.SpeakText(T("No waypoint selected"));
                 return;
             }
 
             ConfirmationDialog.Open(
-                $"Delete {waypoint.Name}?",
+                string.Format(T("Delete {0}?"), waypoint.Name),
                 () =>
                 {
                     string name = waypoint.Name;
@@ -214,14 +215,14 @@ namespace FFIV_ScreenReader.Core
                     {
                         waypointNavigator.RefreshList(GetCurrentMapIdString());
                         waypointNavigator.ClearSelection();
-                        ConfirmationDialog.CloseWithAnnouncement($"Deleted {name}");
+                        ConfirmationDialog.CloseWithAnnouncement(string.Format(T("Deleted {0}"), name));
                     }
                     else
                     {
-                        ConfirmationDialog.CloseWithAnnouncement("Failed to delete waypoint");
+                        ConfirmationDialog.CloseWithAnnouncement(T("Failed to delete waypoint"));
                     }
                 },
-                () => ConfirmationDialog.CloseWithAnnouncement("Canceled")
+                () => ConfirmationDialog.CloseWithAnnouncement(T("Canceled"))
             );
         }
 
@@ -234,27 +235,27 @@ namespace FFIV_ScreenReader.Core
 
             if (count == 0)
             {
-                FFIV_ScreenReaderMod.SpeakText("No waypoints on this map");
+                FFIV_ScreenReaderMod.SpeakText(T("No waypoints on this map"));
                 return;
             }
 
             ConfirmationDialog.Open(
-                $"Clear all {count} waypoints on this map?",
+                string.Format(T("Clear all {0} waypoints on this map?"), count),
                 () =>
                 {
                     ConfirmationDialog.Open(
-                        "Are you sure? This cannot be undone.",
+                        T("Are you sure? This cannot be undone."),
                         () =>
                         {
                             int cleared = waypointManager.ClearMapWaypoints(mapId);
                             waypointNavigator.RefreshList(mapId);
                             waypointNavigator.ClearSelection();
-                            ConfirmationDialog.CloseWithAnnouncement($"Cleared {cleared} waypoints");
+                            ConfirmationDialog.CloseWithAnnouncement(string.Format(T("Cleared {0} waypoints"), cleared));
                         },
-                        () => ConfirmationDialog.CloseWithAnnouncement("Canceled")
+                        () => ConfirmationDialog.CloseWithAnnouncement(T("Canceled"))
                     );
                 },
-                () => ConfirmationDialog.CloseWithAnnouncement("Canceled")
+                () => ConfirmationDialog.CloseWithAnnouncement(T("Canceled"))
             );
         }
     }

@@ -10,6 +10,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Patches;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Menus
 {
@@ -58,15 +59,15 @@ namespace FFIV_ScreenReader.Menus
                         int maxMP = param.ConfirmedMaxMp();
                         int level = param.ConfirmedLevel();
 
-                        parts.Add($"Level {level}");
-                        parts.Add($"HP {currentHP}/{maxHP}");
-                        parts.Add($"MP {currentMP}/{maxMP}");
+                        parts.Add(string.Format(T("{0}: {1}"), T("Level"), level));
+                        parts.Add($"{T("HP")} {currentHP}/{maxHP}");
+                        parts.Add($"{T("MP")} {currentMP}/{maxMP}");
                     }
                 }
 
                 if (parts.Count == 0)
                 {
-                    return "Status Details";
+                    return T("Status Details");
                 }
 
                 return string.Join(", ", parts);
@@ -74,7 +75,7 @@ namespace FFIV_ScreenReader.Menus
             catch (System.Exception ex)
             {
                 MelonLoader.MelonLogger.Warning($"Error reading status details: {ex.Message}");
-                return "Status Details";
+                return T("Status Details");
             }
         }
 
@@ -130,7 +131,7 @@ namespace FFIV_ScreenReader.Menus
         {
             if (currentCharacterData == null || currentCharacterData.parameter == null)
             {
-                return "No character data available";
+                return T("No character data available");
             }
 
             try
@@ -140,19 +141,19 @@ namespace FFIV_ScreenReader.Menus
 
                 // Strength (Power)
                 int strength = param.ConfirmedPower();
-                parts.Add($"Strength: {strength}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Strength"), strength));
 
                 // Stamina (Vitality)
                 int stamina = param.ConfirmedVitality();
-                parts.Add($"Stamina: {stamina}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Stamina"), stamina));
 
                 // Defense
                 int defense = param.ConfirmedDefense();
-                parts.Add($"Defense: {defense}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Defense"), defense));
 
                 // Evade (Defense Count)
                 int evade = param.ConfirmedDefenseCount();
-                parts.Add($"Evade: {evade}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Evade"), evade));
 
                 return string.Join(". ", parts);
             }
@@ -170,7 +171,7 @@ namespace FFIV_ScreenReader.Menus
         {
             if (currentCharacterData == null || currentCharacterData.parameter == null)
             {
-                return "No character data available";
+                return T("No character data available");
             }
 
             try
@@ -180,19 +181,19 @@ namespace FFIV_ScreenReader.Menus
 
                 // Magic Power
                 int magic = param.ConfirmedMagic();
-                parts.Add($"Magic: {magic}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Magic"), magic));
 
                 // Spirit
                 int spirit = param.ConfirmedSpirit();
-                parts.Add($"Spirit: {spirit}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Spirit"), spirit));
 
                 // Magic Defense
                 int magicDefense = param.ConfirmedAbilityDefense();
-                parts.Add($"Magic Defense: {magicDefense}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Magic Defense"), magicDefense));
 
                 // Magic Evade
                 int magicEvade = param.ConfirmedAbilityEvasionRate();
-                parts.Add($"Magic Evade: {magicEvade}");
+                parts.Add(string.Format(T("{0}: {1}"), T("Magic Evade"), magicEvade));
 
                 return string.Join(". ", parts);
             }
@@ -400,29 +401,29 @@ namespace FFIV_ScreenReader.Menus
             statList = new List<StatusStatDefinition>();
 
             // Character Info Group (indices 0-3)
-            statList.Add(new StatusStatDefinition("Level", StatGroup.CharacterInfo, ReadLevel));
-            statList.Add(new StatusStatDefinition("Handed", StatGroup.CharacterInfo, ReadHanded));
-            statList.Add(new StatusStatDefinition("Experience", StatGroup.CharacterInfo, ReadExperience));
-            statList.Add(new StatusStatDefinition("Next Level", StatGroup.CharacterInfo, ReadNextLevel));
+            statList.Add(new StatusStatDefinition(T("Level"), StatGroup.CharacterInfo, ReadLevel));
+            statList.Add(new StatusStatDefinition(T("Handed"), StatGroup.CharacterInfo, ReadHanded));
+            statList.Add(new StatusStatDefinition(T("Experience"), StatGroup.CharacterInfo, ReadExperience));
+            statList.Add(new StatusStatDefinition(T("Next Level"), StatGroup.CharacterInfo, ReadNextLevel));
 
             // Vitals Group (indices 4-5)
-            statList.Add(new StatusStatDefinition("HP", StatGroup.Vitals, ReadHP));
-            statList.Add(new StatusStatDefinition("MP", StatGroup.Vitals, ReadMP));
+            statList.Add(new StatusStatDefinition(T("HP"), StatGroup.Vitals, ReadHP));
+            statList.Add(new StatusStatDefinition(T("MP"), StatGroup.Vitals, ReadMP));
 
             // Attributes Group (indices 6-10)
-            statList.Add(new StatusStatDefinition("Strength", StatGroup.Attributes, ReadStrength));
-            statList.Add(new StatusStatDefinition("Agility", StatGroup.Attributes, ReadAgility));
-            statList.Add(new StatusStatDefinition("Stamina", StatGroup.Attributes, ReadStamina));
-            statList.Add(new StatusStatDefinition("Intellect", StatGroup.Attributes, ReadIntellect));
-            statList.Add(new StatusStatDefinition("Spirit", StatGroup.Attributes, ReadSpirit));
+            statList.Add(new StatusStatDefinition(T("Strength"), StatGroup.Attributes, ReadStrength));
+            statList.Add(new StatusStatDefinition(T("Agility"), StatGroup.Attributes, ReadAgility));
+            statList.Add(new StatusStatDefinition(T("Stamina"), StatGroup.Attributes, ReadStamina));
+            statList.Add(new StatusStatDefinition(T("Intellect"), StatGroup.Attributes, ReadIntellect));
+            statList.Add(new StatusStatDefinition(T("Spirit"), StatGroup.Attributes, ReadSpirit));
 
             // Combat Stats Group (indices 11-16)
-            statList.Add(new StatusStatDefinition("Attack", StatGroup.CombatStats, ReadAttack));
-            statList.Add(new StatusStatDefinition("Accuracy", StatGroup.CombatStats, ReadAccuracy));
-            statList.Add(new StatusStatDefinition("Defense", StatGroup.CombatStats, ReadDefense));
-            statList.Add(new StatusStatDefinition("Evasion", StatGroup.CombatStats, ReadEvasion));
-            statList.Add(new StatusStatDefinition("Magic Defense", StatGroup.CombatStats, ReadMagicDefense));
-            statList.Add(new StatusStatDefinition("Magic Evasion", StatGroup.CombatStats, ReadMagicEvasion));
+            statList.Add(new StatusStatDefinition(T("Attack"), StatGroup.CombatStats, ReadAttack));
+            statList.Add(new StatusStatDefinition(T("Accuracy"), StatGroup.CombatStats, ReadAccuracy));
+            statList.Add(new StatusStatDefinition(T("Defense"), StatGroup.CombatStats, ReadDefense));
+            statList.Add(new StatusStatDefinition(T("Evasion"), StatGroup.CombatStats, ReadEvasion));
+            statList.Add(new StatusStatDefinition(T("Magic Defense"), StatGroup.CombatStats, ReadMagicDefense));
+            statList.Add(new StatusStatDefinition(T("Magic Evasion"), StatGroup.CombatStats, ReadMagicEvasion));
         }
 
         /// <summary>
@@ -557,7 +558,7 @@ namespace FFIV_ScreenReader.Menus
             var tracker = StatusNavigationTracker.Instance;
             if (!tracker.ValidateState())
             {
-                FFIV_ScreenReaderMod.SpeakText("Navigation not available");
+                FFIV_ScreenReaderMod.SpeakText(T("Navigation not available"));
                 return;
             }
 
@@ -581,7 +582,7 @@ namespace FFIV_ScreenReader.Menus
 
             if (tracker.CurrentCharacterData == null)
             {
-                FFIV_ScreenReaderMod.SpeakText("No character data");
+                FFIV_ScreenReaderMod.SpeakText(T("No character data"));
                 return;
             }
 
@@ -594,7 +595,7 @@ namespace FFIV_ScreenReader.Menus
             catch (Exception ex)
             {
                 MelonLogger.Error($"Error reading stat at index {index}: {ex.Message}");
-                FFIV_ScreenReaderMod.SpeakText("Error reading stat");
+                FFIV_ScreenReaderMod.SpeakText(T("Error reading stat"));
             }
         }
 
@@ -603,13 +604,13 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Level: N/A";
-                return $"Level: {data.parameter.ConfirmedLevel()}";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Level"), T("N/A"));
+                return string.Format(T("{0}: {1}"), T("Level"), data.parameter.ConfirmedLevel());
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading level: {ex.Message}");
-                return "Level: N/A";
+                return string.Format(T("{0}: {1}"), T("Level"), T("N/A"));
             }
         }
 
@@ -617,14 +618,14 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data == null) return "Experience: N/A";
+                if (data == null) return string.Format(T("{0}: {1}"), T("Experience"), T("N/A"));
                 int currentExp = data.CurrentExp;
-                return $"Experience: {currentExp}";
+                return string.Format(T("{0}: {1}"), T("Experience"), currentExp);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading experience: {ex.Message}");
-                return "Experience: N/A";
+                return string.Format(T("{0}: {1}"), T("Experience"), T("N/A"));
             }
         }
 
@@ -632,14 +633,14 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data == null) return "Next Level: N/A";
+                if (data == null) return string.Format(T("{0}: {1}"), T("Next Level"), T("N/A"));
                 int nextExp = data.GetNextExp();
-                return $"Next Level: {nextExp}";
+                return string.Format(T("{0}: {1}"), T("Next Level"), nextExp);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading next level: {ex.Message}");
-                return "Next Level: N/A";
+                return string.Format(T("{0}: {1}"), T("Next Level"), T("N/A"));
             }
         }
 
@@ -655,20 +656,20 @@ namespace FFIV_ScreenReader.Menus
                 }
 
                 // Fallback to data API
-                if (data == null) return "N/A";
+                if (data == null) return T("N/A");
                 var dominantType = data.GetEquipDominantArmType();
                 return dominantType switch
                 {
-                    Il2CppLast.Defaine.EquipDominantType.RightHanded => "Right-handed",
-                    Il2CppLast.Defaine.EquipDominantType.LeftHanded => "Left-handed",
-                    Il2CppLast.Defaine.EquipDominantType.Ambidextrous => "Ambidextrous",
-                    _ => "N/A"
+                    Il2CppLast.Defaine.EquipDominantType.RightHanded => T("Right-handed"),
+                    Il2CppLast.Defaine.EquipDominantType.LeftHanded => T("Left-handed"),
+                    Il2CppLast.Defaine.EquipDominantType.Ambidextrous => T("Ambidextrous"),
+                    _ => T("N/A")
                 };
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading handedness: {ex.Message}");
-                return "N/A";
+                return T("N/A");
             }
         }
 
@@ -677,15 +678,15 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "HP: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("HP"), T("N/A"));
                 int current = data.parameter.CurrentHP;
                 int max = data.parameter.ConfirmedMaxHp();
-                return $"HP: {current} / {max}";
+                return string.Format(T("{0}: {1} / {2}"), T("HP"), current, max);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading HP: {ex.Message}");
-                return "HP: N/A";
+                return string.Format(T("{0}: {1}"), T("HP"), T("N/A"));
             }
         }
 
@@ -693,15 +694,15 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "MP: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("MP"), T("N/A"));
                 int current = data.parameter.CurrentMP;
                 int max = data.parameter.ConfirmedMaxMp();
-                return $"MP: {current} / {max}";
+                return string.Format(T("{0}: {1} / {2}"), T("MP"), current, max);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading MP: {ex.Message}");
-                return "MP: N/A";
+                return string.Format(T("{0}: {1}"), T("MP"), T("N/A"));
             }
         }
 
@@ -710,13 +711,13 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Strength: N/A";
-                return $"Strength: {data.parameter.ConfirmedPower()}";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Strength"), T("N/A"));
+                return string.Format(T("{0}: {1}"), T("Strength"), data.parameter.ConfirmedPower());
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Strength: {ex.Message}");
-                return "Strength: N/A";
+                return string.Format(T("{0}: {1}"), T("Strength"), T("N/A"));
             }
         }
 
@@ -724,13 +725,13 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Agility: N/A";
-                return $"Agility: {data.parameter.ConfirmedAgility()}";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Agility"), T("N/A"));
+                return string.Format(T("{0}: {1}"), T("Agility"), data.parameter.ConfirmedAgility());
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Agility: {ex.Message}");
-                return "Agility: N/A";
+                return string.Format(T("{0}: {1}"), T("Agility"), T("N/A"));
             }
         }
 
@@ -738,13 +739,13 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Stamina: N/A";
-                return $"Stamina: {data.parameter.ConfirmedVitality()}";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Stamina"), T("N/A"));
+                return string.Format(T("{0}: {1}"), T("Stamina"), data.parameter.ConfirmedVitality());
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Stamina: {ex.Message}");
-                return "Stamina: N/A";
+                return string.Format(T("{0}: {1}"), T("Stamina"), T("N/A"));
             }
         }
 
@@ -752,13 +753,13 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Intellect: N/A";
-                return $"Intellect: {data.parameter.ConfirmedIntelligence()}";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Intellect"), T("N/A"));
+                return string.Format(T("{0}: {1}"), T("Intellect"), data.parameter.ConfirmedIntelligence());
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Intellect: {ex.Message}");
-                return "Intellect: N/A";
+                return string.Format(T("{0}: {1}"), T("Intellect"), T("N/A"));
             }
         }
 
@@ -766,13 +767,13 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Spirit: N/A";
-                return $"Spirit: {data.parameter.ConfirmedSpirit()}";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Spirit"), T("N/A"));
+                return string.Format(T("{0}: {1}"), T("Spirit"), data.parameter.ConfirmedSpirit());
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Spirit: {ex.Message}");
-                return "Spirit: N/A";
+                return string.Format(T("{0}: {1}"), T("Spirit"), T("N/A"));
             }
         }
 
@@ -781,7 +782,7 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Attack: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Attack"), T("N/A"));
 
                 int attackPower = data.parameter.ConfirmedAttack();
 
@@ -790,16 +791,16 @@ namespace FFIV_ScreenReader.Menus
 
                 if (attackCount > 0)
                 {
-                    return $"Attack: {attackCount}x {attackPower}";
+                    return string.Format(T("{0}: {1}x {2}"), T("Attack"), attackCount, attackPower);
                 }
 
                 // Fallback to power only if count unavailable
-                return $"Attack: {attackPower}";
+                return string.Format(T("{0}: {1}"), T("Attack"), attackPower);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Attack: {ex.Message}");
-                return "Attack: N/A";
+                return string.Format(T("{0}: {1}"), T("Attack"), T("N/A"));
             }
         }
 
@@ -807,14 +808,14 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Accuracy: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Accuracy"), T("N/A"));
                 int accuracy = data.parameter.ConfirmedAccuracyRate(false);
-                return $"Accuracy: {accuracy}%";
+                return string.Format(T("{0}: {1}%"), T("Accuracy"), accuracy);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Accuracy: {ex.Message}");
-                return "Accuracy: N/A";
+                return string.Format(T("{0}: {1}"), T("Accuracy"), T("N/A"));
             }
         }
 
@@ -822,7 +823,7 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Defense: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Defense"), T("N/A"));
 
                 int defensePower = data.parameter.ConfirmedDefense();
 
@@ -831,16 +832,16 @@ namespace FFIV_ScreenReader.Menus
 
                 if (defenseCount > 0)
                 {
-                    return $"Defense: {defenseCount}x {defensePower}";
+                    return string.Format(T("{0}: {1}x {2}"), T("Defense"), defenseCount, defensePower);
                 }
 
                 // Fallback to power only if count unavailable
-                return $"Defense: {defensePower}";
+                return string.Format(T("{0}: {1}"), T("Defense"), defensePower);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Defense: {ex.Message}");
-                return "Defense: N/A";
+                return string.Format(T("{0}: {1}"), T("Defense"), T("N/A"));
             }
         }
 
@@ -848,14 +849,14 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Evasion: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Evasion"), T("N/A"));
                 int evasion = data.parameter.ConfirmedEvasionRate(false);
-                return $"Evasion: {evasion}%";
+                return string.Format(T("{0}: {1}%"), T("Evasion"), evasion);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Evasion: {ex.Message}");
-                return "Evasion: N/A";
+                return string.Format(T("{0}: {1}"), T("Evasion"), T("N/A"));
             }
         }
 
@@ -863,7 +864,7 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Magic Defense: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Magic Defense"), T("N/A"));
 
                 int magicDefensePower = data.parameter.ConfirmedAbilityDefense();
 
@@ -872,16 +873,16 @@ namespace FFIV_ScreenReader.Menus
 
                 if (magicDefenseCount > 0)
                 {
-                    return $"Magic Defense: {magicDefenseCount}x {magicDefensePower}";
+                    return string.Format(T("{0}: {1}x {2}"), T("Magic Defense"), magicDefenseCount, magicDefensePower);
                 }
 
                 // Fallback to power only if count unavailable
-                return $"Magic Defense: {magicDefensePower}";
+                return string.Format(T("{0}: {1}"), T("Magic Defense"), magicDefensePower);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Magic Defense: {ex.Message}");
-                return "Magic Defense: N/A";
+                return string.Format(T("{0}: {1}"), T("Magic Defense"), T("N/A"));
             }
         }
 
@@ -889,14 +890,14 @@ namespace FFIV_ScreenReader.Menus
         {
             try
             {
-                if (data?.parameter == null) return "Magic Evasion: N/A";
+                if (data?.parameter == null) return string.Format(T("{0}: {1}"), T("Magic Evasion"), T("N/A"));
                 int magicEvasion = data.parameter.ConfirmedAbilityEvasionRate(false);
-                return $"Magic Evasion: {magicEvasion}%";
+                return string.Format(T("{0}: {1}%"), T("Magic Evasion"), magicEvasion);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error reading Magic Evasion: {ex.Message}");
-                return "Magic Evasion: N/A";
+                return string.Format(T("{0}: {1}"), T("Magic Evasion"), T("N/A"));
             }
         }
     }

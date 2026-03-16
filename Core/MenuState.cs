@@ -10,6 +10,14 @@ namespace FFIV_ScreenReader.Core
     /// </summary>
     public static class MenuStateRegistry
     {
+        // Extras menu state keys
+        public const string BESTIARY_LIST = "BestiaryList";
+        public const string BESTIARY_DETAIL = "BestiaryDetail";
+        public const string BESTIARY_FORMATION = "BestiaryFormation";
+        public const string BESTIARY_MAP = "BestiaryMap";
+        public const string MUSIC_PLAYER = "MusicPlayer";
+        public const string GALLERY = "Gallery";
+
         private static readonly Dictionary<string, bool> _states = new();
         private static readonly Dictionary<string, Action> _resetHandlers = new();
 
@@ -37,6 +45,32 @@ namespace FFIV_ScreenReader.Core
         }
 
         public static void SetState(string menu, bool active) => _states[menu] = active;
+
+        /// <summary>
+        /// Sets a menu's active state. Registers the key if not already present.
+        /// Used by extras menu patches (bestiary, gallery, music player).
+        /// </summary>
+        public static void SetActive(string menu, bool active)
+        {
+            _states[menu] = active;
+        }
+
+        /// <summary>
+        /// Resets a specific menu state to inactive.
+        /// </summary>
+        public static void Reset(string menu)
+        {
+            SetActive(menu, false);
+        }
+
+        /// <summary>
+        /// Resets multiple menu states to inactive.
+        /// </summary>
+        public static void Reset(params string[] menus)
+        {
+            foreach (var menu in menus)
+                SetActive(menu, false);
+        }
 
         /// <summary>
         /// Sets a menu active and clears all other menus.

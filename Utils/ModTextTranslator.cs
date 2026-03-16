@@ -3,18 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
-using System.Text.RegularExpressions;
 using MelonLoader;
 using Il2CppLast.Management;
 
 namespace FFIV_ScreenReader.Utils
 {
     /// <summary>
-    /// Translates Japanese entity names to the current game language using an embedded JSON dictionary.
-    /// Falls back to English if the target language is missing, and returns the original Japanese
-    /// string if the game is running in Japanese or no translation is found.
+    /// Translates mod-authored UI strings to the current game language.
+    /// Keys are English strings; lookups fall back to English if a translation is missing.
     /// </summary>
-    public static class EntityTranslator
+    public static class ModTextTranslator
     {
         private static Dictionary<string, Dictionary<string, string>> translations;
         private static bool isInitialized = false;
@@ -26,16 +24,6 @@ namespace FFIV_ScreenReader.Utils
             {1,"ja"},{2,"en"},{3,"fr"},{4,"it"},{5,"de"},{6,"es"},
             {7,"ko"},{8,"zht"},{9,"zhc"},{10,"ru"},{11,"th"},{12,"pt"}
         };
-
-        // Matches numeric prefix (e.g., "6:") or SC prefix (e.g., "SC01:") at start of entity names
-        private static readonly Regex EntityPrefixRegex = new Regex(
-            @"^((?:SC)?\d+:)",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-        // Matches circled number suffix at END
-        private static readonly Regex EntitySuffixRegex = new Regex(
-            @"([\u2460-\u2473])$",
-            RegexOptions.Compiled);
 
         /// <summary>
         /// Detects the current game language via MessageManager and returns a language code.
@@ -53,7 +41,7 @@ namespace FFIV_ScreenReader.Utils
                         cachedLanguageCode = code;
                         if (!hasLoggedLanguage)
                         {
-                            MelonLogger.Msg($"[EntityTranslator] Detected language: {cachedLanguageCode}");
+                            MelonLogger.Msg($"[ModTextTranslator] Detected language: {cachedLanguageCode}");
                             hasLoggedLanguage = true;
                         }
                     }
@@ -62,13 +50,13 @@ namespace FFIV_ScreenReader.Utils
             catch (Exception ex)
             {
                 if (!hasLoggedLanguage)
-                    MelonLogger.Msg($"[EntityTranslator] DetectLanguage exception: {ex.Message}");
+                    MelonLogger.Msg($"[ModTextTranslator] DetectLanguage exception: {ex.Message}");
             }
             return cachedLanguageCode;
         }
 
         /// <summary>
-        /// Loads translation.json from embedded resources.
+        /// Loads mod_text.json from embedded resources.
         /// </summary>
         public static void Initialize()
         {
@@ -79,7 +67,7 @@ namespace FFIV_ScreenReader.Utils
             try
             {
                 using var stream = Assembly.GetExecutingAssembly()
-                    .GetManifestResourceStream("translation.json");
+                    .GetManifestResourceStream("mod_text.json");
 
                 if (stream != null)
                 {
@@ -87,81 +75,41 @@ namespace FFIV_ScreenReader.Utils
                     string json = reader.ReadToEnd();
 
                     translations = ParseNestedJson(json);
-                    MelonLogger.Msg($"[EntityTranslator] Loaded {translations.Count} entity translations");
+                    MelonLogger.Msg($"[ModTextTranslator] Loaded {translations.Count} mod text entries");
                 }
                 else
                 {
-                    MelonLogger.Warning("[EntityTranslator] Embedded translation.json not found");
+                    MelonLogger.Warning("[ModTextTranslator] Embedded mod_text.json not found");
                 }
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[EntityTranslator] Error loading translations: {ex.Message}");
+                MelonLogger.Warning($"[ModTextTranslator] Error loading mod text: {ex.Message}");
             }
 
             isInitialized = true;
         }
 
         /// <summary>
-        /// Translates a Japanese entity name to the current game language.
-        /// Returns original name if Japanese, or if no translation found.
+        /// Returns the localized string for the given English key.
+        /// Falls back to English, then to the key itself if no translation exists.
         /// </summary>
-        public static string Translate(string japaneseName)
+        public static string T(string key)
         {
-            if (string.IsNullOrEmpty(japaneseName))
-                return japaneseName;
+            if (string.IsNullOrEmpty(key))
+                return key;
 
-            // Ensure initialized
             if (!isInitialized)
                 Initialize();
 
+            if (translations == null || translations.Count == 0)
+                return key;
+
+            if (!translations.TryGetValue(key, out var langDict))
+                return key;
+
             string lang = DetectLanguage();
 
-            // Skip translation if the game is running in Japanese
-            if (lang == "ja")
-                return japaneseName;
-
-            // 1. Exact match first
-            if (translations.TryGetValue(japaneseName, out var langDict))
-                return GetLocalizedValue(langDict, lang, japaneseName);
-
-            // 2. Strip numeric/SC prefix and try base name lookup
-            StripPrefix(japaneseName, out string prefix, out string baseName);
-            if (prefix != null && translations.TryGetValue(baseName, out var baseLangDict))
-            {
-                string baseTranslation = GetLocalizedValue(baseLangDict, lang, baseName);
-                return prefix + " " + baseTranslation;
-            }
-
-            // 3. Strip circled number SUFFIX and try base name lookup
-            StripSuffix(japaneseName, out string suffix, out string baseNameNoSuffix);
-            if (suffix != null && translations.TryGetValue(baseNameNoSuffix, out var suffixLangDict))
-            {
-                string baseSuffixTranslation = GetLocalizedValue(suffixLangDict, lang, baseNameNoSuffix);
-                return baseSuffixTranslation + " " + ConvertCircledNumber(suffix);
-            }
-
-            // 4. Handle both prefix AND suffix (e.g., "SC01:entity④")
-            if (prefix != null)
-            {
-                StripSuffix(baseName, out string innerSuffix, out string innerBase);
-                if (innerSuffix != null && translations.TryGetValue(innerBase, out var innerLangDict))
-                {
-                    string innerTranslation = GetLocalizedValue(innerLangDict, lang, innerBase);
-                    return prefix + " " + innerTranslation + " " + ConvertCircledNumber(innerSuffix);
-                }
-            }
-
-            // Return original if no translation
-            return japaneseName;
-        }
-
-        /// <summary>
-        /// Gets the localized value from a language dictionary, falling back to English then key.
-        /// </summary>
-        private static string GetLocalizedValue(Dictionary<string, string> langDict, string lang, string fallback)
-        {
-            // Try target language
             if (langDict.TryGetValue(lang, out string localized) && !string.IsNullOrEmpty(localized))
                 return localized;
 
@@ -169,71 +117,12 @@ namespace FFIV_ScreenReader.Utils
             if (lang != "en" && langDict.TryGetValue("en", out string english) && !string.IsNullOrEmpty(english))
                 return english;
 
-            return fallback;
+            return key;
         }
 
-        /// <summary>
-        /// Strips a numeric or SC prefix from an entity name.
-        /// </summary>
-        private static void StripPrefix(string name, out string prefix, out string baseName)
-        {
-            Match match = EntityPrefixRegex.Match(name);
-            if (match.Success)
-            {
-                prefix = match.Groups[1].Value;
-                baseName = name.Substring(prefix.Length);
-            }
-            else
-            {
-                prefix = null;
-                baseName = name;
-            }
-        }
-
-        /// <summary>
-        /// Strips a circled number suffix from an entity name.
-        /// </summary>
-        private static void StripSuffix(string name, out string suffix, out string baseName)
-        {
-            Match match = EntitySuffixRegex.Match(name);
-            if (match.Success)
-            {
-                suffix = match.Groups[1].Value;
-                baseName = name.Substring(0, name.Length - suffix.Length);
-            }
-            else
-            {
-                suffix = null;
-                baseName = name;
-            }
-        }
-
-        private static readonly Dictionary<char, string> CircledNumberMap = new Dictionary<char, string>
-        {
-            {'\u2460', "1"}, {'\u2461', "2"}, {'\u2462', "3"}, {'\u2463', "4"}, {'\u2464', "5"},
-            {'\u2465', "6"}, {'\u2466', "7"}, {'\u2467', "8"}, {'\u2468', "9"}, {'\u2469', "10"},
-            {'\u246A', "11"}, {'\u246B', "12"}, {'\u246C', "13"}, {'\u246D', "14"}, {'\u246E', "15"},
-            {'\u246F', "16"}, {'\u2470', "17"}, {'\u2471', "18"}, {'\u2472', "19"}, {'\u2473', "20"}
-        };
-
-        /// <summary>
-        /// Converts circled number to regular digit string.
-        /// </summary>
-        private static string ConvertCircledNumber(string circled)
-        {
-            if (circled.Length == 1 && CircledNumberMap.TryGetValue(circled[0], out string num))
-                return num;
-            return circled;
-        }
-
-        /// <summary>
-        /// Gets the count of loaded translations.
-        /// </summary>
-        public static int TranslationCount => translations?.Count ?? 0;
-
-        // -----------------------------------------------
-        //  JSON parsing (same as ModTextTranslator)
-        // -----------------------------------------------
+        // ─────────────────────────────────────────────
+        //  JSON parsing for nested { key: { lang: value } } format
+        // ─────────────────────────────────────────────
 
         internal static Dictionary<string, Dictionary<string, string>> ParseNestedJson(string json)
         {
@@ -343,19 +232,6 @@ namespace FFIV_ScreenReader.Utils
                         case 'r': sb.Append('\r'); i++; break;
                         case 't': sb.Append('\t'); i++; break;
                         case '/': sb.Append('/'); i++; break;
-                        case 'u':
-                            if (i + 5 < s.Length)
-                            {
-                                string hex = s.Substring(i + 2, 4);
-                                if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int cp))
-                                {
-                                    sb.Append((char)cp);
-                                    i += 5;
-                                    break;
-                                }
-                            }
-                            sb.Append(s[i]);
-                            break;
                         default: sb.Append(s[i]); break;
                     }
                 }

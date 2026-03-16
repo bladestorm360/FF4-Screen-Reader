@@ -3,6 +3,7 @@ using HarmonyLib;
 using MelonLoader;
 using Il2CppLast.Map;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Patches
 {
@@ -28,7 +29,7 @@ namespace FFIV_ScreenReader.Patches
                 // Only announce when entering landable zone (false -> true)
                 if (landable && !lastLandableState)
                 {
-                    Core.FFIV_ScreenReaderMod.SpeakText("Can land", interrupt: false);
+                    Core.FFIV_ScreenReaderMod.SpeakText(T("Can land"), interrupt: false);
                 }
 
                 lastLandableState = landable;

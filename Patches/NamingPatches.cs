@@ -5,6 +5,7 @@ using HarmonyLib;
 using MelonLoader;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 // Type aliases for IL2CPP types
 using GameCursor = Il2CppLast.UI.Cursor;
@@ -194,7 +195,7 @@ namespace FFIV_ScreenReader.Patches
         /// </summary>
         public static void InitializeInput_Postfix(ChangeNameController __instance)
         {
-            FFIV_ScreenReaderMod.SpeakText("Keyboard input active.", interrupt: true);
+            FFIV_ScreenReaderMod.SpeakText(T("Keyboard input active."), interrupt: true);
         }
 
         /// <summary>

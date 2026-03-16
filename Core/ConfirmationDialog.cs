@@ -3,6 +3,7 @@ using System.Collections;
 using MelonLoader;
 using UnityEngine;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Core
 {
@@ -46,12 +47,12 @@ namespace FFIV_ScreenReader.Core
                 WindowsFocusHelper.StealFocus("FFIV_ConfirmDialog");
 
                 // Announce prompt with delay to avoid NVDA window title interruption
-                CoroutineManager.StartManaged(DelayedPromptAnnouncement($"{prompt} Yes or No"));
+                CoroutineManager.StartManaged(DelayedPromptAnnouncement(string.Format(T("{0} Yes or No"), prompt)));
             }
             else
             {
                 // Continuation - dialog already open, just announce new prompt immediately
-                FFIV_ScreenReaderMod.SpeakText($"{prompt} Yes or No", interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0} Yes or No"), prompt), interrupt: true);
             }
         }
 
@@ -144,7 +145,7 @@ namespace FFIV_ScreenReader.Core
             if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_LEFT) || WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_RIGHT))
             {
                 selectedYes = !selectedYes;
-                string selection = selectedYes ? "Yes" : "No";
+                string selection = selectedYes ? T("Yes") : T("No");
                 FFIV_ScreenReaderMod.SpeakText(selection, interrupt: true);
                 return true;
             }

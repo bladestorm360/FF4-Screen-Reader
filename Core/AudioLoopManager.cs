@@ -6,6 +6,7 @@ using UnityEngine;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Patches;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using Il2CppLast.Map;
 
 namespace FFIV_ScreenReader.Core
@@ -398,8 +399,7 @@ namespace FFIV_ScreenReader.Core
             // Save to preferences
             PreferencesManager.SaveWallTones(enableWallTones);
 
-            string status = enableWallTones ? "on" : "off";
-            FFIV_ScreenReaderMod.SpeakText($"Wall tones {status}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Wall tones {0}"), enableWallTones ? T("on") : T("off")));
         }
 
         internal void ToggleFootsteps()
@@ -409,8 +409,7 @@ namespace FFIV_ScreenReader.Core
             // Save to preferences
             PreferencesManager.SaveFootsteps(enableFootsteps);
 
-            string status = enableFootsteps ? "on" : "off";
-            FFIV_ScreenReaderMod.SpeakText($"Footsteps {status}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Footsteps {0}"), enableFootsteps ? T("on") : T("off")));
         }
 
         internal void ToggleAudioBeacons()
@@ -425,8 +424,7 @@ namespace FFIV_ScreenReader.Core
             // Save to preferences
             PreferencesManager.SaveAudioBeacons(enableAudioBeacons);
 
-            string status = enableAudioBeacons ? "on" : "off";
-            FFIV_ScreenReaderMod.SpeakText($"Audio beacons {status}");
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Audio beacons {0}"), enableAudioBeacons ? T("on") : T("off")));
         }
 
         // Accessors for audio feedback state (used by FootstepPatches, BattleState, mod)

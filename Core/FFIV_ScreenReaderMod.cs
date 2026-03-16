@@ -1,6 +1,7 @@
 using MelonLoader;
 using HarmonyLib;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Patches;
 using UnityEngine;
@@ -64,6 +65,9 @@ namespace FFIV_ScreenReader.Core
             // Store delegate as field to ensure proper unsubscription
             _onSceneLoadedHandler = (UnityAction<Scene, LoadSceneMode>)OnSceneLoaded;
             SceneManager.sceneLoaded += _onSceneLoadedHandler;
+
+            // Initialize mod text translator for localization
+            ModTextTranslator.Initialize();
 
             // Initialize preferences
             PreferencesManager.Initialize();
