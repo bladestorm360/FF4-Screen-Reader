@@ -52,10 +52,12 @@ namespace FFIV_ScreenReader.Menus
                     {
                         // Combine option name and value
                         string fullText = $"{menuText}: {configValue}";
+                        fullText = FFIV_ScreenReader.Utils.MenuPosition.Format(fullText, cursor.Index, count);
                         FFIV_ScreenReaderMod.SpeakText(fullText);
                     }
                     else
                     {
+                        menuText = FFIV_ScreenReader.Utils.MenuPosition.Format(menuText, cursor.Index, count);
                         FFIV_ScreenReaderMod.SpeakText(menuText);
                     }
                 }

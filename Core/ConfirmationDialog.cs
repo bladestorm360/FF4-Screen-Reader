@@ -8,14 +8,16 @@ using static FFIV_ScreenReader.Utils.ModTextTranslator;
 namespace FFIV_ScreenReader.Core
 {
     /// <summary>
-    /// Simple Yes/No confirmation dialog using Windows API focus stealing.
-    /// Used for waypoint deletion confirmations.
+    /// Simple Yes/No confirmation dialog (virtual — no window focus stealing).
+    /// Game input is suppressed via ControllerRouter.SuppressGameInput + InputPassthroughPatches
+    /// while IsOpen. Keys are read through GamepadManager (SDL3 + GetAsyncKeyState).
+    ///
+    /// Supports chained prompts: a Yes/No callback may itself open a new confirmation. When it
+    /// does, this dialog stays open and the new prompt is re-announced immediately, so the player
+    /// flows from one question to the next without a close/reopen gap.
     /// </summary>
     public static class ConfirmationDialog
     {
-        /// <summary>
-        /// Whether the confirmation dialog is currently open.
-        /// </summary>
         public static bool IsOpen { get; private set; }
 
         private static string prompt = "";
@@ -24,7 +26,8 @@ namespace FFIV_ScreenReader.Core
         private static bool selectedYes = true; // Default selection is Yes
 
         /// <summary>
-        /// Opens the confirmation dialog.
+        /// Opens the confirmation dialog. If a dialog is already open (a callback chained into a
+        /// new prompt), the new prompt is announced immediately instead of via the delayed coroutine.
         /// </summary>
         /// <param name="promptText">Prompt to display to user (spoken via TTS)</param>
         /// <param name="onYes">Callback when user confirms Yes</param>
@@ -39,26 +42,18 @@ namespace FFIV_ScreenReader.Core
             onNoCallback = onNo;
             selectedYes = true; // Default to Yes
 
-            WindowsFocusHelper.InitializeKeyStates(new int[] { WindowsFocusHelper.VK_RETURN, WindowsFocusHelper.VK_ESCAPE, WindowsFocusHelper.VK_LEFT, WindowsFocusHelper.VK_RIGHT, WindowsFocusHelper.VK_Y, WindowsFocusHelper.VK_N });
-
             if (!wasAlreadyOpen)
             {
-                // First open - steal focus from game
-                WindowsFocusHelper.StealFocus("FFIV_ConfirmDialog");
-
-                // Announce prompt with delay to avoid NVDA window title interruption
+                // First open — announce prompt with a short delay so it settles cleanly.
                 CoroutineManager.StartManaged(DelayedPromptAnnouncement(string.Format(T("{0} Yes or No"), prompt)));
             }
             else
             {
-                // Continuation - dialog already open, just announce new prompt immediately
+                // Continuation — dialog already open, just announce the new prompt immediately.
                 FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0} Yes or No"), prompt), interrupt: true);
             }
         }
 
-        /// <summary>
-        /// Announces the prompt after a short delay to avoid NVDA announcing the window title first.
-        /// </summary>
         private static IEnumerator DelayedPromptAnnouncement(string text)
         {
             yield return new WaitForSeconds(0.1f);
@@ -66,83 +61,83 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
-        /// Closes the confirmation dialog and restores focus to game.
+        /// Announces the chosen option after a short delay, then invokes the callback. If the
+        /// callback opened a new prompt (chained confirmation), this dialog stays open (the new
+        /// prompt re-announced itself); otherwise the dialog closes.
         /// </summary>
+        private static IEnumerator DelayedCloseAnnouncement(string text, Action callback)
+        {
+            // Clear callbacks up front so we can detect whether the invoked callback opens a new
+            // prompt (which repopulates onYesCallback). Mirrors the old InvokeAndClose semantics.
+            onYesCallback = null;
+            onNoCallback = null;
+
+            yield return new WaitForSeconds(0.1f);
+            FFIV_ScreenReaderMod.SpeakText(text, interrupt: true);
+            callback?.Invoke();
+
+            if (onYesCallback == null)
+                Close();
+        }
+
         public static void Close()
         {
             if (!IsOpen) return;
-
             IsOpen = false;
-            WindowsFocusHelper.RestoreFocus();
-
-            // Clear callbacks
             onYesCallback = null;
             onNoCallback = null;
         }
 
         /// <summary>
-        /// Closes the dialog and announces text after focus is restored.
-        /// Uses a coroutine delay to prevent NVDA window title from interrupting.
-        /// </summary>
-        public static void CloseWithAnnouncement(string text)
-        {
-            if (!IsOpen) return;
-
-            IsOpen = false;
-            WindowsFocusHelper.RestoreFocus();
-
-            // Clear callbacks
-            onYesCallback = null;
-            onNoCallback = null;
-
-            // Announce after focus restoration settles
-            if (!string.IsNullOrEmpty(text))
-            {
-                CoroutineManager.StartManaged(DelayedPromptAnnouncement(text));
-            }
-        }
-
-        /// <summary>
-        /// Clears callbacks, invokes the given callback, and closes the dialog
-        /// unless the callback opened a new dialog (continuation).
-        /// </summary>
-        private static bool InvokeAndClose(Action callback)
-        {
-            var cb = callback;
-            onYesCallback = null;
-            onNoCallback = null;
-            cb?.Invoke();
-            if (onYesCallback == null) Close();
-            return true;
-        }
-
-        /// <summary>
-        /// Handles keyboard input for the confirmation dialog.
-        /// Should be called from InputManager.Update() before any other input handling.
-        /// Returns true if input was consumed (dialog is open).
+        /// Handles keyboard input for the confirmation dialog. Reads keys via GamepadManager;
+        /// game input is suppressed while IsOpen. Returns true if input was consumed (dialog open).
         /// </summary>
         public static bool HandleInput()
         {
             if (!IsOpen) return false;
 
             // Y key - confirm Yes immediately
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_Y))
-                return InvokeAndClose(onYesCallback);
+            if (GamepadManager.IsKeyCodePressed(KeyCode.Y))
+            {
+                var callback = onYesCallback;
+                CoroutineManager.StartManaged(DelayedCloseAnnouncement(T("Yes"), callback));
+                return true;
+            }
 
             // N key - confirm No immediately
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_N))
-                return InvokeAndClose(onNoCallback);
+            if (GamepadManager.IsKeyCodePressed(KeyCode.N))
+            {
+                var callback = onNoCallback;
+                CoroutineManager.StartManaged(DelayedCloseAnnouncement(T("No"), callback));
+                return true;
+            }
 
             // Escape - same as No
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_ESCAPE))
-                return InvokeAndClose(onNoCallback);
+            if (GamepadManager.IsKeyCodePressed(KeyCode.Escape))
+            {
+                var callback = onNoCallback;
+                CoroutineManager.StartManaged(DelayedCloseAnnouncement(T("Cancelled"), callback));
+                return true;
+            }
 
             // Enter - confirm current selection
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_RETURN))
-                return InvokeAndClose(selectedYes ? onYesCallback : onNoCallback);
+            if (GamepadManager.IsKeyCodePressed(KeyCode.Return))
+            {
+                if (selectedYes)
+                {
+                    var callback = onYesCallback;
+                    CoroutineManager.StartManaged(DelayedCloseAnnouncement(T("Yes"), callback));
+                }
+                else
+                {
+                    var callback = onNoCallback;
+                    CoroutineManager.StartManaged(DelayedCloseAnnouncement(T("No"), callback));
+                }
+                return true;
+            }
 
             // Left/Right arrows - toggle selection
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_LEFT) || WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_RIGHT))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.LeftArrow) || GamepadManager.IsKeyCodePressed(KeyCode.RightArrow))
             {
                 selectedYes = !selectedYes;
                 string selection = selectedYes ? T("Yes") : T("No");
@@ -152,6 +147,5 @@ namespace FFIV_ScreenReader.Core
 
             return true; // Consume all input while dialog is open
         }
-
     }
 }

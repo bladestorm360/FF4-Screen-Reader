@@ -76,6 +76,7 @@ namespace FFIV_ScreenReader.Patches
                 // Set title menu state active
                 MenuStates.Title.SetActive();
 
+                commandName = FFIV_ScreenReader.Utils.MenuPosition.Format(commandName, index, activeContents.Count);
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
             catch (Exception ex)

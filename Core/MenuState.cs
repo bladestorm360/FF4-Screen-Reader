@@ -37,7 +37,7 @@ namespace FFIV_ScreenReader.Core
         /// Returns true if any registered menu state is currently active.
         /// Used by CursorSuppressionCheck to replace per-state ShouldSuppress cascade.
         /// </summary>
-        public static bool IsAnyActive()
+        public static bool AnyActive()
         {
             foreach (var kvp in _states)
                 if (kvp.Value) return true;

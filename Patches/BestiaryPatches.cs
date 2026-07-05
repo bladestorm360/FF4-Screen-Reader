@@ -333,9 +333,7 @@ namespace FFIV_ScreenReader.Patches
 
                 var party = partyList[partyIndex];
                 string announcement = BestiaryReader.ReadFormation(partyIndex, party);
-
-                if (partyList.Count > 1)
-                    announcement += $" ({partyIndex + 1} of {partyList.Count})";
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, partyIndex, partyList.Count);
 
                 AnnouncementDeduplicator.AnnounceIfNew(
                     AnnouncementContexts.BESTIARY_FORMATION, announcement, true);
@@ -729,7 +727,7 @@ namespace FFIV_ScreenReader.Patches
                     ? cached[BestiaryStateTracker.FullMapIndex]
                     : null;
                 if (!string.IsNullOrEmpty(mapName))
-                    FFIV_ScreenReaderMod.SpeakText(mapName, true);
+                    FFIV_ScreenReaderMod.SpeakText(FFIV_ScreenReader.Utils.MenuPosition.Format(mapName, BestiaryStateTracker.FullMapIndex, count), true);
             }
             catch (Exception ex)
             {

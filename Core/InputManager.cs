@@ -30,15 +30,11 @@ namespace FFIV_ScreenReader.Core
             InitializeBindings();
         }
 
-        private void RegisterFieldWithBattleFeedback(KeyCode key, KeyModifier modifier, Action action, string description)
+        private void RegisterFieldOnly(KeyCode key, KeyModifier modifier, Action action, string description)
         {
+            // Field-only action. Off-field (menu/battle/title) the active context is never
+            // Field, so this binding has no match and dispatch silently does nothing.
             registry.Register(key, modifier, KeyContext.Field, action, description);
-            registry.Register(key, modifier, KeyContext.Battle, NotAvailableInBattle, description + " (battle blocked)");
-        }
-
-        private static void NotAvailableInBattle()
-        {
-            FFIV_ScreenReaderMod.SpeakText(T("Not available in battle"), interrupt: true);
         }
 
         private void InitializeBindings()
@@ -51,23 +47,23 @@ namespace FFIV_ScreenReader.Core
             registry.Register(KeyCode.UpArrow, KeyModifier.Ctrl, KeyContext.Status, StatusNavigationReader.JumpToTop, "Jump to first stat");
             registry.Register(KeyCode.DownArrow, KeyModifier.Ctrl, KeyContext.Status, StatusNavigationReader.JumpToBottom, "Jump to last stat");
 
-            // --- Field: entity navigation (brackets + backslash) — with battle feedback ---
-            RegisterFieldWithBattleFeedback(KeyCode.LeftBracket, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category");
-            RegisterFieldWithBattleFeedback(KeyCode.LeftBracket, KeyModifier.None, entityNav.CyclePrevious, "Previous entity");
-            RegisterFieldWithBattleFeedback(KeyCode.RightBracket, KeyModifier.Shift, entityNav.CycleNextCategory, "Next entity category");
-            RegisterFieldWithBattleFeedback(KeyCode.RightBracket, KeyModifier.None, entityNav.CycleNext, "Next entity");
-            RegisterFieldWithBattleFeedback(KeyCode.Backslash, KeyModifier.Ctrl, entityNav.ToggleToLayerFilter, "Toggle layer filter");
-            RegisterFieldWithBattleFeedback(KeyCode.Backslash, KeyModifier.Shift, entityNav.TogglePathfindingFilter, "Toggle pathfinding filter");
-            RegisterFieldWithBattleFeedback(KeyCode.Backslash, KeyModifier.None, entityNav.AnnounceCurrentEntity, "Announce current entity");
+            // --- Field: entity navigation (brackets + backslash) — field-only ---
+            RegisterFieldOnly(KeyCode.LeftBracket, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category");
+            RegisterFieldOnly(KeyCode.LeftBracket, KeyModifier.None, entityNav.CyclePrevious, "Previous entity");
+            RegisterFieldOnly(KeyCode.RightBracket, KeyModifier.Shift, entityNav.CycleNextCategory, "Next entity category");
+            RegisterFieldOnly(KeyCode.RightBracket, KeyModifier.None, entityNav.CycleNext, "Next entity");
+            RegisterFieldOnly(KeyCode.Backslash, KeyModifier.Ctrl, entityNav.ToggleToLayerFilter, "Toggle layer filter");
+            RegisterFieldOnly(KeyCode.Backslash, KeyModifier.Shift, entityNav.TogglePathfindingFilter, "Toggle pathfinding filter");
+            RegisterFieldOnly(KeyCode.Backslash, KeyModifier.None, entityNav.AnnounceCurrentEntity, "Announce current entity");
 
-            // --- Field: alternate keys (J/K/L/P) — with battle feedback ---
-            RegisterFieldWithBattleFeedback(KeyCode.J, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category (alt)");
-            RegisterFieldWithBattleFeedback(KeyCode.J, KeyModifier.None, entityNav.CyclePrevious, "Previous entity (alt)");
-            RegisterFieldWithBattleFeedback(KeyCode.K, KeyModifier.None, entityNav.AnnounceEntityOnly, "Announce entity name (alt)");
-            RegisterFieldWithBattleFeedback(KeyCode.L, KeyModifier.Shift, entityNav.CycleNextCategory, "Next entity category (alt)");
-            RegisterFieldWithBattleFeedback(KeyCode.L, KeyModifier.None, entityNav.CycleNext, "Next entity (alt)");
-            RegisterFieldWithBattleFeedback(KeyCode.P, KeyModifier.Shift, entityNav.TogglePathfindingFilter, "Toggle pathfinding filter (alt)");
-            RegisterFieldWithBattleFeedback(KeyCode.P, KeyModifier.None, entityNav.AnnounceCurrentEntity, "Announce current entity (alt)");
+            // --- Field: alternate keys (J/K/L/P) — field-only ---
+            RegisterFieldOnly(KeyCode.J, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category (alt)");
+            RegisterFieldOnly(KeyCode.J, KeyModifier.None, entityNav.CyclePrevious, "Previous entity (alt)");
+            RegisterFieldOnly(KeyCode.K, KeyModifier.None, entityNav.AnnounceEntityOnly, "Announce entity name (alt)");
+            RegisterFieldOnly(KeyCode.L, KeyModifier.Shift, entityNav.CycleNextCategory, "Next entity category (alt)");
+            RegisterFieldOnly(KeyCode.L, KeyModifier.None, entityNav.CycleNext, "Next entity (alt)");
+            RegisterFieldOnly(KeyCode.P, KeyModifier.Shift, entityNav.TogglePathfindingFilter, "Toggle pathfinding filter (alt)");
+            RegisterFieldOnly(KeyCode.P, KeyModifier.None, entityNav.AnnounceCurrentEntity, "Announce current entity (alt)");
 
             // --- Field: waypoint keys ---
             registry.Register(KeyCode.Comma, KeyModifier.Shift, KeyContext.Field, waypoints.CyclePreviousWaypointCategory, "Previous waypoint category");
@@ -97,15 +93,15 @@ namespace FFIV_ScreenReader.Core
             registry.Register(KeyCode.I, KeyModifier.Shift, KeyContext.Global, KeyHelpReader.AnnounceKeyHelp, "Announce controls");
             registry.Register(KeyCode.I, KeyModifier.None, KeyContext.Global, HandleItemDetailsKey, "Item details");
 
-            // --- Field-only toggles (blocked in battle with feedback) ---
-            RegisterFieldWithBattleFeedback(KeyCode.Quote, KeyModifier.None, mod.ToggleFootsteps, "Toggle footsteps");
-            RegisterFieldWithBattleFeedback(KeyCode.Semicolon, KeyModifier.None, mod.ToggleWallTones, "Toggle wall tones");
-            RegisterFieldWithBattleFeedback(KeyCode.Alpha9, KeyModifier.None, mod.ToggleAudioBeacons, "Toggle audio beacons");
+            // --- Field-only toggles ---
+            RegisterFieldOnly(KeyCode.Quote, KeyModifier.None, mod.ToggleFootsteps, "Toggle footsteps");
+            RegisterFieldOnly(KeyCode.Semicolon, KeyModifier.None, mod.ToggleWallTones, "Toggle wall tones");
+            RegisterFieldOnly(KeyCode.Alpha9, KeyModifier.None, mod.ToggleAudioBeacons, "Toggle audio beacons");
 
             // --- Field-only category shortcuts ---
-            RegisterFieldWithBattleFeedback(KeyCode.K, KeyModifier.Shift, entityNav.ResetToAllCategory, "Reset to All category");
-            RegisterFieldWithBattleFeedback(KeyCode.Equals, KeyModifier.None, entityNav.CycleNextCategory, "Next entity category (global)");
-            RegisterFieldWithBattleFeedback(KeyCode.Minus, KeyModifier.None, entityNav.CyclePreviousCategory, "Previous entity category (global)");
+            RegisterFieldOnly(KeyCode.K, KeyModifier.Shift, entityNav.ResetToAllCategory, "Reset to All category");
+            RegisterFieldOnly(KeyCode.Equals, KeyModifier.None, entityNav.CycleNextCategory, "Next entity category (global)");
+            RegisterFieldOnly(KeyCode.Minus, KeyModifier.None, entityNav.CyclePreviousCategory, "Previous entity category (global)");
 
             // Sort for correct modifier precedence
             registry.FinalizeRegistration();
@@ -113,40 +109,94 @@ namespace FFIV_ScreenReader.Core
 
         public void Update()
         {
-            // ModMenu handles its own input via Windows API when open
-            if (ModMenu.IsOpen)
-            {
-                ModMenu.HandleInput();
-                return;
-            }
+            // Poll SDL3 gamepad + GetAsyncKeyState keyboard once per frame.
+            // Must come before any mod input handling so edge-detection state is fresh.
+            GamepadManager.Update();
 
-            // Handle dialog input
+            // Suppress Unity legacy Input when the mod is consuming. Safe because the mod reads
+            // keyboard via GetAsyncKeyState (unaffected by ResetInputAxes). This + the
+            // InputPassthroughPatches = complete game keyboard suppression, and it works even
+            // when no gamepad is connected (the passthrough patches early-return without one).
+            if (ControllerRouter.SuppressGameInput)
+                Input.ResetInputAxes();
+
+            // Determine context AFTER polling so the router (and dispatch below) sees fresh
+            // input for this frame.
+            KeyContext activeContext = DetermineContext();
+
+            // Route controller inputs to the appropriate state-machine bucket. Runs every frame
+            // so the router can interrupt speech / drive nav even without a gamepad.
+            ControllerRouter.Update(activeContext);
+
+            if (GamepadManager.AnyKeyboardKeyDown())
+                ControllerRouter.NotifyKeyboardInput();
+
+            // Handle modal dialogs first (each consumes all input when open)
             if (ConfirmationDialog.HandleInput()) return;
             if (TextInputWindow.HandleInput()) return;
+            if (ModMenu.HandleInput()) return;
 
-            if (!Input.anyKeyDown)
+            // Game-context hotkeys below only fire when the game window is the foreground
+            // window, so mod functions don't trigger while the player is in another app.
+            // Placed AFTER the modals so the now-virtual dialogs/menu keep working even when
+            // the game window isn't foreground.
+            if (!WindowsFocusHelper.IsGameWindowFocused())
                 return;
 
-            // F8 to open mod menu
-            if (Input.GetKeyDown(KeyCode.F8))
+            if (!GamepadManager.AnyKeyboardKeyDown())
+                return;
+
+            // Bare F-keys only fire with no modifier held, so OS shortcuts like Alt+F4
+            // (close window), Ctrl+F-keys and Shift+F-keys don't trigger the screen
+            // reader. Explicit Shift/Ctrl bindings still match via GetCurrentModifiers.
+            bool anyModifierHeld = IsAnyModifierHeld();
+
+            // F8 to open mod menu — gated to field-only via ControllerRouter.IsFieldActive
+            // (blocks battle, in-game menus, title screen). Rejection wording lives in
+            // ControllerRouter.SpeakModMenuUnavailable so Start-button and F8 stay in sync.
+            if (!anyModifierHeld && GamepadManager.IsKeyCodePressed(KeyCode.F8))
             {
-                ModMenu.Open();
+                if (ControllerRouter.IsFieldActive)
+                    ModMenu.Open();
+                else
+                    ControllerRouter.SpeakModMenuUnavailable();
                 return;
             }
 
-            // Handle function keys (F1/F3 — special coroutine logic)
-            HandleFunctionKeyInput();
+            // Handle function keys (F1/F3/F5 — special coroutine/battle logic) — bare keypress only
+            if (!anyModifierHeld)
+                HandleFunctionKeyInput();
 
             // Skip hotkeys when player is typing in a text field
             if (IsInputFieldFocused())
                 return;
 
-            // Determine active context
-            KeyContext activeContext = DetermineContext();
             KeyModifier currentModifiers = GetCurrentModifiers();
+
+            // Alt held with no registered Alt-binding → skip dispatch so Alt+<key> doesn't
+            // accidentally trigger the unmodified binding. (Shift/Ctrl are routed through
+            // currentModifiers and matched exactly by the registry, so they still work.)
+            if (IsAltHeld())
+                return;
 
             // Dispatch all registered bindings
             DispatchRegisteredBindings(activeContext, currentModifiers);
+        }
+
+        private static bool IsAltHeld()
+        {
+            return GamepadManager.IsKeyCodeHeld(KeyCode.LeftAlt)
+                || GamepadManager.IsKeyCodeHeld(KeyCode.RightAlt);
+        }
+
+        private static bool IsAnyModifierHeld()
+        {
+            return GamepadManager.IsKeyCodeHeld(KeyCode.LeftShift)
+                || GamepadManager.IsKeyCodeHeld(KeyCode.RightShift)
+                || GamepadManager.IsKeyCodeHeld(KeyCode.LeftControl)
+                || GamepadManager.IsKeyCodeHeld(KeyCode.RightControl)
+                || GamepadManager.IsKeyCodeHeld(KeyCode.LeftAlt)
+                || GamepadManager.IsKeyCodeHeld(KeyCode.RightAlt);
         }
 
         private KeyContext DetermineContext()
@@ -158,13 +208,24 @@ namespace FFIV_ScreenReader.Core
             if (BattleState.IsInBattle)
                 return KeyContext.Battle;
 
-            return KeyContext.Field;
+            // Field keys only fire while actively on a field map with no menu open.
+            // Otherwise fall through to Global so field/entity/waypoint/toggle hotkeys
+            // are silent no-ops off-field, while Global info keys still work everywhere.
+            if (IsOnValidMap() && !MenuStateRegistry.AnyActive())
+                return KeyContext.Field;
+
+            return KeyContext.Global;
+        }
+
+        private static bool IsOnValidMap()
+        {
+            return GameObjectCache.Get<Il2CppLast.Map.FieldPlayerController>()?.fieldPlayer != null;
         }
 
         private KeyModifier GetCurrentModifiers()
         {
-            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-            bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool shift = GamepadManager.IsKeyCodeHeld(KeyCode.LeftShift) || GamepadManager.IsKeyCodeHeld(KeyCode.RightShift);
+            bool ctrl = GamepadManager.IsKeyCodeHeld(KeyCode.LeftControl) || GamepadManager.IsKeyCodeHeld(KeyCode.RightControl);
 
             if (ctrl && shift) return KeyModifier.CtrlShift;
             if (ctrl) return KeyModifier.Ctrl;
@@ -176,22 +237,40 @@ namespace FFIV_ScreenReader.Core
         {
             foreach (var key in registry.RegisteredKeys)
             {
-                if (Input.GetKeyDown(key))
+                if (GamepadManager.IsKeyCodePressed(key))
                     registry.TryExecute(key, currentModifiers, activeContext);
             }
         }
 
         private void HandleFunctionKeyInput()
         {
-            if (Input.GetKeyDown(KeyCode.F1))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.F1))
             {
                 CoroutineManager.StartUntracked(AnnounceWalkRunState());
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.F3))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.F3))
             {
                 CoroutineManager.StartUntracked(AnnounceEncounterState());
+                return;
+            }
+
+            // F5 cycles enemy HP display (field-only via ControllerRouter.IsFieldActive).
+            if (GamepadManager.IsKeyCodePressed(KeyCode.F5))
+            {
+                if (ControllerRouter.IsFieldActive)
+                {
+                    int current = PreferencesManager.EnemyHPDisplay;
+                    int next = (current + 1) % 3;
+                    PreferencesManager.SetEnemyHPDisplay(next);
+                    string[] options = { T("Numbers"), T("Percentage"), T("Hidden") };
+                    FFIV_ScreenReaderMod.SpeakText(string.Format(T("Enemy HP: {0}"), options[next]), interrupt: true);
+                }
+                else
+                {
+                    ControllerRouter.SpeakModMenuUnavailable();
+                }
             }
         }
 

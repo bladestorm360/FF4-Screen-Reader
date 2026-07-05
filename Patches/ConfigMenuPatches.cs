@@ -10,6 +10,8 @@ using FFIV_ScreenReader.Menus;
 using FFIV_ScreenReader.Utils;
 using ConfigKeysSettingController = Il2CppLast.UI.KeyInput.ConfigKeysSettingController;
 using ConfigControllCommandController = Il2CppLast.UI.KeyInput.ConfigControllCommandController;
+using ConfigKeyIconController = Il2CppLast.UI.KeyInput.ConfigKeyIconController;
+using OptionController = Il2CppLast.UI.KeyInput.OptionController;
 
 
 // ConfigController is in base namespace
@@ -49,6 +51,80 @@ namespace FFIV_ScreenReader.Patches
                     harmony.Patch(setActiveMethod, postfix: new HarmonyMethod(postfix));
                 }
 
+                // Title-screen options (OptionController) hosts the Language dropdown and the
+                // gamepad/keyboard remap sub-screens. Drive Config state from its lifecycle so the
+                // Language-dropdown announce can gate on the menu actually being open.
+                var optionSetActive = AccessTools.Method(typeof(OptionController), "SetActive", new Type[] { typeof(bool) });
+                if (optionSetActive != null)
+                {
+                    harmony.Patch(optionSetActive, postfix: new HarmonyMethod(
+                        AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(OptionController_SetActive_Postfix))));
+                }
+                else
+                {
+                    MelonLogger.Warning("[ConfigMenu] OptionController.SetActive not found");
+                }
+
+                // Title-screen Language dropdown (keyboard/gamepad uses a Unity Dropdown driven by the
+                // KeyInput OptionController). SetDropDownItemFocus is the discrete, event-driven hook —
+                // it announces the focused language, gated on the config menu being open. DO NOT hook
+                // OptionController.UpdateSelectLanguage — it is an EMPTY method (shared stub body);
+                // detouring it corrupts every method that shares that body → launch crash.
+                var dropDownFocus = AccessTools.Method(typeof(OptionController), "SetDropDownItemFocus");
+                if (dropDownFocus != null)
+                {
+                    harmony.Patch(dropDownFocus, postfix: new HarmonyMethod(
+                        AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(SetDropDownItemFocus_Postfix))));
+                }
+                else
+                {
+                    MelonLogger.Warning("[ConfigMenu] OptionController.SetDropDownItemFocus not found");
+                }
+
+                // Remap assign-flow speaking (ConfigKeysSettingController, all real-bodied methods).
+                // KeyboardSettingInit / GamePadSettingInit fire on entering assign mode → "press a
+                // key/button" prompt. ChangeKeySetting (overloaded keyboard + gamepad) fires when the
+                // binding is applied → announce the new mapping.
+                void PatchKeysSetting(string method, string postfixName)
+                {
+                    try
+                    {
+                        var m = AccessTools.Method(typeof(ConfigKeysSettingController), method);
+                        if (m != null)
+                        {
+                            harmony.Patch(m, postfix: new HarmonyMethod(
+                                AccessTools.Method(typeof(ConfigMenuStatePatches), postfixName)));
+                        }
+                        else
+                        {
+                            MelonLogger.Warning($"[ConfigMenu] ConfigKeysSettingController.{method} not found");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Warning($"[ConfigMenu] Error patching ConfigKeysSettingController.{method}: {ex.Message}");
+                    }
+                }
+
+                PatchKeysSetting("KeyboardSettingInit", nameof(KeyboardSettingInit_Postfix));
+                PatchKeysSetting("GamePadSettingInit", nameof(GamePadSettingInit_Postfix));
+
+                // ChangeKeySetting is overloaded — patch every overload with the same __instance-only
+                // postfix (avoids AmbiguousMatchException without needing an exact Type[]).
+                try
+                {
+                    var changePostfix = new HarmonyMethod(AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(ChangeKeySetting_Postfix)));
+                    foreach (var m in typeof(ConfigKeysSettingController).GetMethods(
+                        BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public))
+                    {
+                        if (m.Name == "ChangeKeySetting") harmony.Patch(m, postfix: changePostfix);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[ConfigMenu] Error patching ChangeKeySetting: {ex.Message}");
+                }
+
                 isPatched = true;
             }
             catch (Exception ex)
@@ -65,6 +141,113 @@ namespace FFIV_ScreenReader.Patches
             if (!isActive && MenuStates.Config.IsActive)
             {
                 MenuStates.Config.Reset();
+            }
+        }
+
+        /// <summary>
+        /// Mirror of the in-game ConfigController.SetActive driver for the title-screen options menu.
+        /// Drives Config state so the Language-dropdown announce can gate on the menu being open.
+        /// </summary>
+        public static void OptionController_SetActive_Postfix(bool isActive)
+        {
+            if (isActive)
+            {
+                MenuStates.Config.SetActive();
+            }
+            else if (MenuStates.Config.IsActive)
+            {
+                MenuStates.Config.Reset();
+            }
+        }
+
+        // ── Title-screen Language dropdown ──────────────────────────────────────────────
+
+        /// <summary>Focused language label: prefer the tracked dropdown item, else the dropdown value.</summary>
+        private static string GetFocusedLanguageLabel(OptionController inst)
+        {
+            var item = inst.selectedItem;
+            if (item == null) return null;
+
+            if (item.view != null && item.view.LabelText != null)
+            {
+                string t = item.view.LabelText.text;
+                if (!string.IsNullOrWhiteSpace(t)) return t;
+            }
+            var dd = inst.selectedDoropDown;
+            if (dd != null && dd.options != null && dd.value >= 0 && dd.value < dd.options.Count)
+            {
+                var opt = dd.options[dd.value];
+                if (opt != null && !string.IsNullOrWhiteSpace(opt.text)) return opt.text;
+            }
+            // The CURRENT language's item has an empty label (its native name is a sprite). A focused
+            // item with no readable label is therefore the current language → name it via the game.
+            return ConfigMenuReader.GetCurrentLanguageDisplayName();
+        }
+
+        /// <summary>
+        /// EVENT-DRIVEN announce. OptionController.SetDropDownItemFocus is the discrete "focused
+        /// dropdown item changed" hook — speaks the focused language directly, gated on the config
+        /// menu being open (the title screen fires this during load before the menu is opened).
+        /// </summary>
+        public static void SetDropDownItemFocus_Postfix(OptionController __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                if (!MenuStates.Config.IsActive) return;
+                string label = GetFocusedLanguageLabel(__instance);
+                if (string.IsNullOrWhiteSpace(label)) return;
+                label = label.Trim();
+                var focusedDropdown = __instance.selectedDoropDown;
+                if (focusedDropdown != null && focusedDropdown.options != null)
+                    label = FFIV_ScreenReader.Utils.MenuPosition.Format(label, focusedDropdown.value, focusedDropdown.options.Count);
+                FFIV_ScreenReaderMod.SpeakText(label, interrupt: true);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in SetDropDownItemFocus patch: {ex.Message}");
+            }
+        }
+
+        // ── Remap assign-flow (ConfigKeysSettingController) ──────────────────────────────
+        // Entering assign mode → announce the "press a key/button" prompt. Init methods fire once on
+        // state entry → event-driven, no dedup.
+        public static void KeyboardSettingInit_Postfix(ConfigKeysSettingController __instance)
+            => AnnounceAssignPrompt(gamepad: false);
+
+        public static void GamePadSettingInit_Postfix(ConfigKeysSettingController __instance)
+            => AnnounceAssignPrompt(gamepad: true);
+
+        private static void AnnounceAssignPrompt(bool gamepad)
+        {
+            try
+            {
+                FFIV_ScreenReaderMod.SpeakText(gamepad ? "Press a button." : "Press a key.", interrupt: true);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in assign-prompt patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Postfix for ConfigKeysSettingController.ChangeKeySetting (all overloads). Fires when a
+        /// binding is applied — re-reads the just-edited command and announces the new mapping.
+        /// Event-driven, no dedup.
+        /// </summary>
+        public static void ChangeKeySetting_Postfix(ConfigKeysSettingController __instance)
+        {
+            try
+            {
+                if (__instance == null) return;
+                string announcement = ConfigKeysSettingController_SelectContent_Patch.BuildCommandAnnouncement(
+                    __instance, __instance.selectedCommand);
+                if (string.IsNullOrWhiteSpace(announcement)) return;
+                FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ChangeKeySetting patch: {ex.Message}");
             }
         }
     }
@@ -188,51 +371,11 @@ namespace FFIV_ScreenReader.Patches
                 if (command == null)
                     return;
 
-                var textParts = new System.Collections.Generic.List<string>();
-
-                // Read action name from the view's nameTexts
-                if (command.view != null && command.view.nameTexts != null && command.view.nameTexts.Count > 0)
-                {
-                    foreach (var textComp in command.view.nameTexts)
-                    {
-                        if (textComp != null && !string.IsNullOrWhiteSpace(textComp.text))
-                        {
-                            string text = textComp.text.Trim();
-                            if (!text.StartsWith("MENU_") && !textParts.Contains(text))
-                            {
-                                textParts.Add(text);
-                            }
-                        }
-                    }
-                }
-
-                // Read key bindings from keyboardIconController.view (only works for keyboard settings)
-                if (command.keyboardIconController != null && command.keyboardIconController.view != null)
-                {
-                    // Read from iconTextList - contains the actual key names (e.g., "Enter", "Backspace")
-                    if (command.keyboardIconController.view.iconTextList != null)
-                    {
-                        for (int i = 0; i < command.keyboardIconController.view.iconTextList.Count; i++)
-                        {
-                            var iconText = command.keyboardIconController.view.iconTextList[i];
-                            if (iconText != null && !string.IsNullOrWhiteSpace(iconText.text))
-                            {
-                                string text = iconText.text.Trim();
-                                if (!textParts.Contains(text))
-                                {
-                                    textParts.Add(text);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (textParts.Count == 0)
+                string announcement = BuildCommandAnnouncement(__instance, command);
+                if (string.IsNullOrWhiteSpace(announcement))
                 {
                     return;
                 }
-
-                string announcement = string.Join(" ", textParts);
 
                 // Skip duplicate announcements
                 if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
@@ -243,11 +386,144 @@ namespace FFIV_ScreenReader.Patches
                 // Set config menu state active
                 MenuStates.Config.SetActive();
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, list.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in ConfigKeysSettingController.SelectContent patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Builds the controls-screen announcement for one command: action name + keyboard binding
+        /// (readable key names) + gamepad binding. The gamepad icon is an unreadable controller glyph,
+        /// so we translate the LIVE bound button (from the screen's KeyConfigData) to family-aware text
+        /// via ControllerLabels. Shared by the navigation read (SelectContent) and the rebind read
+        /// (ChangeKeySetting).
+        /// </summary>
+        internal static string BuildCommandAnnouncement(
+            ConfigKeysSettingController owner,
+            ConfigControllCommandController command)
+        {
+            if (command == null) return null;
+
+            var textParts = new System.Collections.Generic.List<string>();
+
+            // Action name from the view's nameTexts
+            if (command.view != null && command.view.nameTexts != null && command.view.nameTexts.Count > 0)
+            {
+                foreach (var textComp in command.view.nameTexts)
+                {
+                    if (textComp != null && !string.IsNullOrWhiteSpace(textComp.text))
+                    {
+                        string text = textComp.text.Trim();
+                        if (!text.StartsWith("MENU_") && !textParts.Contains(text))
+                        {
+                            textParts.Add(text);
+                        }
+                    }
+                }
+            }
+
+            // Keyboard binding — already readable key names.
+            AppendIconTexts(textParts, command.keyboardIconController);
+
+            // Gamepad binding — the icon is a sprite glyph carrying NO readable text (iconTextList is
+            // empty), so reading it never worked. The keyboard and gamepad remap sections are mutually
+            // exclusive per row: keyboard rows carry a key name, gamepad rows don't. So when the keyboard
+            // icon is empty we're on the gamepad section — translate the LIVE bound button via
+            // ControllerLabels.
+            if (ResolveGamepadButtonText(owner, command) is string btn && !string.IsNullOrEmpty(btn)
+                && !IconHasContent(command.keyboardIconController))
+            {
+                textParts.Add($"({btn})");
+            }
+
+            return textParts.Count == 0 ? null : string.Join(" ", textParts);
+        }
+
+        /// <summary>Appends an icon controller's binding labels (iconTextList) to textParts, deduped.</summary>
+        private static void AppendIconTexts(System.Collections.Generic.List<string> textParts, ConfigKeyIconController icon)
+        {
+            var iconView = icon?.view;
+            if (iconView == null || iconView.iconTextList == null) return;
+            for (int i = 0; i < iconView.iconTextList.Count; i++)
+            {
+                var iconText = iconView.iconTextList[i];
+                if (iconText != null && !string.IsNullOrWhiteSpace(iconText.text))
+                {
+                    string text = iconText.text.Trim();
+                    if (!textParts.Contains(text))
+                        textParts.Add(text);
+                }
+            }
+        }
+
+        /// <summary>True if an icon controller is currently showing readable binding text.</summary>
+        private static bool IconHasContent(ConfigKeyIconController icon)
+        {
+            var iconView = icon?.view;
+            if (iconView == null || iconView.iconTextList == null) return false;
+            for (int i = 0; i < iconView.iconTextList.Count; i++)
+            {
+                var t = iconView.iconTextList[i];
+                if (t != null && !string.IsNullOrWhiteSpace(t.text)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Resolves a remap row's CURRENT (remappable) gamepad button to family-aware text. Reads the
+        /// live binding from the screen's KeyConfigData (GameKey → Unity KeyCode), maps the KeyCode to
+        /// an SDL button index, and lets ControllerLabels pick the text for the connected controller.
+        /// Returns null if it can't be resolved.
+        /// </summary>
+        private static string ResolveGamepadButtonText(
+            ConfigKeysSettingController owner,
+            ConfigControllCommandController command)
+        {
+            try
+            {
+                if (owner == null || command == null) return null;
+                var kd = owner.keydata;
+                if (kd == null) return null;
+                var dict = kd.GetGamePadKeyConfigtDictionary();
+                if (dict == null || !dict.ContainsKey(command.Key)) return null;
+                int sdl = JoystickKeyCodeToSdlButton((int)dict[command.Key]);
+                if (sdl < 0) return null;
+                return ControllerLabels.GetButtonLabel(sdl);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Maps a Unity legacy KeyCode.JoystickButtonN (330+) to an SDL gamepad button index using the
+        /// XInput-standard layout. ControllerLabels then yields the right family text for whichever
+        /// controller is connected. Returns -1 if not a mapped button.
+        /// </summary>
+        private static int JoystickKeyCodeToSdlButton(int keyCode)
+        {
+            switch (keyCode)
+            {
+                // FFPR keeps the bottom/right face buttons in the Japanese arrangement: Confirm is
+                // stored on JoystickButton1 and Cancel on JoystickButton0. The American build confirms
+                // with the BOTTOM button (A/Cross), so JB1→SOUTH and JB0→EAST — i.e. swapped from
+                // Unity's XInput default. (X/Y below are unaffected.)
+                case 330: return SDL3.SDL_GAMEPAD_BUTTON_EAST;           // JoystickButton0 — Cancel (B/Circle)
+                case 331: return SDL3.SDL_GAMEPAD_BUTTON_SOUTH;          // JoystickButton1 — Confirm (A/Cross)
+                case 332: return SDL3.SDL_GAMEPAD_BUTTON_WEST;           // JoystickButton2 — X/Square
+                case 333: return SDL3.SDL_GAMEPAD_BUTTON_NORTH;          // JoystickButton3 — Y/Triangle
+                case 334: return SDL3.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;  // JoystickButton4 — LB
+                case 335: return SDL3.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER; // JoystickButton5 — RB
+                case 336: return SDL3.SDL_GAMEPAD_BUTTON_BACK;           // JoystickButton6 — Back/View
+                case 337: return SDL3.SDL_GAMEPAD_BUTTON_START;          // JoystickButton7 — Start/Menu
+                case 338: return SDL3.SDL_GAMEPAD_BUTTON_LEFT_STICK;     // JoystickButton8 — LS
+                case 339: return SDL3.SDL_GAMEPAD_BUTTON_RIGHT_STICK;    // JoystickButton9 — RS
+                default: return -1;
             }
         }
     }

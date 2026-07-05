@@ -382,7 +382,17 @@ namespace FFIV_ScreenReader.Patches
                 // Set item menu state active
                 ItemMenuState.SetActive();
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, targetList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
+
+                // Auto Detail: automatically read the equip-compatibility detail normally
+                // reached with the details key, queued after the name (interrupt: false) so it
+                // never cuts off the name. The content dedup guard above already returned early
+                // for a repeat of the same item, so this fires once per focused item.
+                if (PreferencesManager.AutoDetailEnabled)
+                {
+                    ItemDetailsAnnouncer.AnnounceEquipRequirements(interrupt: false);
+                }
             }
             catch (Exception ex)
             {
@@ -469,6 +479,7 @@ namespace FFIV_ScreenReader.Patches
                 // Set equipment menu state active
                 EquipmentMenuState.SetActive();
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.ContentDataList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -560,6 +571,7 @@ namespace FFIV_ScreenReader.Patches
                 // Set equipment menu state active
                 EquipmentMenuState.SetActive();
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -610,6 +622,7 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, targetList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

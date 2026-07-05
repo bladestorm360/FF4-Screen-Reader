@@ -39,9 +39,9 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         public void LoadPreferences()
         {
-            filterByPathfinding = PreferencesManager.PathfindingFilterDefault;
-            filterMapExits = PreferencesManager.MapExitFilterDefault;
-            filterToLayer = PreferencesManager.ToLayerFilterDefault;
+            filterByPathfinding = PreferencesManager.PathfindingFilterEnabled;
+            filterMapExits = PreferencesManager.MapExitFilterEnabled;
+            filterToLayer = PreferencesManager.ToLayerFilterEnabled;
 
             entityNavigator.FilterByPathfinding = filterByPathfinding;
             entityNavigator.FilterMapExits = filterMapExits;
@@ -52,7 +52,9 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
-        /// Checks if player is on an active field map.
+        /// Checks if player is on an active field map, then runs the delta scan so that
+        /// any state changes since the last navigation input (chest opened, NPC despawned,
+        /// new NPC spawned) are reflected before reading the current entity.
         /// </summary>
         private bool EnsureFieldContextAndScan()
         {
@@ -70,6 +72,7 @@ namespace FFIV_ScreenReader.Core
                 return false;
             }
 
+            entityNavigator.RefreshIfNeeded();
             return true;
         }
 
@@ -82,6 +85,17 @@ namespace FFIV_ScreenReader.Core
             if (entity == null)
             {
                 FFIV_ScreenReaderMod.SpeakText(T("No entities nearby"));
+                return;
+            }
+
+            NavigationTargetTracker.MarkEntity();
+
+            // Beacon-mode: skip A* and just re-ping; the beacon loop already announces direction.
+            if (AudioLoopManager.AudioBeaconsEnabled)
+            {
+                FFIV_ScreenReaderMod.Instance?.RestartBeacon();
+                if (PreferencesManager.AnnounceOnBeaconRestartEnabled)
+                    AnnounceEntityOnly();
                 return;
             }
 
@@ -110,6 +124,7 @@ namespace FFIV_ScreenReader.Core
 
             if (entityNavigator.CycleNext())
             {
+                NavigationTargetTracker.MarkEntity();
                 AnnounceEntityOnly();
             }
             else
@@ -126,6 +141,7 @@ namespace FFIV_ScreenReader.Core
 
             if (entityNavigator.CyclePrevious())
             {
+                NavigationTargetTracker.MarkEntity();
                 AnnounceEntityOnly();
             }
             else
@@ -146,6 +162,8 @@ namespace FFIV_ScreenReader.Core
                 FFIV_ScreenReaderMod.SpeakText(T("No entities nearby"));
                 return;
             }
+
+            NavigationTargetTracker.MarkEntity();
 
             var playerController = GameObjectCache.Get<FieldPlayerController>();
 
@@ -170,6 +188,8 @@ namespace FFIV_ScreenReader.Core
 
             int nextCategory = ((int)entityNavigator.CurrentCategory + 1) % CategoryCount;
             entityNavigator.SetCategory((EntityCategory)nextCategory);
+            if (entityNavigator.EntityCount > 0)
+                NavigationTargetTracker.MarkEntity();
             AnnounceCategoryChange();
         }
 
@@ -181,6 +201,8 @@ namespace FFIV_ScreenReader.Core
             int prevCategory = (int)entityNavigator.CurrentCategory - 1;
             if (prevCategory < 0) prevCategory = CategoryCount - 1;
             entityNavigator.SetCategory((EntityCategory)prevCategory);
+            if (entityNavigator.EntityCount > 0)
+                NavigationTargetTracker.MarkEntity();
             AnnounceCategoryChange();
         }
 

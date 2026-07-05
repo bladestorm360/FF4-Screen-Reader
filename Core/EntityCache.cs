@@ -6,6 +6,7 @@ using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Core.Filters;
 using FFIV_ScreenReader.Utils;
 using Il2CppLast.Entity.Field;
+using Il2CppLast.Management;
 using Il2CppLast.Map;
 
 namespace FFIV_ScreenReader.Core
@@ -21,6 +22,7 @@ namespace FFIV_ScreenReader.Core
         private List<IGroupingStrategy> enabledStrategies = new List<IGroupingStrategy>();
         // O(1) lookup for groups by key (avoids scanning all entities)
         private Dictionary<string, GroupEntity> groupsByKey = new Dictionary<string, GroupEntity>();
+        private int lastScannedMapId = -1;
 
         /// <summary>
         /// Fired when a new entity is added to the cache.
@@ -177,16 +179,19 @@ namespace FFIV_ScreenReader.Core
         /// Scans for changes in the world and updates the entity registry.
         /// Fires OnEntityAdded/OnEntityRemoved events for changes.
         /// Groups related entities together using enabled grouping strategies.
+        /// Also prunes entities deactivated by events (chest opened, NPC despawned).
         /// </summary>
         public void Scan()
         {
+            int currentMapId = GetCurrentMapId();
+
             // Get all current FieldEntity objects from the world
             var currentFieldEntities = FieldNavigationHelper.GetAllFieldEntities();
 
             // Convert to HashSet for O(1) lookups
             var currentSet = new HashSet<FieldEntity>(currentFieldEntities);
 
-            // REMOVE phase: Find entities that are no longer in the world
+            // REMOVE phase 1: Find entities that are no longer in the world
             var toRemove = new List<FieldEntity>();
             foreach (var kvp in entityMap)
             {
@@ -194,6 +199,28 @@ namespace FFIV_ScreenReader.Core
                 {
                     toRemove.Add(kvp.Key);
                 }
+            }
+
+            // REMOVE phase 2: Find entities whose backing GameObject was deactivated
+            // (opened chest sprites, NPCs despawned by events). For GroupEntity values,
+            // we check the specific member that maps to this FieldEntity key — group-wide
+            // aliveness is handled by HandleEntityRemoval dissolving empty groups.
+            foreach (var kvp in entityMap)
+            {
+                if (toRemove.Contains(kvp.Key)) continue; // Already queued
+
+                var value = kvp.Value;
+                bool dead;
+                if (value is GroupEntity group)
+                {
+                    var member = group.Members.FirstOrDefault(m => m.GameEntity == kvp.Key);
+                    dead = member != null && !member.IsAlive;
+                }
+                else
+                {
+                    dead = !value.IsAlive;
+                }
+                if (dead) toRemove.Add(kvp.Key);
             }
 
             foreach (var fieldEntity in toRemove)
@@ -218,6 +245,36 @@ namespace FFIV_ScreenReader.Core
                     }
                 }
             }
+
+            lastScannedMapId = currentMapId;
+        }
+
+        /// <summary>
+        /// Soft fallback: if a navigation entry point detects the current map differs from
+        /// the last scanned map, force a fresh scan. Backstop for any scripted transition
+        /// that bypasses CheckMapTransition's hard rescan path.
+        /// </summary>
+        public void EnsureCorrectMap()
+        {
+            try
+            {
+                int currentMapId = GetCurrentMapId();
+                if (currentMapId > 0 && currentMapId != lastScannedMapId)
+                    Scan();
+            }
+            catch { } // Map ID read may fail during transitions
+        }
+
+        private int GetCurrentMapId()
+        {
+            try
+            {
+                var userDataManager = UserDataManager.Instance();
+                if (userDataManager != null)
+                    return userDataManager.CurrentMapId;
+            }
+            catch { } // UserDataManager may not be initialized
+            return -1;
         }
 
         /// <summary>

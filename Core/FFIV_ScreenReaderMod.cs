@@ -44,9 +44,12 @@ namespace FFIV_ScreenReader.Core
         // Navigation state (battle/dialogue suppression)
         private NavigationStateManager navigationState;
 
-        // Facades
-        internal EntityNavigationFacade entityNavFacade;
-        internal WaypointFacade waypointFacade;
+        // Facades (public so ControllerRouter can drive them)
+        public EntityNavigationFacade entityNavFacade;
+        public WaypointFacade waypointFacade;
+
+        // Controller normalization (L3/R3 pass-through to game when not in mod mode)
+        private bool enableStickClickNormalization = false;
 
         // Static instance for access from patches
         internal static FFIV_ScreenReaderMod Instance { get; private set; }
@@ -79,6 +82,12 @@ namespace FFIV_ScreenReader.Core
             // Initialize external sound player for distinct audio feedback (wall bumps, tones, footsteps)
             SoundPlayer.Initialize();
 
+            // Initialize SDL3 gamepad/keyboard input manager
+            GamepadManager.Initialize();
+
+            // Load stick click normalization preference
+            enableStickClickNormalization = PreferencesManager.StickClickNormalizationEnabled;
+
             // Initialize entity name translator for Japanese-to-English entity names
             EntityTranslator.Initialize();
 
@@ -86,9 +95,13 @@ namespace FFIV_ScreenReader.Core
             entityCache = new EntityCache();
             entityNavigator = new EntityNavigator(entityCache);
 
-            // Initialize audio feedback manager
-            audioManager = new AudioLoopManager(entityNavigator, entityCache);
-            audioManager.LoadPreferences();
+            // Initialize waypoint system FIRST so AudioLoopManager can target waypoints
+            waypointManager = new WaypointManager();
+            waypointNavigator = new WaypointNavigator(waypointManager);
+
+            // Initialize audio feedback manager (now with waypointNavigator for beacon targeting).
+            // No preference preload needed — the loops read PreferencesManager live (single source of truth).
+            audioManager = new AudioLoopManager(entityNavigator, entityCache, waypointNavigator);
 
             // Initialize navigation state manager (battle/dialogue suppression)
             navigationState = new NavigationStateManager(audioManager, entityNavigator);
@@ -97,9 +110,7 @@ namespace FFIV_ScreenReader.Core
             entityNavFacade = new EntityNavigationFacade(entityNavigator, navigationState);
             entityNavFacade.LoadPreferences();
 
-            // Initialize waypoint system
-            waypointManager = new WaypointManager();
-            waypointNavigator = new WaypointNavigator(waypointManager);
+            // Initialize waypoint facade
             waypointFacade = new WaypointFacade(waypointManager, waypointNavigator);
 
             // Initialize input manager
@@ -113,6 +124,7 @@ namespace FFIV_ScreenReader.Core
 
             // Apply manual Harmony patches for popups, save/load dialogs, naming, vehicle state, main menu, and menu state transitions
             var harmony = new HarmonyLib.Harmony("FFIV_ScreenReader.ManualPatches");
+            InputPassthroughPatches.ApplyPatches(harmony);
             PopupPatches.ApplyPatches(harmony);
             SaveLoadPatches.ApplyPatches(harmony);
             NamingPatches.ApplyPatches(harmony);
@@ -130,8 +142,6 @@ namespace FFIV_ScreenReader.Core
             // Patch game state transitions (map changes) - event-driven, no polling
             GameStatePatches.ApplyPatches(harmony);
 
-            // Patch entity interactions for immediate entity refresh (treasure chest, dialogue end)
-            TryPatchEntityInteractions(harmony);
 
             // Initialize fade detection for wall tone suppression during map transitions
             MapTransitionPatches.Initialize(harmony);
@@ -153,7 +163,10 @@ namespace FFIV_ScreenReader.Core
             // Stop audio loops
             audioManager?.Shutdown();
 
-            // Shutdown sound player (closes waveOut handles, frees unmanaged memory)
+            // Shutdown SDL3 gamepad/keyboard input
+            GamepadManager.Shutdown();
+
+            // Shutdown sound player (destroys SDL audio streams + device, frees scratch buffer)
             SoundPlayer.Shutdown();
 
             CoroutineManager.CleanupAll();
@@ -176,65 +189,6 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
-        /// <summary>
-        /// Patches entity interaction methods for immediate entity refresh.
-        /// Triggers rescan when treasure chests are opened or dialogue ends.
-        /// </summary>
-        private void TryPatchEntityInteractions(HarmonyLib.Harmony harmony)
-        {
-            try
-            {
-                // Patch FieldTresureBox.Open() - triggers entity refresh when chest is opened
-                Type treasureBoxType = typeof(FieldTresureBox);
-                var openMethod = treasureBoxType.GetMethod("Open", BindingFlags.Public | BindingFlags.Instance);
-                var openPostfix = typeof(Patches.EntityInteractionPatches).GetMethod("TreasureBox_Open_Postfix", BindingFlags.Public | BindingFlags.Static);
-
-                if (openMethod != null && openPostfix != null)
-                {
-                    harmony.Patch(openMethod, postfix: new HarmonyMethod(openPostfix));
-                }
-                else
-                {
-                    LoggerInstance.Warning($"FieldTresureBox.Open patch failed. Method: {openMethod != null}, Postfix: {openPostfix != null}");
-                }
-
-                // Patch MessageWindowManager.Close() - triggers entity refresh when dialogue ends
-                Type messageManagerType = typeof(MessageWindowManager);
-                var closeMethod = messageManagerType.GetMethod("Close", BindingFlags.Public | BindingFlags.Instance);
-                var closePostfix = typeof(Patches.EntityInteractionPatches).GetMethod("MessageWindow_Close_Postfix", BindingFlags.Public | BindingFlags.Static);
-
-                if (closeMethod != null && closePostfix != null)
-                {
-                    harmony.Patch(closeMethod, postfix: new HarmonyMethod(closePostfix));
-                }
-                else
-                {
-                    LoggerInstance.Warning($"MessageWindowManager.Close patch failed. Method: {closeMethod != null}, Postfix: {closePostfix != null}");
-                }
-            }
-            catch (Exception ex)
-            {
-                LoggerInstance.Error($"Error patching entity interactions: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Schedules an entity refresh after a 1-frame delay.
-        /// Called by interaction hooks (treasure chest, dialogue end) to update entity states.
-        /// </summary>
-        internal void ScheduleEntityRefresh()
-        {
-            CoroutineManager.StartManaged(EntityRefreshCoroutine());
-        }
-
-        private IEnumerator EntityRefreshCoroutine()
-        {
-            // Wait one frame for game state to fully update
-            yield return null;
-
-            // Rescan entities to pick up state changes (e.g., chest opened)
-            entityCache.ForceScan();
-        }
 
         /// <summary>
         /// Called when a new scene is loaded.
@@ -339,6 +293,82 @@ namespace FFIV_ScreenReader.Core
         internal void ToggleWallTones() => audioManager.ToggleWallTones();
         internal void ToggleFootsteps() => audioManager.ToggleFootsteps();
         internal void ToggleAudioBeacons() => audioManager.ToggleAudioBeacons();
+
+        /// <summary>
+        /// Forces the audio beacon to ping immediately on the next loop iteration.
+        /// Called by pathfinding commands when beacon navigation mode is enabled.
+        /// </summary>
+        internal void RestartBeacon() => audioManager?.RestartBeacon();
+
+        /// <summary>
+        /// Toggles stick click normalization mode.
+        /// When on, L3/R3 fall through to the game (auto-dash, encounter toggle);
+        /// mod functions move to mod mode.
+        /// </summary>
+        internal void ToggleStickClickNormalization()
+        {
+            enableStickClickNormalization = !enableStickClickNormalization;
+            PreferencesManager.SaveStickClickNormalization(enableStickClickNormalization);
+            SpeakText(string.Format(T("Stick click normalization {0}"),
+                enableStickClickNormalization ? T("on") : T("off")), interrupt: true);
+        }
+
+        /// <summary>
+        /// Whether stick click normalization is enabled (L3/R3 pass through to game).
+        /// </summary>
+        public static bool StickClickNormalizationEnabled =>
+            Instance?.enableStickClickNormalization ?? false;
+
+        /// <summary>
+        /// Toggles the "Beacon Destination Announcement" feature. When on, restarting the
+        /// audio beacon at the current nav target also re-speaks the destination name.
+        /// </summary>
+        internal void ToggleAnnounceOnBeaconRestart()
+        {
+            bool newValue = !PreferencesManager.AnnounceOnBeaconRestartEnabled;
+            PreferencesManager.SaveAnnounceOnBeaconRestart(newValue);
+            SpeakText(string.Format(T("Beacon destination announcement {0}"),
+                newValue ? T("on") : T("off")), interrupt: true);
+        }
+
+        /// <summary>
+        /// Whether restarting the beacon should also re-speak the current destination.
+        /// </summary>
+        public static bool AnnounceOnBeaconRestartEnabled => PreferencesManager.AnnounceOnBeaconRestartEnabled;
+
+        /// <summary>
+        /// Toggles the "Auto Detail" feature. When on, focusing an item in the item menu or a
+        /// shop entry automatically reads the detail normally reached with the details key
+        /// (equip compatibility for items, description and MP cost in shops), queued after the
+        /// name so it never interrupts it.
+        /// </summary>
+        internal void ToggleAutoDetail()
+        {
+            bool newValue = !PreferencesManager.AutoDetailEnabled;
+            PreferencesManager.SaveAutoDetail(newValue);
+            SpeakText(string.Format(T("Auto detail {0}"),
+                newValue ? T("on") : T("off")), interrupt: true);
+        }
+
+        /// <summary>
+        /// Whether item/shop focus should automatically read the details-key detail.
+        /// </summary>
+        public static bool AutoDetailEnabled => PreferencesManager.AutoDetailEnabled;
+
+        /// <summary>
+        /// Whether the EXP counter sound plays while the EXP bar animates on battle results.
+        /// </summary>
+        public static bool ExpCounterEnabled => PreferencesManager.ExpCounterEnabled;
+
+        /// <summary>
+        /// Toggles the "EXP Counter Sound" feature. Prefs-backed; the mod menu re-announces the
+        /// new state, so no extra speech here (mirrors the FF5 mod).
+        /// </summary>
+        public static void ToggleExpCounter()
+        {
+            bool newValue = !PreferencesManager.ExpCounterEnabled;
+            PreferencesManager.SaveExpCounter(newValue);
+        }
 
         // Public static accessors for filter settings (used by ModMenu, BattleState)
         public static bool PathfindingFilterEnabled => Instance?.navigationState?.FilterByPathfinding ?? false;

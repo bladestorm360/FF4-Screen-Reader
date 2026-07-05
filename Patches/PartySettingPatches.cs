@@ -139,6 +139,7 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.members.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

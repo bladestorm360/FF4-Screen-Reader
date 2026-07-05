@@ -7,6 +7,7 @@ using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
 using MelonLoader;
 using UnityEngine;
+using FFIV_ScreenReader.Utils;
 using FieldPlayerController = Il2CppLast.Map.FieldPlayerController;
 using MapRouteSearcher = Il2Cpp.MapRouteSearcher;
 

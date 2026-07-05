@@ -287,6 +287,7 @@ namespace FFIV_ScreenReader.Patches
 
                 if (!string.IsNullOrWhiteSpace(characterInfo))
                 {
+                    characterInfo = FFIV_ScreenReader.Utils.MenuPosition.Format(characterInfo, index, contents.Count);
                     FFIV_ScreenReaderMod.SpeakText(characterInfo);
                 }
             }

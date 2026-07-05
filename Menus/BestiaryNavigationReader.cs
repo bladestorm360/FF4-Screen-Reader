@@ -170,7 +170,7 @@ namespace FFIV_ScreenReader.Menus
             }
 
             var entry = statBuffer[currentIndex];
-            FFIV_ScreenReaderMod.SpeakText(entry.ToString(), true);
+            FFIV_ScreenReaderMod.SpeakText(FFIV_ScreenReader.Utils.MenuPosition.Format(entry.ToString(), currentIndex, statBuffer.Count), true);
         }
 
         /// <summary>
@@ -188,7 +188,7 @@ namespace FFIV_ScreenReader.Menus
 
             var entry = statBuffer[currentIndex];
             string groupName = GetGroupDisplayName(entry.Group);
-            FFIV_ScreenReaderMod.SpeakText($"{groupName}. {entry}", true);
+            FFIV_ScreenReaderMod.SpeakText(FFIV_ScreenReader.Utils.MenuPosition.Format($"{groupName}. {entry}", currentIndex, statBuffer.Count), true);
         }
 
         /// <summary>

@@ -29,7 +29,7 @@ namespace FFIV_ScreenReader.Patches
         public static bool ShouldSuppress()
         {
             // All registered menu states (Battle, Shop, Item, Equipment, Ability, Config, Status, Party, Title)
-            if (MenuStateRegistry.IsAnyActive()) return true;
+            if (MenuStateRegistry.AnyActive()) return true;
 
             // External states (not managed by MenuStateRegistry)
             if (SaveLoadMenuState.IsActive) return true;

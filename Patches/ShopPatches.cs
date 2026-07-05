@@ -57,7 +57,12 @@ namespace FFIV_ScreenReader.Patches
     /// </summary>
     public static class ShopDetailsAnnouncer
     {
-        public static void AnnounceCurrentItemDetails()
+        /// <param name="interrupt">
+        /// When true (the details key), the announcement interrupts current speech.
+        /// When false (Auto Detail on focus), it is queued after the item name/price so it
+        /// never cuts off the name announcement.
+        /// </param>
+        public static void AnnounceCurrentItemDetails(bool interrupt = true)
         {
             try
             {
@@ -77,7 +82,7 @@ namespace FFIV_ScreenReader.Patches
 
                 if (!string.IsNullOrEmpty(announcement))
                 {
-                    FFIV_ScreenReaderMod.SpeakText(announcement);
+                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: interrupt);
                 }
             }
             catch (Exception ex)
@@ -131,6 +136,7 @@ namespace FFIV_ScreenReader.Patches
                 if (string.IsNullOrEmpty(commandText))
                     return;
 
+                commandText = FFIV_ScreenReader.Utils.MenuPosition.Format(commandText, index, __instance.contentList.Count);
                 CoroutineManager.StartManaged(DelayedAnnounceShopCommand(commandText));
             }
             catch (Exception ex)
@@ -172,6 +178,8 @@ namespace FFIV_ScreenReader.Patches
                 // Try to find the currently selected item by searching for active ShopListMainContentController
                 string itemName = null;
                 string price = null;
+                int shopItemIndex = -1;
+                int shopItemCount = 0;
 
                 var shopListController = UnityEngine.Object.FindObjectOfType<ShopListMainContentController>();
                 if (shopListController != null)
@@ -185,6 +193,8 @@ namespace FFIV_ScreenReader.Patches
                         if (cursor != null && productList != null)
                         {
                             int index = cursor.Index;
+                            shopItemIndex = index;
+                            shopItemCount = productList.Count;
                             if (index >= 0 && index < productList.Count)
                             {
                                 var item = productList[index];
@@ -210,6 +220,7 @@ namespace FFIV_ScreenReader.Patches
                 if (!string.IsNullOrEmpty(itemName))
                 {
                     string announcement = string.IsNullOrEmpty(price) ? itemName : $"{itemName}, {price}";
+                    announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, shopItemIndex, shopItemCount);
 
                     // Deduplicate by content
                     if (AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, itemName))
@@ -277,6 +288,15 @@ namespace FFIV_ScreenReader.Patches
         {
             yield return null; // Wait one frame for UI to update
             FFIV_ScreenReaderMod.SpeakText($"{itemText}");
+
+            // Auto Detail: queue the description + MP cost normally reached with the details key,
+            // after the name/price (interrupt: false) so it never cuts off the name. This coroutine
+            // is only started after the shop-item content dedup passes, so it fires once per focused
+            // item (same-index debounce).
+            if (PreferencesManager.AutoDetailEnabled)
+            {
+                ShopDetailsAnnouncer.AnnounceCurrentItemDetails(interrupt: false);
+            }
         }
 
         private static IEnumerator DelayedAnnounceQuantity(string quantityText)

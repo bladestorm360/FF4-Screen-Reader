@@ -22,6 +22,10 @@ namespace FFIV_ScreenReader.Patches
         private const int STATE_PLAYER = 3;
         private const int STATE_BATTLE = 13;
 
+        // Config menu bestiary states (FF4 SubSceneManagerMainGame): MenuLibraryUi=17, MenuLibraryInfo=18.
+        private const int STATE_MENU_LIBRARY_UI = 17;
+        private const int STATE_MENU_LIBRARY_INFO = 18;
+
         private static int lastAnnouncedMapId = -1;
 
         public static void ApplyPatches(HarmonyLib.Harmony harmony)
@@ -70,9 +74,28 @@ namespace FFIV_ScreenReader.Patches
                         BattleState.Reset();
                     }
 
+                    // If we were in config bestiary, handle exit
+                    if (ConfigBestiaryStateHandler.WasInConfigBestiary)
+                    {
+                        ConfigBestiaryStateHandler.HandleExit();
+                    }
+
                     // Check for map transition
                     CheckMapTransition();
                 }
+                // Config menu bestiary states
+                else if (stateValue == STATE_MENU_LIBRARY_UI || stateValue == STATE_MENU_LIBRARY_INFO)
+                {
+                    ConfigBestiaryStateHandler.HandleStateChange(stateValue);
+                }
+                // Exiting config bestiary to another non-field state
+                else if (ConfigBestiaryStateHandler.WasInConfigBestiary)
+                {
+                    ConfigBestiaryStateHandler.HandleExit();
+                }
+
+                // Entity state updates (NPCs respawned, chests reset, etc.) are now picked
+                // up by the delta scan on the next cycle — no STATE_PLAYER refresh needed.
             }
             catch (Exception ex)
             {

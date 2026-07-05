@@ -70,6 +70,7 @@ namespace FFIV_ScreenReader.Core
             }
 
             waypointNavigator.CycleNext();
+            NavigationTargetTracker.MarkWaypoint();
             FFIV_ScreenReaderMod.SpeakText(waypointNavigator.FormatCurrentWaypoint());
         }
 
@@ -87,6 +88,7 @@ namespace FFIV_ScreenReader.Core
             }
 
             waypointNavigator.CyclePrevious();
+            NavigationTargetTracker.MarkWaypoint();
             FFIV_ScreenReaderMod.SpeakText(waypointNavigator.FormatCurrentWaypoint());
         }
 
@@ -96,6 +98,8 @@ namespace FFIV_ScreenReader.Core
             if (mapId == null) return;
 
             waypointNavigator.CycleNextCategory(mapId);
+            if (waypointNavigator.Count > 0)
+                NavigationTargetTracker.MarkWaypoint();
             FFIV_ScreenReaderMod.SpeakText(waypointNavigator.GetCategoryAnnouncement());
         }
 
@@ -105,6 +109,8 @@ namespace FFIV_ScreenReader.Core
             if (mapId == null) return;
 
             waypointNavigator.CyclePreviousCategory(mapId);
+            if (waypointNavigator.Count > 0)
+                NavigationTargetTracker.MarkWaypoint();
             FFIV_ScreenReaderMod.SpeakText(waypointNavigator.GetCategoryAnnouncement());
         }
 
@@ -120,10 +126,21 @@ namespace FFIV_ScreenReader.Core
                 return;
             }
 
+            NavigationTargetTracker.MarkWaypoint();
+
             var playerController = GameObjectCache.Get<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
                 FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
+                return;
+            }
+
+            // Beacon-mode pathfind: just restart the beacon to re-ping toward this waypoint.
+            if (AudioLoopManager.AudioBeaconsEnabled)
+            {
+                FFIV_ScreenReaderMod.Instance?.RestartBeacon();
+                if (PreferencesManager.AnnounceOnBeaconRestartEnabled)
+                    FFIV_ScreenReaderMod.SpeakText(waypointNavigator.FormatCurrentWaypoint());
                 return;
             }
 
@@ -215,14 +232,14 @@ namespace FFIV_ScreenReader.Core
                     {
                         waypointNavigator.RefreshList(GetCurrentMapIdString());
                         waypointNavigator.ClearSelection();
-                        ConfirmationDialog.CloseWithAnnouncement(string.Format(T("Deleted {0}"), name));
+                        FFIV_ScreenReaderMod.SpeakText(string.Format(T("Deleted {0}"), name));
                     }
                     else
                     {
-                        ConfirmationDialog.CloseWithAnnouncement(T("Failed to delete waypoint"));
+                        FFIV_ScreenReaderMod.SpeakText(T("Failed to delete waypoint"));
                     }
                 },
-                () => ConfirmationDialog.CloseWithAnnouncement(T("Canceled"))
+                () => { }
             );
         }
 
@@ -250,12 +267,12 @@ namespace FFIV_ScreenReader.Core
                             int cleared = waypointManager.ClearMapWaypoints(mapId);
                             waypointNavigator.RefreshList(mapId);
                             waypointNavigator.ClearSelection();
-                            ConfirmationDialog.CloseWithAnnouncement(string.Format(T("Cleared {0} waypoints"), cleared));
+                            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Cleared {0} waypoints"), cleared));
                         },
-                        () => ConfirmationDialog.CloseWithAnnouncement(T("Canceled"))
+                        () => { }
                     );
                 },
-                () => ConfirmationDialog.CloseWithAnnouncement(T("Canceled"))
+                () => { }
             );
         }
     }

@@ -33,7 +33,18 @@ namespace FFIV_ScreenReader.Patches
                 if (userDataManager == null)
                     return;
 
-                var corpsList = userDataManager.GetCorpsListClone();
+                // Use display-order corps list to match UI cursor position
+                Il2CppSystem.Collections.Generic.List<Il2CppLast.Data.User.Corps> corpsList = null;
+                try
+                {
+                    corpsList = Il2CppLast.Map.FieldController.GetCorpsListCloneWithApparentOrder();
+                }
+                catch { }
+
+                // Fallback to data-order if FieldController not ready
+                if (corpsList == null)
+                    corpsList = userDataManager.GetCorpsListClone();
+
                 if (corpsList == null || index < 0 || index >= corpsList.Count)
                     return;
 

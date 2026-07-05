@@ -53,6 +53,7 @@ namespace FFIV_ScreenReader.Utils
         public const string GAMEOVER_SELECT = "GameOverSelect";
         public const string GAMEOVER_LOAD = "GameOverLoad";
         public const string SAVE_LOAD_POPUP_BUTTON = "SaveLoadPopupButton";
+        public const string COMMON_POPUP_BUTTON = "CommonPopupButton";
 
         // Title menu
         public const string TITLE_MENU_COMMAND = "TitleMenu.Command";

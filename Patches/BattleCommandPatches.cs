@@ -79,6 +79,7 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                commandName = FFIV_ScreenReader.Utils.MenuPosition.Format(commandName, index, __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
             catch (Exception ex)
@@ -202,6 +203,7 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -292,6 +294,7 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

@@ -124,6 +124,7 @@ namespace FFIV_ScreenReader.Patches
                 // Set ability menu state active
                 MenuStates.Ability.SetActive();
 
+                commandName = FFIV_ScreenReader.Utils.MenuPosition.Format(commandName, index, __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(commandName);
             }
             catch (Exception ex)
@@ -228,6 +229,7 @@ namespace FFIV_ScreenReader.Patches
                 // Set ability menu state active
                 MenuStates.Ability.SetActive();
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)
@@ -258,7 +260,20 @@ namespace FFIV_ScreenReader.Patches
                 if (index < 0)
                     return;
 
-                var selectedController = SelectContentHelper.TryGetItem(__instance.contentList, index);
+                // Use targetContents (display/layout order) instead of contentList (data order)
+                // to get the correct character matching the cursor position
+                ItemTargetSelectContentController selectedController = null;
+                var targetList = targetContents.TryCast<Il2CppSystem.Collections.Generic.List<ItemTargetSelectContentController>>();
+                if (targetList != null && index >= 0 && index < targetList.Count)
+                {
+                    selectedController = targetList[index];
+                }
+                else
+                {
+                    // Fallback to contentList if targetContents is not a List
+                    selectedController = SelectContentHelper.TryGetItem(__instance.contentList, index);
+                }
+
                 if (selectedController == null || selectedController.CurrentData == null)
                     return;
 
@@ -282,6 +297,7 @@ namespace FFIV_ScreenReader.Patches
                 // Set ability menu state active
                 MenuStates.Ability.SetActive();
 
+                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, targetList != null ? targetList.Count : __instance.contentList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
             }
             catch (Exception ex)

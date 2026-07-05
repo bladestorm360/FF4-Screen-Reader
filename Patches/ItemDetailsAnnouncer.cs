@@ -25,7 +25,12 @@ namespace FFIV_ScreenReader.Patches
         /// Announces which party members can equip the currently selected item.
         /// Only announces for weapons and armor, silent for other items.
         /// </summary>
-        public static void AnnounceEquipRequirements()
+        /// <param name="interrupt">
+        /// When true (the details key), the announcement interrupts current speech.
+        /// When false (Auto Detail on focus), it is queued after the item name so it never
+        /// cuts off the name announcement.
+        /// </param>
+        public static void AnnounceEquipRequirements(bool interrupt = true)
         {
             try
             {
@@ -83,7 +88,7 @@ namespace FFIV_ScreenReader.Patches
                 string announcement = BuildAnnouncement(canEquipNames);
                 if (!string.IsNullOrEmpty(announcement))
                 {
-                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
+                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: interrupt);
                 }
             }
             catch (Exception ex)

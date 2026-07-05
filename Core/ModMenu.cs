@@ -78,6 +78,40 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
+        private class EnumItem : MenuItem
+        {
+            private readonly string[] options;
+            private readonly Func<int> getter;
+            private readonly Action<int> setter;
+
+            public EnumItem(string name, string[] options, Func<int> getter, Action<int> setter)
+            {
+                Name = name;
+                this.options = options;
+                this.getter = getter;
+                this.setter = setter;
+            }
+
+            public override string GetValueString()
+            {
+                int index = getter();
+                if (index >= 0 && index < options.Length)
+                    return options[index];
+                return T("Unknown");
+            }
+
+            public override void Adjust(int delta)
+            {
+                int current = getter();
+                int newValue = current + delta;
+                if (newValue < 0) newValue = options.Length - 1;
+                if (newValue >= options.Length) newValue = 0;
+                setter(newValue);
+            }
+
+            public override void Toggle() => Adjust(1);
+        }
+
         private class SectionHeader : MenuItem
         {
             public SectionHeader(string name)
@@ -126,6 +160,18 @@ namespace FFIV_ScreenReader.Core
                 new ToggleItem(T("Audio Beacons"),
                     () => AudioLoopManager.AudioBeaconsEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.ToggleAudioBeacons()),
+                new ToggleItem(T("Beacon Destination Announcement"),
+                    () => FFIV_ScreenReaderMod.AnnounceOnBeaconRestartEnabled,
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleAnnounceOnBeaconRestart()),
+                new ToggleItem(T("Stick Click Normalization"),
+                    () => FFIV_ScreenReaderMod.StickClickNormalizationEnabled,
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleStickClickNormalization()),
+                new ToggleItem(T("Menu Position Announcements"),
+                    () => PreferencesManager.MenuPositionAnnouncementsEnabled,
+                    () => PreferencesManager.SaveMenuPositionAnnouncements(!PreferencesManager.MenuPositionAnnouncementsEnabled)),
+                new ToggleItem(T("Auto Detail"),
+                    () => FFIV_ScreenReaderMod.AutoDetailEnabled,
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleAutoDetail()),
 
                 // Volume Controls section
                 new SectionHeader(T("Volume Controls")),
@@ -154,6 +200,26 @@ namespace FFIV_ScreenReader.Core
                     () => EntityNavigationFacade.ToLayerFilterEnabled,
                     () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleToLayerFilter()),
 
+                // Battle Results section
+                new SectionHeader(T("Battle Results")),
+                new ToggleItem(T("EXP Counter Sound"),
+                    () => FFIV_ScreenReaderMod.ExpCounterEnabled,
+                    FFIV_ScreenReaderMod.ToggleExpCounter),
+                new VolumeItem(T("EXP Counter Volume"),
+                    () => PreferencesManager.ExpCounterVolume,
+                    PreferencesManager.SetExpCounterVolume),
+
+                // Battle Settings section
+                new SectionHeader(T("Battle Settings")),
+                new EnumItem(T("Enemy HP Display"),
+                    new[] { T("Numbers"), T("Percentage"), T("Hidden") },
+                    () => PreferencesManager.EnemyHPDisplay,
+                    PreferencesManager.SetEnemyHPDisplay),
+                new EnumItem(T("Multi-hit Damage"),
+                    new[] { T("Total only"), T("With hit count") },
+                    () => PreferencesManager.DamageDisplay,
+                    PreferencesManager.SetDamageDisplay),
+
                 // Close Menu action
                 new ActionItem(T("Close Menu"), Close)
             };
@@ -173,12 +239,10 @@ namespace FFIV_ScreenReader.Core
             if (items != null && items.Count > 1 && items[0] is SectionHeader)
                 currentIndex = 1;
 
-            // Initialize key states to current pressed state to prevent keys that opened the menu from triggering actions
-            WindowsFocusHelper.InitializeKeyStates(new int[] { WindowsFocusHelper.VK_ESCAPE, WindowsFocusHelper.VK_F8, WindowsFocusHelper.VK_UP, WindowsFocusHelper.VK_DOWN, WindowsFocusHelper.VK_LEFT, WindowsFocusHelper.VK_RIGHT, WindowsFocusHelper.VK_RETURN, WindowsFocusHelper.VK_SPACE });
-
-            WindowsFocusHelper.StealFocus("FFIV_ModMenu");
-
-            // Announce "Mod menu" then first item after a short delay
+            // Announce that the menu opened (both F8 and the controller Start button reach here),
+            // then the first item after a short delay. The menu is virtual — game input is
+            // suppressed via ControllerRouter.SuppressGameInput + InputPassthroughPatches (no
+            // window stealing), so we speak the title ourselves instead of relying on NVDA.
             FFIV_ScreenReaderMod.SpeakText(T("Mod menu"), interrupt: true);
             CoroutineManager.StartManaged(AnnounceFirstItemDelayed());
         }
@@ -203,13 +267,15 @@ namespace FFIV_ScreenReader.Core
             if (!IsOpen) return;
 
             IsOpen = false;
-            WindowsFocusHelper.RestoreFocus();
+            // Announce on every close path (keyboard Escape/F8, "Close Menu" item, controller B/Start).
+            // Game input is restored automatically — ControllerRouter.SuppressGameInput becomes false.
+            FFIV_ScreenReaderMod.SpeakText(T("Mod menu closed"), interrupt: true);
         }
 
         /// <summary>
-        /// Handles input when the mod menu is open.
-        /// Uses Windows GetAsyncKeyState API for input detection, which works
-        /// even when the game window doesn't have focus.
+        /// Handles input when the mod menu is open. Reads keys via GamepadManager
+        /// (SDL3 + GetAsyncKeyState — hardware state); game input is suppressed by
+        /// InputPassthroughPatches + Input.ResetInputAxes while open. No window focus stealing.
         /// Returns true if input was consumed (menu is open).
         /// </summary>
         public static bool HandleInput()
@@ -218,42 +284,42 @@ namespace FFIV_ScreenReader.Core
             if (items == null || items.Count == 0) return false;
 
             // Escape or F8 to close
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_ESCAPE) || WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_F8))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.Escape) || GamepadManager.IsKeyCodePressed(KeyCode.F8))
             {
                 Close();
                 return true;
             }
 
             // Up arrow - navigate to previous item
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_UP))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.UpArrow))
             {
                 NavigatePrevious();
                 return true;
             }
 
             // Down arrow - navigate to next item
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_DOWN))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.DownArrow))
             {
                 NavigateNext();
                 return true;
             }
 
             // Left arrow - decrease value
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_LEFT))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.LeftArrow))
             {
                 AdjustCurrentItem(-1);
                 return true;
             }
 
             // Right arrow - increase value
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_RIGHT))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.RightArrow))
             {
                 AdjustCurrentItem(1);
                 return true;
             }
 
             // Enter or Space - toggle/activate
-            if (WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_RETURN) || WindowsFocusHelper.IsKeyDown(WindowsFocusHelper.VK_SPACE))
+            if (GamepadManager.IsKeyCodePressed(KeyCode.Return) || GamepadManager.IsKeyCodePressed(KeyCode.Space))
             {
                 ToggleCurrentItem();
                 return true;
@@ -262,7 +328,7 @@ namespace FFIV_ScreenReader.Core
             return true; // Consume all input while menu is open
         }
 
-        private static void NavigateNext()
+        internal static void NavigateNext()
         {
             int startIndex = currentIndex;
             do
@@ -280,7 +346,7 @@ namespace FFIV_ScreenReader.Core
             AnnounceCurrentItem();
         }
 
-        private static void NavigatePrevious()
+        internal static void NavigatePrevious()
         {
             int startIndex = currentIndex;
             do
@@ -298,7 +364,7 @@ namespace FFIV_ScreenReader.Core
             AnnounceCurrentItem();
         }
 
-        private static void AdjustCurrentItem(int delta)
+        internal static void AdjustCurrentItem(int delta)
         {
             if (currentIndex < 0 || currentIndex >= items.Count) return;
 
@@ -309,7 +375,7 @@ namespace FFIV_ScreenReader.Core
             AnnounceCurrentItem();
         }
 
-        private static void ToggleCurrentItem()
+        internal static void ToggleCurrentItem()
         {
             if (currentIndex < 0 || currentIndex >= items.Count) return;
 
@@ -341,7 +407,27 @@ namespace FFIV_ScreenReader.Core
                 announcement = $"{item.Name}: {value}";
             }
 
+            var (index, count) = NavigablePosition();
+            announcement = MenuPosition.Format(announcement, index, count);
+
             FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: interrupt);
+        }
+
+        /// <summary>
+        /// Position of the current item among the navigable (non-header) items. Section headers are
+        /// silently skipped during navigation, so the user hears "(N of total settings)" — not counting
+        /// the invisible headers.
+        /// </summary>
+        private static (int index, int count) NavigablePosition()
+        {
+            int count = 0, index = -1;
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i] is SectionHeader) continue;
+                if (i == currentIndex) index = count;
+                count++;
+            }
+            return (index, count);
         }
 
     }

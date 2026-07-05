@@ -2,6 +2,9 @@
 **/bin/
 **/obj/
 **/Releases/
+**/docs/scripts/
+**/scripts/
 build_log.txt
 nul
 NUL
+NUL.*

@@ -13,7 +13,7 @@ Glob pattern="*.log" path="D:\Games\steamlibrary\steamapps\common\final fantasy 
 
 ### State Management (`Core/MenuState.cs`)
 `MenuStateRegistry` manages named boolean states. `SimpleMenuState` (reusable) for Ability/Config/Status/Party/Title. Custom classes for Battle/Shop/Item/Equipment (unique logic).
-- `MenuStates.Ability.SetActive()`, `MenuStateRegistry.IsAnyActive()` for suppression
+- `MenuStates.Ability.SetActive()`, `MenuStateRegistry.AnyActive()` for suppression
 - `ClearAllMenuStates()` on scene load
 - Hooks: `SetActive(false)`, `*Init` methods, `SetFocus(true)`
 
@@ -47,6 +47,12 @@ For two-part abilities: `RecordAction()`, `HasRecentActionForActor()`, `IsRedund
 | Two-part ability dupes | `GlobalBattleMessageTracker` |
 | Same-name enemy attacks | Object-based deduplication with `BattleActData` |
 | Map transition polling | `GameStatePatches` hooks `ChangeState` |
+| Corps ordering mismatch | `GetCorpsListCloneWithApparentOrder()` for display-order row info |
+| Overwrite popup buttons silent | Patch `CommonPopup.UpdateCommand` (gated on `SaveLoadMenuState.IsActive`); generic cursor hooks blocked by SaveLoadMenuState |
+| Save overwrite silent | `OverwriteConfirmInit_Postfix` clears `SaveLoadMenuState` so generic popup system handles button navigation |
+| Cure wrong target | `targetContents` param (display order) instead of `contentList` (data order) |
+| Opening map silent | Known issue — first-run announce causes "map 0" bugs, reverted |
+| Stale entities after events | `ScheduleEntityRefresh()` on `STATE_PLAYER` transition |
 | Wall tones on victory | Reset battle state on scene transition only |
 | Defeat message silent | Patch `BattleCommandMessageController.SetMessage` |
 | Game Over popup silent | Patch `GameOverSelectPopup/LoadPopup.UpdateCommand` |
@@ -60,6 +66,7 @@ For two-part abilities: `RecordAction()`, `HasRecentActionForActor()`, `IsRedund
 | `FieldTresureBox.Open()` | Chest opened |
 | `MessageWindowManager.Close()` | Dialogue ends |
 | `MainGame.set_FieldReady` | Map loaded |
+| `ChangeState(STATE_PLAYER)` | Event/cutscene/battle ends |
 
 Pattern: `ScheduleEntityRefresh()` → one-frame delay → `ForceScan()`
 
@@ -109,6 +116,12 @@ Extracted from main mod class. Dependencies: `EntityNavigator` (beacon targeting
 16-bit audio (32KB buffers), volume-baked tone generation, shared `WriteWavHeader()` helper, IL2CPP-safe loops (`Time.time` vs `WaitForSeconds`).
 `CoroutineManager.StopManaged()` with wrapper tracking. Max 20 concurrent.
 
+### EXP Counter Sound (battle results)
+Rapid ticking beep while the EXP tally animates on the victory screen. Toggle `ExpCounter` (default **true**) + `ExpCounterVolume` (50) in `PreferencesManager`; "Battle Results" section in `ModMenu`. Ported from FF5.
+- **Audio:** `SoundPlayer.PlayExpCounter/TopUpExpCounter/StopExpCounter` on a dedicated `AudioEngine.Stream.Counter`. Beep = `ToneGenerator.GenerateLandingPing` (2000 Hz, 50 ms beep + 50 ms silence) fed to a looping SDL stream, topped up each 100 ms tick.
+- **Hooks (`Patches/BattleResultPatches.cs`):** START on `ResultMenuController.ShowPointsInit` when `ExpCounterEnabled && data.GetExp>0`. Completion via `MonitorExpCounterAnimation` coroutine walking the KeyInput result graph (identical offsets to FF5): `instance +0x20 pointController → +0x30 characterListConteroller → +0x20 contentList (count @+0x18); perormanceEndCount @+0x30`; done when `perormanceEndCount >= contentList.Count`. STOP safety nets on `ShowStatusUpInit` / `ShowGetAbilitysInit` / `ShowGetItemsInit` / `EndWaitInit` (guaranteed backstop — results always dismissed through `EndWaitInit`). `BattleResultState.ExpCounterPlaying` guards the single-fire stop. Toggle OFF = stream never touched.
+- FF4 has fixed jobs / no ABP, so FF5's `JobExp`/ABP branches were dropped — character EXP only.
+
 ### Vehicle Names
 `TransportationInfo.MessageId` → `MessageManager.GetMessage()` for specific names. Falls back to type-based generic.
 
@@ -119,7 +132,7 @@ User-defined map markers independent of entity scanner. Ported from FF5.
 - `WaypointEntity` - Standalone class (not NavigableEntity), has own category system
 - `WaypointManager` - CRUD operations, Newtonsoft.Json persistence to `UserData/waypoints.json`
 - `WaypointNavigator` - Cycling, category filtering, distance sorting
-- `TextInputWindow` / `ConfirmationDialog` - Windows API focus stealing for modal dialogs
+- `TextInputWindow` / `ConfirmationDialog` - Virtual modal dialogs (keys via GamepadManager; game input suppressed; no focus stealing)
 
 **Categories:** All, Docks, Landmarks, Airship Landings, Miscellaneous
 
@@ -129,12 +142,12 @@ User-defined map markers independent of entity scanner. Ported from FF5.
 | `Core/WaypointManager.cs` | CRUD + JSON serialization |
 | `Core/WaypointNavigator.cs` | Cycling + category filtering |
 | `Field/WaypointEntity.cs` | Data model + formatting |
-| `Core/TextInputWindow.cs` | Text input with focus stealing |
-| `Core/ConfirmationDialog.cs` | Yes/No confirmation dialogs |
+| `Core/TextInputWindow.cs` | Virtual text input (keys via GamepadManager; no focus stealing) |
+| `Core/ConfirmationDialog.cs` | Virtual Yes/No confirmation dialogs (chained prompts; no focus stealing) |
 | `Utils/CollectionHelper.cs` | Distance sorting utilities |
 | `Utils/PlayerPositionHelper.cs` | Player position retrieval |
 
-**Dialog Input Flow:** `InputManager.Update()` checks dialogs first (before `Input.anyKeyDown` early exit) since they use Windows API polling.
+**Dialog Input Flow:** `InputManager.Update()` checks the modals first (`ConfirmationDialog`/`TextInputWindow`/`ModMenu`, each consuming all input when open) before the window-focus gate, so the virtual dialogs keep working even when the game window isn't foreground. Keys are read via `GamepadManager` (SDL3 + GetAsyncKeyState); game input is suppressed via `ControllerRouter.SuppressGameInput` + `InputPassthroughPatches` + `Input.ResetInputAxes` (no window focus stealing).
 
 **Dialog Close Pattern:** Uses `CloseWithDelayedAnnouncement()` to restore focus first, then announce after 0.3s delay (lets NVDA finish window title), then invoke callback after 0.15s pause. Prevents speech interruption from window focus change.
 
@@ -158,6 +171,8 @@ GameOverPopupController: view=0x30 | GameOverPopupView: loadPopup=0x18
 
 ### Save/Load Popup Button Navigation
 `SavePopup.UpdateCommand` patch reads cursor index from `selectCursor` (0x58), deduplicates via `AnnouncementDeduplicator.ShouldAnnounce("SaveLoadPopupButton", index)`, reads button text from `commandList` (0x60) → `CommonCommand.text` (0x18). Single patch covers ALL save/load popups since all controllers use the same `SavePopup` class. `CursorNavigationPatches` has early `SaveLoadMenuState.IsActive` return before `PopupState.ShouldSuppress()` to prevent generic popup system from double-reading buttons.
+
+**Overwrite confirmation** uses `CommonPopup` (not `SavePopup`). `OverwriteConfirmInit_Postfix` clears `SaveLoadMenuState`, letting the generic popup system (`PopupPatches` + `CursorNavigationPatches`) handle both text reading and button navigation. `PopupOpen_Postfix` reads the popup text; cursor hooks (`NextIndex`/`PrevIndex`) call `ReadCurrentButton()` for Yes/No navigation.
 
 ### Utility Classes
 

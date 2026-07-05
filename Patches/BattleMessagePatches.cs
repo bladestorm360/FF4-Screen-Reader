@@ -408,6 +408,11 @@ namespace FFIV_ScreenReader.Patches
             {
                 string targetName = BattleUnitHelper.GetUnitName(data) ?? "Unknown";
 
+                // Consume the multi-hit count captured by CreateHitCount (it fires just before this view).
+                // Reset to 1 so a later damage with no fresh hit count defaults to single.
+                int hitCount = DamageViewUIManager_CreateHitCount_Patch.PendingHitCount;
+                DamageViewUIManager_CreateHitCount_Patch.PendingHitCount = 1;
+
                 string message;
                 if (hitType == Il2CppLast.Systems.HitType.Miss)
                 {
@@ -428,7 +433,11 @@ namespace FFIV_ScreenReader.Patches
                 }
                 else
                 {
-                    message = $"{targetName}: {value} damage";
+                    // HP DAMAGE — optionally prepend the multi-hit "{N}x" multiplier (e.g. "14x1552 damage")
+                    // when the Multi-hit Damage setting is on; otherwise keep just the total.
+                    message = (PreferencesManager.DamageDisplay == 1 && hitCount > 1)
+                        ? $"{targetName}: {hitCount}x{value} damage"
+                        : $"{targetName}: {value} damage";
                 }
 
                 FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
@@ -443,13 +452,18 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(DamageViewUIManager), nameof(DamageViewUIManager.CreateHitCount))]
     public static class DamageViewUIManager_CreateHitCount_Patch
     {
+        // Multi-hit "×N" multiplier captured here, consumed (and reset to 1) by the
+        // CreateDamageView postfix. CreateHitCount fires just before the matching CreateDamageView.
+        // Buffered instead of spoken directly so the count appears inline on the damage line
+        // (e.g. "14x1552 damage") only when the Multi-hit Damage setting is enabled.
+        public static int PendingHitCount = 1;
+
         [HarmonyPostfix]
         public static void Postfix(int hitCountValue, Il2CppLast.Battle.BattleSpriteEntity attack, Il2CppLast.Battle.BattleSpriteEntity target)
         {
             try
             {
-                string message = $"{hitCountValue} hits";
-                FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
+                PendingHitCount = hitCountValue;
             }
             catch (Exception ex)
             {
@@ -722,6 +736,7 @@ namespace FFIV_ScreenReader.Patches
                             // Reset enemy targeting tracking when player is selected
                             AnnouncementDeduplicator.Reset(DEDUP_CONTEXT_ENEMY);
 
+                            announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, playerList.Count);
                             FFIV_ScreenReaderMod.SpeakText(announcement);
                         }
                     }
@@ -828,7 +843,7 @@ namespace FFIV_ScreenReader.Patches
                                     announcement += $" {letter}";
                                 }
 
-                                // Try to get HP from BattleUnitDataInfo
+                                // Append enemy HP according to user preference (Numbers/Percentage/Hidden)
                                 try
                                 {
                                     var unitDataInfo = selectedEnemy.BattleUnitDataInfo;
@@ -837,7 +852,18 @@ namespace FFIV_ScreenReader.Patches
                                         int currentHP = unitDataInfo.Parameter.CurrentHP;
                                         int maxHP = unitDataInfo.Parameter.ConfirmedMaxHp();
 
-                                        announcement += $", HP {currentHP}/{maxHP}";
+                                        switch (PreferencesManager.EnemyHPDisplay)
+                                        {
+                                            case 0: // Numbers (default)
+                                                announcement += $", HP {currentHP}/{maxHP}";
+                                                break;
+                                            case 1: // Percentage
+                                                int pct = maxHP > 0 ? (currentHP * 100 / maxHP) : 0;
+                                                announcement += $", {pct}%";
+                                                break;
+                                            case 2: // Hidden
+                                                break;
+                                        }
                                     }
                                 }
                                 catch
@@ -845,6 +871,7 @@ namespace FFIV_ScreenReader.Patches
                                     // Continue with just the name if HP can't be read
                                 }
 
+                                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, enemyList.Count);
                                 FFIV_ScreenReaderMod.SpeakText(announcement);
                             }
                         }

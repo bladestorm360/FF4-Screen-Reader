@@ -257,24 +257,35 @@ namespace FFIV_ScreenReader.Menus
                 // Add row information (Front Row / Back Row) - useful on all character screens
                 try
                 {
-                    var userDataManager = UserDataManager.Instance();
-                    if (userDataManager != null)
+                    // Use display-order corps list to match UI cursor position
+                    Il2CppSystem.Collections.Generic.List<Il2CppLast.Data.User.Corps> corpsList = null;
+                    try
                     {
-                        var corpsList = userDataManager.GetCorpsListClone();
-                        if (corpsList != null && slotIndex >= 0 && slotIndex < corpsList.Count)
+                        corpsList = Il2CppLast.Map.FieldController.GetCorpsListCloneWithApparentOrder();
+                    }
+                    catch { }
+
+                    // Fallback to data-order if FieldController not ready (battle/early load)
+                    if (corpsList == null)
+                    {
+                        var userDataManager = UserDataManager.Instance();
+                        if (userDataManager != null)
+                            corpsList = userDataManager.GetCorpsListClone();
+                    }
+
+                    if (corpsList != null && slotIndex >= 0 && slotIndex < corpsList.Count)
+                    {
+                        var corps = corpsList[slotIndex];
+                        if (corps != null)
                         {
-                            var corps = corpsList[slotIndex];
-                            if (corps != null)
+                            CorpsId corpsId = corps.Id;
+                            if (corpsId == CorpsId.Front)
                             {
-                                CorpsId corpsId = corps.Id;
-                                if (corpsId == CorpsId.Front)
-                                {
-                                    announcement += ", Front Row";
-                                }
-                                else if (corpsId == CorpsId.Back)
-                                {
-                                    announcement += ", Back Row";
-                                }
+                                announcement += ", Front Row";
+                            }
+                            else if (corpsId == CorpsId.Back)
+                            {
+                                announcement += ", Back Row";
                             }
                         }
                     }

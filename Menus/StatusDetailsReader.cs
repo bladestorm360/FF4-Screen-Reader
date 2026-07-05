@@ -590,6 +590,7 @@ namespace FFIV_ScreenReader.Menus
             {
                 var stat = statList[index];
                 string value = stat.Reader(tracker.CurrentCharacterData);
+                value = FFIV_ScreenReader.Utils.MenuPosition.Format(value, index, statList.Count);
                 FFIV_ScreenReaderMod.SpeakText(value, true);
             }
             catch (Exception ex)

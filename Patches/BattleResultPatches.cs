@@ -1,17 +1,42 @@
 using System;
+using System.Collections;
 using System.Linq;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 using MelonLoader;
+using UnityEngine;
 using Il2CppLast.Data;
 using Il2CppLast.Data.User;
 using Il2CppLast.UI.KeyInput;
 using Il2CppLast.Management;
 using Il2CppLast.Systems;
 using FFIV_ScreenReader.Core;
+using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
 
 namespace FFIV_ScreenReader.Patches
 {
+    /// <summary>
+    /// Shared state for the EXP-counter sound across the battle-result patch classes.
+    /// </summary>
+    internal static class BattleResultState
+    {
+        // True only while the EXP counter sound is actually playing.
+        internal static bool ExpCounterPlaying;
+
+        /// <summary>
+        /// Stops the EXP counter sound if it is currently playing.
+        /// Safe to call from any phase-init postfix; the flag ensures it only fires once.
+        /// </summary>
+        internal static void StopExpCounterIfPlaying()
+        {
+            if (!ExpCounterPlaying) return;
+            ExpCounterPlaying = false;
+            SoundPlayer.StopExpCounter();
+            MelonLogger.Msg("[BattleResult] EXP counter stopped");
+        }
+    }
+
     /// <summary>
     /// Patches for battle result announcements (XP, gil, level ups, stat growth)
     /// TODO: Implement multi-phase victory screen announcements in future update
@@ -240,7 +265,8 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
-    // Patch ShowPointsInit to catch cases where the controller is reused/pooled
+    // Patch ShowPointsInit to catch cases where the controller is reused/pooled, and to start
+    // the EXP counter sound when the EXP tally animation begins.
     [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowPointsInit))]
     public static class ResultMenuController_ShowPointsInit_Patch
     {
@@ -253,11 +279,138 @@ namespace FFIV_ScreenReader.Patches
                 if (data == null) return;
 
                 ResultMenuController_Show_Patch.ProcessBattleResult(data, "ShowPointsInit");
+
+                // Start the EXP counter sound if enabled and this battle awarded EXP.
+                int totalExp = data.GetExp;
+                if (FFIV_ScreenReaderMod.ExpCounterEnabled && totalExp > 0)
+                {
+                    SoundPlayer.PlayExpCounter();
+                    BattleResultState.ExpCounterPlaying = true;
+
+                    // Stop the counter when the tally animation finishes.
+                    CoroutineManager.StartUntracked(MonitorExpCounterAnimation(__instance.Pointer));
+                }
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in ResultMenuController.ShowPointsInit patch: {ex.Message}");
             }
         }
+
+        /// <summary>
+        /// Polls the unsafe pointer chain from ResultMenuController to detect when the EXP
+        /// counting animation finishes, then stops the counter sound. FF4's KeyInput result
+        /// graph mirrors FF5's exactly, so the offsets are identical:
+        /// Chain: instance -> +0x20 (pointController) -> +0x30 (characterListConteroller)
+        ///   -> +0x20 (contentList, count at +0x18) ; perormanceEndCount at +0x30.
+        /// Animation done when: perormanceEndCount >= contentList.Count &amp;&amp; Count > 0.
+        /// </summary>
+        private static IEnumerator MonitorExpCounterAnimation(IntPtr instancePtr)
+        {
+            var wait = new WaitForSeconds(0.1f);
+            bool loggedOnce = false;
+
+            if (instancePtr == IntPtr.Zero)
+            {
+                MelonLogger.Warning("[BattleResult] MonitorExp: instancePtr is null");
+                yield break;
+            }
+
+            IntPtr pointControllerPtr = Marshal.ReadIntPtr(instancePtr, 0x20);
+            if (pointControllerPtr == IntPtr.Zero)
+            {
+                MelonLogger.Warning("[BattleResult] MonitorExp: pointController is null");
+                yield break;
+            }
+
+            IntPtr charListCtrlPtr = Marshal.ReadIntPtr(pointControllerPtr, 0x30);
+            if (charListCtrlPtr == IntPtr.Zero)
+            {
+                MelonLogger.Warning("[BattleResult] MonitorExp: characterListController is null");
+                yield break;
+            }
+
+            IntPtr contentListPtr = Marshal.ReadIntPtr(charListCtrlPtr, 0x20);
+            if (contentListPtr == IntPtr.Zero)
+            {
+                MelonLogger.Warning("[BattleResult] MonitorExp: contentList is null");
+                yield break;
+            }
+
+            // contentList.Count (List._size) at contentListPtr + 0x18
+            int contentCount = Marshal.ReadInt32(contentListPtr, 0x18);
+            if (contentCount <= 0)
+            {
+                MelonLogger.Warning($"[BattleResult] MonitorExp: contentCount={contentCount}, aborting");
+                yield break;
+            }
+
+            MelonLogger.Msg($"[BattleResult] MonitorExp: chain OK. charListCtrl=0x{charListCtrlPtr:X}, contentCount={contentCount}");
+
+            // Poll until animation finishes or the counter was already stopped by a safety net.
+            while (BattleResultState.ExpCounterPlaying)
+            {
+                yield return wait;
+
+                // Keep the Counter stream fed so the loop never drains between ticks.
+                SoundPlayer.TopUpExpCounter();
+
+                try
+                {
+                    int endCount = Marshal.ReadInt32(charListCtrlPtr, 0x30);
+
+                    if (!loggedOnce)
+                    {
+                        MelonLogger.Msg($"[BattleResult] MonitorExp: first poll endCount={endCount}/{contentCount}");
+                        loggedOnce = true;
+                    }
+
+                    if (endCount >= contentCount)
+                    {
+                        MelonLogger.Msg($"[BattleResult] MonitorExp: animation done (endCount={endCount} >= contentCount={contentCount})");
+                        BattleResultState.StopExpCounterIfPlaying();
+                        yield break;
+                    }
+                }
+                catch
+                {
+                    // Pointer became invalid -- bail out; the phase-init safety nets will stop it.
+                    yield break;
+                }
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------
+    //  Safety-net stop hooks: once the result screen advances past the
+    //  EXP-tally phase, the counter sound must stop.
+    // ----------------------------------------------------------------
+    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowStatusUpInit))]
+    public static class ResultMenuController_ShowStatusUpInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();
+    }
+
+    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowGetAbilitysInit))]
+    public static class ResultMenuController_ShowGetAbilitysInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();
+    }
+
+    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowGetItemsInit))]
+    public static class ResultMenuController_ShowGetItemsInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();
+    }
+
+    // EndWaitInit: results dismissed -- guaranteed backstop that the tone never sticks.
+    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.EndWaitInit))]
+    public static class ResultMenuController_EndWaitInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();
     }
 }
