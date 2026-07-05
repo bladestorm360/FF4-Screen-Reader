@@ -151,7 +151,8 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         public void RefreshIfNeeded()
         {
-            cache.EnsureCorrectMap();
+            // Scan() already handles map changes (it re-enumerates and updates lastScannedMapId),
+            // so the prior EnsureCorrectMap() call was a redundant second full scan on map change.
             cache.Scan();
         }
 

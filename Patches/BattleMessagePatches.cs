@@ -408,9 +408,12 @@ namespace FFIV_ScreenReader.Patches
             {
                 string targetName = BattleUnitHelper.GetUnitName(data) ?? "Unknown";
 
-                // Consume the multi-hit count captured by CreateHitCount (it fires just before this view).
-                // Reset to 1 so a later damage with no fresh hit count defaults to single.
-                int hitCount = DamageViewUIManager_CreateHitCount_Patch.PendingHitCount;
+                // Consume the multi-hit count captured by CreateHitCount (fires just before this view,
+                // on the same or adjacent frame). Reject a stale count from an earlier action that never
+                // produced a damage view, then reset to 1 so a later damage with no fresh hit count
+                // defaults to single.
+                bool fresh = UnityEngine.Time.frameCount - DamageViewUIManager_CreateHitCount_Patch.PendingHitCountFrame <= 1;
+                int hitCount = fresh ? DamageViewUIManager_CreateHitCount_Patch.PendingHitCount : 1;
                 DamageViewUIManager_CreateHitCount_Patch.PendingHitCount = 1;
 
                 string message;
@@ -457,6 +460,10 @@ namespace FFIV_ScreenReader.Patches
         // Buffered instead of spoken directly so the count appears inline on the damage line
         // (e.g. "14x1552 damage") only when the Multi-hit Damage setting is enabled.
         public static int PendingHitCount = 1;
+        // Frame the multiplier was captured on. Used to reject a stale count that was never
+        // consumed by a CreateDamageView (e.g. a fully-evaded multi-hit) so it can't leak into
+        // an unrelated later attack's damage announcement.
+        public static int PendingHitCountFrame = -1;
 
         [HarmonyPostfix]
         public static void Postfix(int hitCountValue, Il2CppLast.Battle.BattleSpriteEntity attack, Il2CppLast.Battle.BattleSpriteEntity target)
@@ -464,6 +471,7 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 PendingHitCount = hitCountValue;
+                PendingHitCountFrame = UnityEngine.Time.frameCount;
             }
             catch (Exception ex)
             {
