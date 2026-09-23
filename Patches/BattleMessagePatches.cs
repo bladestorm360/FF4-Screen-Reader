@@ -142,6 +142,14 @@ namespace FFIV_ScreenReader.Patches
         private static readonly HashSet<int> FleeCommandIds = new HashSet<int>();
         private static bool fleeCommandIdsInitialized = false;
 
+        // A plain attack is classified by the command's identity, never its localized name
+        // (matching the English word "Attack" only ever worked in English). FF4 master data
+        // (command.csv / ability.csv, 2026-09-23): command 1 = Fight (MSG_SYSTEM_085, ability_id 1);
+        // ability 1 = the Fight command's own ability (type 4). Abilities 209 and 442 are two more
+        // type-4 attacks whose display name is that same Fight message, so they read as attacks too.
+        private const int FIGHT_COMMAND_ID = 1;
+        private const int PLAIN_ATTACK_ABILITY_ID = 1;
+
         [HarmonyPostfix]
         public static void Postfix(BattleActData battleActData)
         {
@@ -171,9 +179,10 @@ namespace FFIV_ScreenReader.Patches
 
                 // Check for Flee command specifically
                 bool isFlee = IsFleeCommand(battleActData);
+                bool isPlainAttack = !isFlee && IsPlainAttack(battleActData);
 
                 string actionName = GetActionName(battleActData, isFlee);
-                if (string.IsNullOrWhiteSpace(actionName))
+                if (!isPlainAttack && string.IsNullOrWhiteSpace(actionName))
                     return; // Skip actions with no name
 
                 string message;
@@ -183,7 +192,7 @@ namespace FFIV_ScreenReader.Patches
                     message = string.Format(T("{0} flees"), attackerName);
                     GlobalBattleMessageTracker.SetFleeInProgress(true);
                 }
-                else if (actionName.Equals("Attack", StringComparison.OrdinalIgnoreCase))
+                else if (isPlainAttack)
                 {
                     message = string.Format(T("{0} attacks"), attackerName);
                 }
@@ -201,6 +210,62 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in CreateActFunction patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// True for a plain weapon attack: the Fight command's own ability (id 1), an ability the game
+        /// names with the Fight command's own (localized) name, or the Fight command with no ability.
+        /// Items and named abilities keep their names ("uses X").
+        /// </summary>
+        private static bool IsPlainAttack(BattleActData actData)
+        {
+            try
+            {
+                if (actData.itemList != null && actData.itemList.Count > 0)
+                    return false;
+
+                var abilityList = actData.abilityList;
+                if (abilityList != null && abilityList.Count > 0 && abilityList[0] != null)
+                {
+                    var ability = abilityList[0];
+                    if (ability.Id == PLAIN_ATTACK_ABILITY_ID)
+                        return true;
+
+                    string fightName = GetFightCommandName();
+                    if (string.IsNullOrEmpty(fightName))
+                        return false;
+                    string abilityName = StripIconMarkup(ContentUtitlity.GetAbilityName(ability));
+                    return !string.IsNullOrEmpty(abilityName)
+                        && string.Equals(abilityName.Trim(), fightName, StringComparison.Ordinal);
+                }
+
+                var command = actData.Command;
+                return command != null && command.Id == FIGHT_COMMAND_ID;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>The Fight command's name in the current game language (master command 1).</summary>
+        private static string GetFightCommandName()
+        {
+            try
+            {
+                var commands = Il2CppLast.Data.Master.MasterManager.Instance?.GetList<Il2CppLast.Data.Master.Command>();
+                if (commands == null || !commands.ContainsKey(FIGHT_COMMAND_ID))
+                    return null;
+                string mesId = commands[FIGHT_COMMAND_ID]?.MesIdName;
+                if (string.IsNullOrEmpty(mesId))
+                    return null;
+                string name = MessageManager.Instance?.GetMessage(mesId);
+                return string.IsNullOrWhiteSpace(name) ? null : StripIconMarkup(name).Trim();
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -419,9 +484,15 @@ namespace FFIV_ScreenReader.Patches
         /// The attack's own hit count against this target, from the function's calculation results
         /// (ICalcResultDic → ICalcResult.GetHitCount). FF4 is an ATB game, and the game only draws
         /// the on-screen ×N (BattleBasicFunction.CreateHitCount) when SystemConfigData.GetBattleType()
-        /// is Command — FF4's returns ATB — so CreateHitCount never fires here and the count has to
-        /// come from the calculation. Weapon attacks only, the same rule the ×N display uses; 1 for
-        /// anything else or on any failure.
+        /// is Command — FF4's returns ATB — so CreateHitCount never fires here. Weapon attacks only,
+        /// the same rule the ×N display uses; 1 for anything else or on any failure.
+        ///
+        /// Offline finding (2026-09-23, session 2): in FF4 this is always 0 for a Fight result, so this
+        /// returns 1 and the damage reads as the total only. ClacExecuteFF4.PhysicalExecution (RVA
+        /// 0xA097F0) does compute the hits LANDED (attacker hit rolls minus target evasion rolls) as
+        /// Item3 of its ValueTuple, but CalcControllerProvider.GetFightStatus (RVA 0x429080) drops it
+        /// and calls ICalcResult.SetStatus with hitCount = 0, and FunctionBase.GetCalcResult /
+        /// SetupValueToDisplay only copy that 0. Kept so a game build that fills the count works.
         /// </summary>
         private static int ReadWeaponHitCount(Il2CppLast.Battle.Function.BattleBasicFunction function, Il2CppLast.Battle.BattleUnitData target)
         {
@@ -443,6 +514,33 @@ namespace FFIV_ScreenReader.Patches
             {
                 return 1;
             }
+        }
+
+        /// <summary>
+        /// One diagnostic line per unspoken value-0 view: its hit type and the ids of the conditions
+        /// its calc result carries (a status cure's result lists the cured condition).
+        /// </summary>
+        private static void LogValueZeroView(Il2CppLast.Battle.Function.BattleBasicFunction function,
+            Il2CppLast.Battle.BattleUnitData target, Il2CppLast.Systems.HitType hitType, bool isRecovery, string targetName)
+        {
+            string conditions = "?";
+            try
+            {
+                var results = function?.ICalcResultDic;
+                if (results != null && target != null && results.ContainsKey(target))
+                {
+                    var list = results[target]?.GetConditions();
+                    if (list != null)
+                    {
+                        var ids = new List<string>();
+                        foreach (var c in list)
+                            if (c != null) ids.Add(c.Id.ToString());
+                        conditions = "[" + string.Join(",", ids) + "]";
+                    }
+                }
+            }
+            catch { }
+            MelonLogger.Msg($"[Battle] value-0 view: hitType={(int)hitType} isRecovery={isRecovery} target={targetName} conditions={conditions}");
         }
 
         [HarmonyPostfix]
@@ -470,8 +568,26 @@ namespace FFIV_ScreenReader.Patches
                 }
                 else if (value == 0)
                 {
-                    // Non-damaging ability (buff/debuff) - don't announce, status effects handle it
-                    return;
+                    // Value-0 views (offline analysis, debug.md "Open-issues pass (2026-09-23, session 2)"):
+                    // buffs/debuffs carry Hit (AddConditionExection returns Hit/Miss), a status cure
+                    // carries Non (CalcControllerProvider.GetRecoveryCondition), and nothing in FF4's calc
+                    // writes RecoveryCondition. Zero is written only for a genuine 0 result (a recovery
+                    // reversed on an undead target that comes to 0, MagicAbsorptionFunction).
+                    if (hitType == Il2CppLast.Systems.HitType.Zero)
+                    {
+                        message = string.Format(T("{0}: {1} damage"), targetName, 0);
+                    }
+                    else if (hitType == Il2CppLast.Systems.HitType.RecoveryCondition)
+                    {
+                        message = string.Format(T("{0}: cured"), targetName);
+                    }
+                    else
+                    {
+                        // Buff/debuff (announced by the condition hooks) or status cure: stay silent,
+                        // but log it so one in-game test can confirm what a status cure carries.
+                        LogValueZeroView(__instance, data, hitType, isRecovery, targetName);
+                        return;
+                    }
                 }
                 else if (hitType == Il2CppLast.Systems.HitType.Recovery)
                 {

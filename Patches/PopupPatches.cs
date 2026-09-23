@@ -252,7 +252,8 @@ namespace FFIV_ScreenReader.Patches
         /// <summary>
         /// Postfix for CommonPopup.UpdateFocus — the popup's own focus change, fired on open and on
         /// every Yes/No move (the game never calls UpdateCommand). Reads the focused button for
-        /// every KeyInput CommonPopup, including the save-overwrite confirmation.
+        /// every KeyInput CommonPopup. (The save-overwrite confirmation is a SavePopup, not a
+        /// CommonPopup: SaveLoadPatches.SavePopupFocus_Postfix reads its Yes/No.)
         /// </summary>
         public static void CommonPopup_UpdateFocus_Postfix(KeyInputCommonPopup __instance)
         {

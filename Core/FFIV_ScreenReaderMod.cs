@@ -142,6 +142,9 @@ namespace FFIV_ScreenReader.Core
             // Patch game state transitions (map changes) - event-driven, no polling
             GameStatePatches.ApplyPatches(harmony);
 
+            // Game's own walk/run (F1) and encounter (F3) toggles, from the game's setters
+            GameTogglePatches.ApplyPatches(harmony);
+
 
             // Initialize fade detection for wall tone suppression during map transitions
             MapTransitionPatches.Initialize(harmony);

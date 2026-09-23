@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Runtime.InteropServices;
 using HarmonyLib;
 using MelonLoader;
 using FFIV_ScreenReader.Core;
@@ -66,11 +67,16 @@ namespace FFIV_ScreenReader.Patches
         private const int SAVE_POPUP_SELECT_CURSOR_OFFSET = 0x58;
         private const int COMMON_COMMAND_TEXT_OFFSET = 0x18;
 
-        // CommonPopup field offsets (from dump.cs line 458986)
-        private const int COMMON_POPUP_MESSAGE_TEXT_OFFSET = 0x40;
+        // Last.UI.Save.KeyInput.SaveWindowController (OverwriteSaveController): view @0x30, and its
+        // Last.UI.Save.KeyInput.SaveWindowView: savePopup @0x28 (a KeyInput SavePopup). The
+        // overwrite confirmation (OverwriteConfirmInit / OverwriteConfirmUpdate) drives that
+        // SavePopup; the controller's CommonPopup @0x38 belongs to SaveConfirm, not to overwrite.
+        private const int OVERWRITE_CONTROLLER_VIEW_OFFSET = 0x30;
+        private const int OVERWRITE_VIEW_SAVE_POPUP_OFFSET = 0x28;
 
-        // OverwriteSaveController field offset for its CommonPopup
-        private const int OVERWRITE_CONTROLLER_COMMON_POPUP_OFFSET = 0x38;
+        // Set while a SavePopup's open read (title + message + focused button) is pending, so the
+        // cursor placement done by the popup's own setup doesn't speak the button first.
+        private static bool savePopupOpenReadPending;
 
         // Controller-specific savePopup field offsets
         private const int TITLE_LOAD_SAVE_POPUP_OFFSET = 0x58;   // LoadGameWindowController.savePopup
@@ -78,7 +84,6 @@ namespace FFIV_ScreenReader.Patches
         private const int INTERRUPTION_SAVE_POPUP_OFFSET = 0x38; // InterruptionWindowController.savePopup
 
         private const string DEDUP_SAVE_POPUP_BUTTON = AnnouncementContexts.SAVE_LOAD_POPUP_BUTTON;
-        private const string DEDUP_COMMON_POPUP_BUTTON = AnnouncementContexts.COMMON_POPUP_BUTTON;
 
         public static void ApplyPatches(HarmonyLib.Harmony harmony)
         {
@@ -95,8 +100,8 @@ namespace FFIV_ScreenReader.Patches
                 // Patch SaveListController.SelectContent for slot navigation
                 TryPatchSaveListSelectContent(harmony);
 
-                // Patch SavePopup.UpdateCommand for button navigation (covers ALL save/load popups)
-                TryPatchSavePopupUpdateCommand(harmony);
+                // Patch SavePopup.SetCommandSelectCursor for Yes/No navigation (covers ALL save/load popups)
+                TryPatchSavePopupFocus(harmony);
 
                 // Patch OverwriteConfirmInit on Save.KeyInput.SaveWindowController for overwrite popup text
                 TryPatchOverwriteConfirmInit(harmony);
@@ -537,25 +542,35 @@ namespace FFIV_ScreenReader.Patches
                 {
                     // Read savePopup pointer from controller
                     IntPtr popupPtr = *(IntPtr*)((byte*)controllerPtr.ToPointer() + savePopupOffset);
-                    if (popupPtr == IntPtr.Zero)
-                    {
-                        return;
-                    }
-
-                    // Set state for button navigation immediately
-                    SaveLoadMenuState.IsActive = true;
-                    SaveLoadMenuState.IsInConfirmation = true;
-                    AnnouncementDeduplicator.Reset(DEDUP_SAVE_POPUP_BUTTON);
-                    AnnouncementDeduplicator.Reset(DEDUP_COMMON_POPUP_BUTTON);
-
-                    // Start coroutine to read text after delay (allows UI to populate)
-                    CoroutineManager.StartManaged(ReadPopupTextDelayed(popupPtr, context));
+                    ReadSavePopupAt(popupPtr, context);
                 }
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[SaveLoad] Error reading {context} popup: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Marks a SavePopup as open (confirmation state, fresh button guard, open read pending) and
+        /// reads its title, message and focused button a couple of frames later.
+        /// </summary>
+        private static void ReadSavePopupAt(IntPtr popupPtr, string context)
+        {
+            if (popupPtr == IntPtr.Zero)
+            {
+                savePopupOpenReadPending = false;
+                return;
+            }
+
+            // Set state for button navigation immediately
+            SaveLoadMenuState.IsActive = true;
+            SaveLoadMenuState.IsInConfirmation = true;
+            AnnouncementDeduplicator.Reset(DEDUP_SAVE_POPUP_BUTTON);
+            savePopupOpenReadPending = true;
+
+            // Start coroutine to read text after delay (allows UI to populate)
+            CoroutineManager.StartManaged(ReadPopupTextDelayed(popupPtr, context));
         }
 
         /// <summary>
@@ -567,8 +582,13 @@ namespace FFIV_ScreenReader.Patches
             yield return null;
             yield return null;
 
+            // From here on, focus changes are read by SavePopupFocus_Postfix.
+            savePopupOpenReadPending = false;
+
             try
             {
+                string focusedButton = ReadFocusedSaveButton(popupPtr);
+
                 unsafe
                 {
                     // Try reading title first
@@ -588,7 +608,11 @@ namespace FFIV_ScreenReader.Patches
                         if (!string.IsNullOrWhiteSpace(title))
                         {
                             title = TextUtils.StripRichTextTags(title);
-                            FFIV_ScreenReaderMod.SpeakText(title);
+                            FFIV_ScreenReaderMod.SpeakText(AppendButton(title, focusedButton));
+                        }
+                        else if (focusedButton != null)
+                        {
+                            FFIV_ScreenReaderMod.SpeakText(focusedButton);
                         }
                         yield break;
                     }
@@ -613,7 +637,11 @@ namespace FFIV_ScreenReader.Patches
                             announcement = message;
                         }
 
-                        FFIV_ScreenReaderMod.SpeakText(announcement);
+                        FFIV_ScreenReaderMod.SpeakText(AppendButton(announcement, focusedButton));
+                    }
+                    else if (focusedButton != null)
+                    {
+                        FFIV_ScreenReaderMod.SpeakText(focusedButton);
                     }
                 }
             }
@@ -623,122 +651,145 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
+        private static string AppendButton(string text, string button)
+            => string.IsNullOrEmpty(button) ? text : $"{text}. {button}";
+
         /// <summary>
-        /// Patches SavePopup.UpdateCommand for button navigation.
-        /// This single patch handles ALL popup button navigation since all controllers use the same SavePopup class.
+        /// The SavePopup's focused button text (selectCursor @0x58, commandList @0x60), claiming the
+        /// button guard so the focus postfix doesn't repeat it. Null if unreadable.
         /// </summary>
-        private static void TryPatchSavePopupUpdateCommand(HarmonyLib.Harmony harmony) =>
-            PatchHelper.TryPatchPostfix(harmony, typeof(SavePopup), "UpdateCommand",
-                typeof(SaveLoadPatches), nameof(SavePopupUpdateCommand_Postfix), "[SaveLoad]");
+        private static string ReadFocusedSaveButton(IntPtr popupPtr)
+        {
+            try
+            {
+                int index = ReadSaveCursorIndex(popupPtr);
+                if (index < 0) return null;
+                string buttonText = ReadPopupButton(popupPtr, SAVE_POPUP_COMMAND_LIST_OFFSET, index);
+                if (string.IsNullOrWhiteSpace(buttonText)) return null;
+                AnnouncementDeduplicator.ShouldAnnounce(DEDUP_SAVE_POPUP_BUTTON, index);
+                return TextUtils.StripIconMarkup(buttonText);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int ReadSaveCursorIndex(IntPtr popupPtr)
+        {
+            if (popupPtr == IntPtr.Zero) return -1;
+            IntPtr cursorPtr = Marshal.ReadIntPtr(popupPtr, SAVE_POPUP_SELECT_CURSOR_OFFSET);
+            if (cursorPtr == IntPtr.Zero) return -1;
+            return new GameCursor(cursorPtr).Index;
+        }
+
+        /// <summary>
+        /// Patches SavePopup.SetCommandSelectCursor (private, unique RVA 0x99BFA0) for Yes/No
+        /// navigation. Every SavePopup focus change goes through it: UpdateSelect's up/down lambdas
+        /// pass it to Cursor.NextIndex/PrevIndex as the index callback (always invoked), and
+        /// ResetCursor, the mouse handler and the main-menu save's PopupInit call it directly.
+        /// The previous hook, SavePopup.UpdateCommand, is a per-frame update that the main-menu
+        /// save never calls (its PopupUpdate calls SavePopup.UpdateSelect directly), so the save
+        /// overwrite Yes/No went unread there.
+        /// </summary>
+        private static void TryPatchSavePopupFocus(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(SavePopup), "SetCommandSelectCursor",
+                typeof(SaveLoadPatches), nameof(SavePopupFocus_Postfix), "[SaveLoad]");
 
         /// <summary>
         /// Patches OverwriteConfirmInit on the Save.KeyInput.SaveWindowController
         /// to clear SaveLoadMenuState and let the generic popup system handle navigation.
         /// </summary>
-        private static void TryPatchOverwriteConfirmInit(HarmonyLib.Harmony harmony) =>
-            PatchHelper.TryPatchPostfix(harmony, typeof(OverwriteSaveController), "OverwriteConfirmInit",
-                typeof(SaveLoadPatches), nameof(OverwriteConfirmInit_Postfix), "[SaveLoad]");
+        private static void TryPatchOverwriteConfirmInit(HarmonyLib.Harmony harmony)
+        {
+            try
+            {
+                var method = AccessTools.Method(typeof(OverwriteSaveController), "OverwriteConfirmInit");
+                if (method == null)
+                {
+                    MelonLogger.Warning("[SaveLoad] OverwriteSaveController.OverwriteConfirmInit not found");
+                    return;
+                }
+                harmony.Patch(method,
+                    prefix: new HarmonyMethod(AccessTools.Method(typeof(SaveLoadPatches), nameof(OverwriteConfirmInit_Prefix))),
+                    postfix: new HarmonyMethod(AccessTools.Method(typeof(SaveLoadPatches), nameof(OverwriteConfirmInit_Postfix))));
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[SaveLoad] Error patching OverwriteConfirmInit: {ex.Message}");
+            }
+        }
 
         /// <summary>
-        /// Postfix for OverwriteConfirmInit - keeps SaveLoadMenuState active so the generic cursor
-        /// reader stays out (PopupPatches.CommonPopup_UpdateFocus_Postfix reads the Yes/No buttons),
-        /// and reads the popup text via coroutine.
+        /// The body resets the popup cursor (SetCommandSelectCursor): hold the focus read until the
+        /// open read so the button isn't spoken ahead of the message.
+        /// </summary>
+        public static void OverwriteConfirmInit_Prefix()
+        {
+            savePopupOpenReadPending = true;
+        }
+
+        /// <summary>
+        /// Postfix for OverwriteConfirmInit (Last.UI.Save.KeyInput.SaveWindowController). The overwrite
+        /// confirmation is the view's SavePopup (disassembly: every popup call in the body goes through
+        /// view @0x30 -> savePopup @0x28), so it gets the standard SavePopup open read, and its Yes/No
+        /// moves are read by SavePopupFocus_Postfix.
         /// </summary>
         public static void OverwriteConfirmInit_Postfix(object __instance)
         {
             try
             {
                 var controller = __instance as OverwriteSaveController;
-                if (controller == null) return;
-
-                IntPtr controllerPtr = controller.Pointer;
-                if (controllerPtr == IntPtr.Zero) return;
-
-                // Keep SaveLoadMenuState active; CommonPopup.UpdateFocus reads the buttons
-                SaveLoadMenuState.IsActive = true;
-                SaveLoadMenuState.IsInConfirmation = true;
-                AnnouncementDeduplicator.Reset(DEDUP_COMMON_POPUP_BUTTON);
-
-                unsafe
+                if (controller == null || controller.Pointer == IntPtr.Zero)
                 {
-                    IntPtr popupPtr = *(IntPtr*)((byte*)controllerPtr.ToPointer() + OVERWRITE_CONTROLLER_COMMON_POPUP_OFFSET);
-                    if (popupPtr == IntPtr.Zero) return;
-
-                    CoroutineManager.StartManaged(ReadCommonPopupTextDelayed(popupPtr));
+                    savePopupOpenReadPending = false;
+                    return;
                 }
+
+                IntPtr viewPtr = Marshal.ReadIntPtr(controller.Pointer, OVERWRITE_CONTROLLER_VIEW_OFFSET);
+                IntPtr popupPtr = viewPtr == IntPtr.Zero ? IntPtr.Zero : Marshal.ReadIntPtr(viewPtr, OVERWRITE_VIEW_SAVE_POPUP_OFFSET);
+                ReadSavePopupAt(popupPtr, "Overwrite");
             }
             catch (Exception ex)
             {
+                savePopupOpenReadPending = false;
                 MelonLogger.Warning($"[SaveLoad] Error in OverwriteConfirmInit_Postfix: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Postfix for SavePopup.UpdateCommand - reads button text when navigating Yes/No.
+        /// Postfix for SavePopup.SetCommandSelectCursor - reads the focused button when the Yes/No
+        /// focus changes. Deduplicated on the cursor index (the game re-runs this every frame for a
+        /// single-button popup, which then speaks once).
         /// </summary>
-        public static void SavePopupUpdateCommand_Postfix(SavePopup __instance)
+        public static void SavePopupFocus_Postfix(SavePopup __instance)
         {
             try
             {
-                if (__instance == null) return;
+                if (__instance == null || savePopupOpenReadPending) return;
 
                 IntPtr ptr = __instance.Pointer;
                 if (ptr == IntPtr.Zero) return;
 
-                // Read cursor from offset 0x58
-                unsafe
+                int index = ReadSaveCursorIndex(ptr);
+                if (index < 0) return;
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_SAVE_POPUP_BUTTON, index)) return;
+
+                // Setup calls while the popup is hidden (menu construction) don't speak.
+                var go = __instance.gameObject;
+                if (go == null || !go.activeInHierarchy)
                 {
-                    IntPtr cursorPtr = *(IntPtr*)((byte*)ptr.ToPointer() + SAVE_POPUP_SELECT_CURSOR_OFFSET);
-                    if (cursorPtr == IntPtr.Zero) return;
-
-                    var cursor = new GameCursor(cursorPtr);
-                    int index = cursor.Index;
-
-                    // Deduplicate
-                    if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_SAVE_POPUP_BUTTON, index)) return;
-
-                    // Read button text from commandList
-                    string buttonText = ReadPopupButton(ptr, SAVE_POPUP_COMMAND_LIST_OFFSET, index);
-                    if (!string.IsNullOrWhiteSpace(buttonText))
-                    {
-                        FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: false);
-                    }
+                    AnnouncementDeduplicator.Reset(DEDUP_SAVE_POPUP_BUTTON);
+                    return;
                 }
+
+                string buttonText = ReadPopupButton(ptr, SAVE_POPUP_COMMAND_LIST_OFFSET, index);
+                if (!string.IsNullOrWhiteSpace(buttonText))
+                    FFIV_ScreenReaderMod.SpeakText(TextUtils.StripIconMarkup(buttonText), interrupt: true);
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[SaveLoad] Error in SavePopupUpdateCommand: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Coroutine to read CommonPopup message text after a delay.
-        /// </summary>
-        private static IEnumerator ReadCommonPopupTextDelayed(IntPtr popupPtr)
-        {
-            yield return null;
-            yield return null;
-
-            try
-            {
-                unsafe
-                {
-                    IntPtr messageTextPtr = *(IntPtr*)((byte*)popupPtr.ToPointer() + COMMON_POPUP_MESSAGE_TEXT_OFFSET);
-                    if (messageTextPtr == IntPtr.Zero) yield break;
-
-                    var textComponent = new UnityEngine.UI.Text(messageTextPtr);
-                    string message = textComponent.text;
-
-                    if (!string.IsNullOrWhiteSpace(message))
-                    {
-                        message = TextUtils.StripRichTextTags(message);
-                        FFIV_ScreenReaderMod.SpeakText(message);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Error reading CommonPopup text: {ex.Message}");
+                MelonLogger.Warning($"[SaveLoad] Error in SavePopupFocus_Postfix: {ex.Message}");
             }
         }
 
@@ -777,6 +828,7 @@ namespace FFIV_ScreenReader.Patches
         {
             SaveLoadMenuState.ResetState();
             PopupState.Clear();
+            savePopupOpenReadPending = false;
         }
     }
 }

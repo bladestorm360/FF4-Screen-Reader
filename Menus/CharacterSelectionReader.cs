@@ -6,6 +6,7 @@ using Il2CppLast.UI;
 using MelonLoader;
 using UnityEngine;
 using static FFIV_ScreenReader.Utils.TextUtils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Menus
 {
@@ -251,7 +252,7 @@ namespace FFIV_ScreenReader.Menus
                 // Add level
                 if (!string.IsNullOrEmpty(level))
                 {
-                    announcement += ", Level " + level;
+                    announcement += ", " + T("Level") + " " + level;
                 }
 
                 // Add row information (Front Row / Back Row) - useful on all character screens
@@ -281,11 +282,11 @@ namespace FFIV_ScreenReader.Menus
                             CorpsId corpsId = corps.Id;
                             if (corpsId == CorpsId.Front)
                             {
-                                announcement += ", Front Row";
+                                announcement += ", " + T("Front Row");
                             }
                             else if (corpsId == CorpsId.Back)
                             {
-                                announcement += ", Back Row";
+                                announcement += ", " + T("Back Row");
                             }
                         }
                     }

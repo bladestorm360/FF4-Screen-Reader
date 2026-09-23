@@ -40,22 +40,23 @@ namespace FFIV_ScreenReader.Patches
                 if (itemType != CONTENT_TYPE_WEAPON && itemType != CONTENT_TYPE_ARMOR)
                     return;
 
+                // From here on the row is equipment, so the key never goes silent: anything that
+                // can't be read speaks the "Equipment info unavailable" fallback.
                 var userDataManager = UserDataManager.Instance();
-                if (userDataManager == null)
-                    return;
-
-                // Get OwnedItemData from contentId
-                var ownedItemData = userDataManager.SearchOwnedItem(itemData.contentId);
+                var ownedItemData = userDataManager?.SearchOwnedItem(itemData.contentId);
                 if (ownedItemData == null)
+                {
+                    FFIV_ScreenReaderMod.SpeakText(T("Equipment info unavailable"), interrupt: true);
                     return;
+                }
 
                 string announcement = BuildAnnouncement(character => EquipUtility.CanEquipped(ownedItemData, character.JobId));
-                if (!string.IsNullOrEmpty(announcement))
-                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[ItemDetails] Error: {ex.Message}");
+                FFIV_ScreenReaderMod.SpeakText(T("Equipment info unavailable"), interrupt: true);
             }
         }
 
@@ -78,13 +79,14 @@ namespace FFIV_ScreenReader.Patches
 
         /// <summary>
         /// Builds "Can equip: A, B" over the current party in on-screen order, or the
-        /// "no party members" message. Returns null if the party can't be read.
+        /// "no party members" message. Never null: when the party can't be read it returns the
+        /// "Equipment info unavailable" fallback, so the U key is never silent on equipment.
         /// </summary>
         internal static string BuildAnnouncement(Func<OwnedCharacterData, bool> canEquip)
         {
             var partyMembers = GetPartyMembers();
             if (partyMembers == null || partyMembers.Count == 0)
-                return null;
+                return T("Equipment info unavailable");
 
             var canEquipNames = new List<string>();
             foreach (var character in partyMembers)

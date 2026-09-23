@@ -78,7 +78,20 @@ namespace FFIV_ScreenReader.Core
                 && !BattleState.IsInBattle;
 
             if (!GamepadManager.IsAvailable)
+            {
+                // Controller unplugged in mod mode (or its mod menu since closed from the keyboard):
+                // drop back to Normal so SuppressGameInput can't stay stuck on and lock the keyboard
+                // out of the game.
+                if (State == ControllerState.ModMode || (State == ControllerState.ModMenu && !ModMenu.IsOpen))
+                    Reset();
                 return;
+            }
+
+            // Keep the state machine in sync with the mod menu when it was opened from the keyboard
+            // (F8), so the D-pad, stick and triggers drive the menu instead of acting underneath it.
+            // (Closing from the keyboard is handled by HandleModMenuState.)
+            if (ModMenu.IsOpen && State != ControllerState.ModMenu)
+                State = ControllerState.ModMenu;
 
             // Track that controller is being used
             for (int i = 0; i < SDL3.SDL_GAMEPAD_BUTTON_COUNT; i++)

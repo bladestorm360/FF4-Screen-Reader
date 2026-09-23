@@ -193,7 +193,8 @@ namespace FFIV_ScreenReader.Core
                 return;
             }
 
-            // Handle function keys (F1/F3/F5 — special coroutine/battle logic) — bare keypress only
+            // Handle mod function keys (F5/F7) — bare keypress only. The game's own F1/F3 are
+            // narrated from the game's setters by GameTogglePatches, whatever the input source.
             if (!anyModifierHeld)
                 HandleFunctionKeyInput();
 
@@ -256,7 +257,7 @@ namespace FFIV_ScreenReader.Core
         // Frame of the last cache-miss refresh; see IsOnValidMap.
         private static int lastFieldRefreshFrame = -1000;
 
-        private static bool IsOnValidMap()
+        internal static bool IsOnValidMap()
         {
             // Self-heal the cache (like every other FieldPlayerController reader) so a cleared or
             // stale entry can't wedge the field context into Global and silently disable field hotkeys.
@@ -317,18 +318,6 @@ namespace FFIV_ScreenReader.Core
                 return;
             }
 
-            if (GamepadManager.IsKeyCodePressed(KeyCode.F1))
-            {
-                CoroutineManager.StartUntracked(AnnounceWalkRunState());
-                return;
-            }
-
-            if (GamepadManager.IsKeyCodePressed(KeyCode.F3))
-            {
-                CoroutineManager.StartUntracked(AnnounceEncounterState());
-                return;
-            }
-
             if (GamepadManager.IsKeyCodePressed(KeyCode.F5))
             {
                 // Enemy HP Display is a battle feature, so gate on in-battle (not IsFieldActive,
@@ -359,12 +348,31 @@ namespace FFIV_ScreenReader.Core
 
         /// <summary>
         /// Tab opens the field menu, so a battle flag still set outside the battle scene is stale
-        /// (a missed battle-end hook): clear it so field keys and audio come back.
+        /// (a missed battle-end hook): clear it so field keys and audio come back. Tab is also pressed
+        /// mid-battle, and the battle is an additive sub-scene (the active scene need not be named
+        /// "Battle"), so only clear when no live BattleController exists either (one scene scan per
+        /// keypress, only while the flag is set).
         /// </summary>
         private static void HandleTabKey()
         {
-            if (BattleState.IsInBattle && !UnityEngine.SceneManagement.SceneManager.GetActiveScene().name.Contains("Battle"))
-                BattleState.Reset();
+            if (!BattleState.IsInBattle)
+                return;
+            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name.Contains("Battle"))
+                return;
+
+            try
+            {
+                var battle = UnityEngine.Object.FindObjectOfType<Il2CppLast.Battle.BattleController>();
+                if (battle != null && battle.isActiveAndEnabled)
+                    return;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Battle State] Tab: BattleController check failed: {ex.Message}");
+                return;
+            }
+
+            BattleState.Reset();
         }
 
         internal static void AnnounceVehicleState()
@@ -443,41 +451,5 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
-        private static IEnumerator AnnounceWalkRunState()
-        {
-            yield return null;
-            yield return null;
-            yield return null;
-
-            try
-            {
-                bool isDashing = MoveStateHelper.GetDashFlag();
-                string state = isDashing ? T("Run") : T("Walk");
-                FFIV_ScreenReaderMod.SpeakText(state, interrupt: true);
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[F1] Error reading walk/run state: {ex.Message}");
-            }
-        }
-
-        private static IEnumerator AnnounceEncounterState()
-        {
-            yield return null;
-            try
-            {
-                var userData = Il2CppLast.Management.UserDataManager.Instance();
-                if (userData?.CheatSettingsData != null)
-                {
-                    bool enabled = userData.CheatSettingsData.IsEnableEncount;
-                    string state = enabled ? T("Encounters on") : T("Encounters off");
-                    FFIV_ScreenReaderMod.SpeakText(state, interrupt: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[F3] Error reading encounter state: {ex.Message}");
-            }
-        }
     }
 }
