@@ -20,6 +20,7 @@ namespace FFIV_ScreenReader.Menus
         // ExtraSoundListContentInfo field offsets
         private const int OFFSET_MUSIC_NAME = 0x10;     // musicName (Il2CppString*)
         private const int OFFSET_BGM_ID = 0x18;         // bgmId (int)
+        private const int OFFSET_PLAY_TIME = 0x1C;      // playTime (float, seconds)
 
         // ExtraSoundController field offset (KeyInput namespace, TypeDefIndex 9079)
         private const int OFFSET_PLAYER_LIST = 0x50;    // <PlayerList>k__BackingField
@@ -28,11 +29,12 @@ namespace FFIV_ScreenReader.Menus
         /// Read song data from an ExtraSoundListContentController pointer using unsafe field access.
         /// Returns false if any pointer is zero/null.
         /// </summary>
-        public static unsafe bool ReadContentFromPointer(IntPtr contentControllerPtr, out string musicName, out int bgmId, out int index)
+        public static unsafe bool ReadContentFromPointer(IntPtr contentControllerPtr, out string musicName, out int bgmId, out int index, out float playTime)
         {
             musicName = null;
             bgmId = 0;
             index = 0;
+            playTime = 0f;
 
             if (contentControllerPtr == IntPtr.Zero)
                 return false;
@@ -45,8 +47,9 @@ namespace FFIV_ScreenReader.Menus
             if (contentInfoPtr == IntPtr.Zero)
                 return false;
 
-            // Read bgmId (int) at +0x18 from ContentInfo
+            // Read bgmId (int) at +0x18 and playTime (float) at +0x1C from ContentInfo
             bgmId = *(int*)((byte*)contentInfoPtr.ToPointer() + OFFSET_BGM_ID);
+            playTime = *(float*)((byte*)contentInfoPtr.ToPointer() + OFFSET_PLAY_TIME);
 
             // Read musicName (Il2CppString*) at +0x10 from ContentInfo
             IntPtr musicNamePtr = *(IntPtr*)((byte*)contentInfoPtr.ToPointer() + OFFSET_MUSIC_NAME);
@@ -59,16 +62,19 @@ namespace FFIV_ScreenReader.Menus
 
         /// <summary>
         /// Format a song entry announcement: "01: Main Theme of Final Fantasy IV, 1:30"
-        /// Takes pre-extracted C# values (not IL2CPP references).
+        /// Takes pre-extracted C# values (not IL2CPP references). The duration comes from the
+        /// entry's own playTime, falling back to master data; it is omitted when neither is known
+        /// rather than read as "0:00".
         /// </summary>
-        public static string ReadSongEntry(string musicName, int bgmId, int index)
+        public static string ReadSongEntry(string musicName, int bgmId, int index, float playTime)
         {
             if (string.IsNullOrEmpty(musicName)) return null;
 
             string number = (index + 1).ToString("D2");
-            int durationSec = LookupDuration(bgmId);
-            string duration = FormatPlayTime(durationSec);
-            return $"{number}: {musicName}, {duration}";
+            int durationSec = playTime > 0f ? (int)playTime : LookupDuration(bgmId);
+            return durationSec > 0
+                ? $"{number}: {musicName}, {FormatPlayTime(durationSec)}"
+                : $"{number}: {musicName}";
         }
 
         /// <summary>

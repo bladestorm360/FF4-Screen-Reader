@@ -16,6 +16,7 @@ using Il2CppLast.Systems;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Patches
@@ -153,6 +154,14 @@ namespace FFIV_ScreenReader.Patches
                 if (string.IsNullOrWhiteSpace(attackerName))
                     return;
 
+                // The announced turn-holder's input turn is over once their action executes, so
+                // their next "X's turn" must announce even if nobody else acted in between.
+                if (battleActData.AttackUnitData.TryCast<Il2Cpp.BattlePlayerData>() != null &&
+                    attackerName == AnnouncementDeduplicator.GetLastString(AnnouncementContexts.BATTLE_TURN))
+                {
+                    AnnouncementDeduplicator.Reset(AnnouncementContexts.BATTLE_TURN);
+                }
+
                 // Use object-based deduplication so different enemies with the same name
                 // attacking in succession are both announced (each BattleActData is unique)
                 if (!AnnouncementDeduplicator.ShouldAnnounce(AnnouncementContexts.BATTLE_ACTION, battleActData))
@@ -171,16 +180,16 @@ namespace FFIV_ScreenReader.Patches
                 if (isFlee)
                 {
                     // Format flee as "Cecil flees." to match "Cecil attacks."
-                    message = $"{attackerName} flees";
+                    message = string.Format(T("{0} flees"), attackerName);
                     GlobalBattleMessageTracker.SetFleeInProgress(true);
                 }
                 else if (actionName.Equals("Attack", StringComparison.OrdinalIgnoreCase))
                 {
-                    message = $"{attackerName} attacks";
+                    message = string.Format(T("{0} attacks"), attackerName);
                 }
                 else
                 {
-                    message = $"{attackerName} uses {actionName}";
+                    message = string.Format(T("{0} uses {1}"), attackerName, actionName);
                 }
 
                 // Record this action to prevent duplicates from SetCommadnMessage
@@ -401,25 +410,63 @@ namespace FFIV_ScreenReader.Patches
     [HarmonyPatch(typeof(Il2CppLast.Battle.Function.BattleBasicFunction), nameof(Il2CppLast.Battle.Function.BattleBasicFunction.CreateDamageView))]
     public static class BattleBasicFunction_CreateDamageView_Patch
     {
-        [HarmonyPostfix]
-        public static void Postfix(Il2CppLast.Battle.BattleUnitData data, int value, Il2CppLast.Systems.HitType hitType, bool isRecovery)
+        // BattleBaseFunction.<battleActData>k__BackingField — a protected property, so read by offset.
+        private const int OFFSET_BATTLE_ACT_DATA = 0x28;
+        // Ability.TypeId of weapon attacks (the Fight command's ability 1 has this type).
+        private const int WEAPON_ABILITY_TYPE = 4;
+
+        /// <summary>
+        /// The attack's own hit count against this target, from the function's calculation results
+        /// (ICalcResultDic → ICalcResult.GetHitCount). FF4 is an ATB game, and the game only draws
+        /// the on-screen ×N (BattleBasicFunction.CreateHitCount) when SystemConfigData.GetBattleType()
+        /// is Command — FF4's returns ATB — so CreateHitCount never fires here and the count has to
+        /// come from the calculation. Weapon attacks only, the same rule the ×N display uses; 1 for
+        /// anything else or on any failure.
+        /// </summary>
+        private static int ReadWeaponHitCount(Il2CppLast.Battle.Function.BattleBasicFunction function, Il2CppLast.Battle.BattleUnitData target)
         {
             try
             {
-                string targetName = BattleUnitHelper.GetUnitName(data) ?? "Unknown";
+                if (function == null || target == null) return 1;
+                IntPtr actPtr = System.Runtime.InteropServices.Marshal.ReadIntPtr(function.Pointer, OFFSET_BATTLE_ACT_DATA);
+                if (actPtr == IntPtr.Zero) return 1;
+                var abilities = new BattleActData(actPtr).abilityList;
+                if (abilities == null || abilities.Count == 0 || abilities[0] == null
+                    || abilities[0].TypeId != WEAPON_ABILITY_TYPE)
+                    return 1;
+                var results = function.ICalcResultDic;
+                if (results == null || !results.ContainsKey(target)) return 1;
+                var result = results[target];
+                return result != null ? Math.Max(1, result.GetHitCount()) : 1;
+            }
+            catch
+            {
+                return 1;
+            }
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.Battle.Function.BattleBasicFunction __instance, Il2CppLast.Battle.BattleUnitData data, int value, Il2CppLast.Systems.HitType hitType, bool isRecovery)
+        {
+            try
+            {
+                string targetName = BattleUnitHelper.GetUnitName(data) ?? T("Unknown");
 
                 // Consume the multi-hit count captured by CreateHitCount (fires just before this view,
                 // on the same or adjacent frame). Reject a stale count from an earlier action that never
                 // produced a damage view, then reset to 1 so a later damage with no fresh hit count
-                // defaults to single.
+                // defaults to single. In practice FF4 never draws the ×N (see ReadWeaponHitCount), so
+                // the count comes from the attack's calculation.
                 bool fresh = UnityEngine.Time.frameCount - DamageViewUIManager_CreateHitCount_Patch.PendingHitCountFrame <= 1;
                 int hitCount = fresh ? DamageViewUIManager_CreateHitCount_Patch.PendingHitCount : 1;
                 DamageViewUIManager_CreateHitCount_Patch.PendingHitCount = 1;
+                if (hitCount <= 1)
+                    hitCount = ReadWeaponHitCount(__instance, data);
 
                 string message;
                 if (hitType == Il2CppLast.Systems.HitType.Miss)
                 {
-                    message = $"{targetName}: Miss";
+                    message = string.Format(T("{0}: Miss"), targetName);
                 }
                 else if (value == 0)
                 {
@@ -428,19 +475,19 @@ namespace FFIV_ScreenReader.Patches
                 }
                 else if (hitType == Il2CppLast.Systems.HitType.Recovery)
                 {
-                    message = $"{targetName}: Recovered {value} HP";
+                    message = string.Format(T("{0}: Recovered {1} HP"), targetName, value);
                 }
                 else if (hitType == Il2CppLast.Systems.HitType.MPRecovery)
                 {
-                    message = $"{targetName}: Recovered {value} MP";
+                    message = string.Format(T("{0}: Recovered {1} MP"), targetName, value);
                 }
                 else
                 {
                     // HP DAMAGE — optionally prepend the multi-hit "{N}x" multiplier (e.g. "14x1552 damage")
                     // when the Multi-hit Damage setting is on; otherwise keep just the total.
                     message = (PreferencesManager.DamageDisplay == 1 && hitCount > 1)
-                        ? $"{targetName}: {hitCount}x{value} damage"
-                        : $"{targetName}: {value} damage";
+                        ? string.Format(T("{0}: {1}x{2} damage"), targetName, hitCount, value)
+                        : string.Format(T("{0}: {1} damage"), targetName, value);
                 }
 
                 FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
@@ -497,7 +544,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 // Get target name
-                string targetName = BattleUnitHelper.GetUnitName(battleUnitData) ?? "Unknown";
+                string targetName = BattleUnitHelper.GetUnitName(battleUnitData) ?? T("Unknown");
 
                 // Get condition name from ID - look up from ConfirmedConditionList (includes equipment statuses)
                 string conditionName = null;
@@ -541,17 +588,17 @@ namespace FFIV_ScreenReader.Patches
                     // Final fallback: Announce the raw ID if we couldn't resolve the name
                     if (conditionName == null)
                     {
-                        conditionName = $"Status {id}";
+                        conditionName = string.Format(T("Status {0}"), id);
                         MelonLogger.Warning($"[Status] Could not resolve condition ID {id}, announcing as raw ID");
                     }
                 }
                 catch (Exception condEx)
                 {
                     MelonLogger.Warning($"Error resolving condition ID {id}: {condEx.Message}");
-                    conditionName = $"Status {id}";
+                    conditionName = string.Format(T("Status {0}"), id);
                 }
 
-                string announcement = $"{targetName}: {conditionName}";
+                string announcement = string.Format(T("{0}: {1}"), targetName, conditionName);
 
                 // Skip duplicates
                 if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
@@ -583,6 +630,19 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 BattleState.SetActive();
+
+                // New battle: clear the previous battle's announcement guards so its last turn,
+                // command, list entry, status or system message ("Back attack!") is not
+                // swallowed as a duplicate when it repeats here.
+                AnnouncementDeduplicator.Reset(
+                    AnnouncementContexts.BATTLE_TURN,
+                    AnnouncementContexts.BATTLE_COMMAND_SELECT,
+                    AnnouncementContexts.BATTLE_ITEM_SELECT,
+                    AnnouncementContexts.BATTLE_ABILITY_SELECT,
+                    AnnouncementContexts.BATTLE_CONDITION_ADD,
+                    AnnouncementContexts.BATTLE_SET_COMMAND_MESSAGE);
+                BattleCommandMessageManualPatches.ResetState();
+                BattleResultState.ResetState();
             }
             catch (Exception ex)
             {
@@ -641,6 +701,16 @@ namespace FFIV_ScreenReader.Patches
         private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_TURN;
         public static Il2Cpp.BattlePlayerData CurrentActiveCharacter = null;
 
+        /// <summary>
+        /// Clears the command-menu guard before the new turn's command list is built, so the
+        /// first focused command is announced even when it sits at the previous turn's index.
+        /// </summary>
+        [HarmonyPrefix]
+        public static void Prefix()
+        {
+            AnnouncementDeduplicator.Reset(AnnouncementContexts.BATTLE_COMMAND_SELECT);
+        }
+
         [HarmonyPostfix]
         public static void Postfix(Il2Cpp.BattlePlayerData targetData)
         {
@@ -673,7 +743,7 @@ namespace FFIV_ScreenReader.Patches
                             return;
                         }
 
-                        string message = $"{characterName}'s turn";
+                        string message = string.Format(T("{0}'s turn"), characterName);
                         FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
                     }
                 }
@@ -1007,10 +1077,7 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Use interrupt for defeat message so it's heard immediately
-                bool isDefeatMessage = cleanMessage.Contains("defeated", StringComparison.OrdinalIgnoreCase);
-
-                FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: isDefeatMessage);
+                FFIV_ScreenReaderMod.SpeakText(cleanMessage, interrupt: IsDefeatMessage(cleanMessage));
             }
             catch (Exception ex)
             {
@@ -1019,7 +1086,21 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
-        /// Reset state tracking (call at battle end).
+        /// The defeat message interrupts so it's heard immediately. Compared against the game's own
+        /// localized text for BATTLE_RESULT_ANNIHILATION so it works in every language; the English
+        /// keyword is only a fallback for when that text can't be resolved.
+        /// </summary>
+        private static bool IsDefeatMessage(string message)
+        {
+            string defeat = TextUtils.NormalizeWhitespace(TextUtils.StripIconMarkup(
+                MessageHelper.GetLocalizedMessage(Il2Cpp.UiMessageConstants.BATTLE_RESULT_ANNIHILATION)));
+            return string.IsNullOrEmpty(defeat)
+                ? message.Contains("defeated", StringComparison.OrdinalIgnoreCase)
+                : message == defeat;
+        }
+
+        /// <summary>
+        /// Reset state tracking (call at battle start).
         /// </summary>
         public static void ResetState()
         {

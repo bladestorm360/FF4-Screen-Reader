@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 // Type aliases for IL2CPP types - Base
 using BasePopup = Il2CppLast.UI.Popup;
@@ -99,6 +100,8 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 TryPatchBasePopup(harmony);
+                PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputCommonPopup), "UpdateFocus",
+                    typeof(PopupPatches), nameof(CommonPopup_UpdateFocus_Postfix), "[Popup]");
                 TryPatchTitleScreen(harmony);
                 TryPatchGameOverSelectPopupUpdateCommand(harmony);
                 TryPatchGameOverLoadPopup(harmony);
@@ -217,7 +220,7 @@ namespace FFIV_ScreenReader.Patches
 
         private static string ReadGameOverSelectPopup(IntPtr ptr)
         {
-            return "Game Over";
+            return T("Game Over");
         }
 
         private static string ReadInfomationPopup(IntPtr ptr)
@@ -241,6 +244,54 @@ namespace FFIV_ScreenReader.Patches
         #endregion
 
         #region Button Reading
+
+        // Set while a CommonPopup's open read (message + focused button) is pending, so the
+        // UpdateFocus fired by the popup's own cursor setup doesn't speak the button first.
+        private static bool commonPopupOpenReadPending;
+
+        /// <summary>
+        /// Postfix for CommonPopup.UpdateFocus — the popup's own focus change, fired on open and on
+        /// every Yes/No move (the game never calls UpdateCommand). Reads the focused button for
+        /// every KeyInput CommonPopup, including the save-overwrite confirmation.
+        /// </summary>
+        public static void CommonPopup_UpdateFocus_Postfix(KeyInputCommonPopup __instance)
+        {
+            try
+            {
+                if (__instance == null || commonPopupOpenReadPending)
+                    return;
+
+                int index = __instance.selectCursor?.Index ?? -1;
+                if (!AnnouncementDeduplicator.ShouldAnnounce(AnnouncementContexts.COMMON_POPUP_BUTTON, index))
+                    return;
+
+                string buttonText = ReadButtonFromCommandList(__instance.Pointer, COMMON_CMDLIST_OFFSET, index);
+                if (!string.IsNullOrWhiteSpace(buttonText))
+                    FFIV_ScreenReaderMod.SpeakText(TextUtils.StripIconMarkup(buttonText), interrupt: true);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error in CommonPopup.UpdateFocus postfix: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Open read for a CommonPopup: title/message followed by the initially focused button.
+        /// </summary>
+        private static string ReadCommonPopupWithFocus(KeyInputCommonPopup popup)
+        {
+            commonPopupOpenReadPending = false;
+
+            string announcement = ReadCommonPopup(popup.Pointer);
+            int index = popup.selectCursor?.Index ?? -1;
+            string buttonText = ReadButtonFromCommandList(popup.Pointer, COMMON_CMDLIST_OFFSET, index);
+            if (string.IsNullOrWhiteSpace(buttonText) ||
+                !AnnouncementDeduplicator.ShouldAnnounce(AnnouncementContexts.COMMON_POPUP_BUTTON, index))
+                return announcement;
+
+            buttonText = TextUtils.StripIconMarkup(buttonText);
+            return string.IsNullOrEmpty(announcement) ? buttonText : $"{announcement}. {buttonText}";
+        }
 
         public static void ReadCurrentButton(GameCursor cursor)
         {
@@ -307,8 +358,10 @@ namespace FFIV_ScreenReader.Patches
                 var commonPopup = __instance.TryCast<KeyInputCommonPopup>();
                 if (commonPopup != null)
                 {
+                    AnnouncementDeduplicator.Reset(AnnouncementContexts.COMMON_POPUP_BUTTON);
+                    commonPopupOpenReadPending = true;
                     HandlePopupDetected("CommonPopup", commonPopup.Pointer, COMMON_CMDLIST_OFFSET,
-                        () => ReadCommonPopup(commonPopup.Pointer));
+                        () => ReadCommonPopupWithFocus(commonPopup));
                     return;
                 }
 
@@ -341,7 +394,7 @@ namespace FFIV_ScreenReader.Patches
                 if (touchGameOver != null)
                 {
                     HandlePopupDetected("TouchGameOverSelectPopup", touchGameOver.Pointer, -1,
-                        () => "Game Over");
+                        () => T("Game Over"));
                     return;
                 }
             }
@@ -381,6 +434,9 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                // The next popup starts fresh, including ones that skip the open read (shops)
+                commonPopupOpenReadPending = false;
+                AnnouncementDeduplicator.Reset(AnnouncementContexts.COMMON_POPUP_BUTTON);
                 if (PopupState.IsConfirmationPopupActive)
                 {
                     PopupState.Clear();

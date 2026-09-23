@@ -9,6 +9,7 @@ using Il2CppLast.Management;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 // Import MenuState classes
 using ItemMenuState = FFIV_ScreenReader.Core.ItemMenuState;
@@ -285,6 +286,37 @@ namespace FFIV_ScreenReader.Patches
     }
 
     /// <summary>
+    /// Description of the equipment focused in the slot or candidate list, read by the
+    /// details (I) key. Cleared with EquipmentMenuState.
+    /// </summary>
+    public static class EquipmentDetails
+    {
+        public static string LastDescription { get; set; }
+    }
+
+    /// <summary>
+    /// Clears the slot guard when the slot list (re)gains focus, so the focused slot
+    /// re-announces on entry and on back-out from the candidate list.
+    /// </summary>
+    [HarmonyPatch(typeof(EquipmentWindowController), "InfoInit")]
+    public static class EquipmentWindowController_InfoInit_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() => EquipmentAnnouncementDeduplicator.Reset();
+    }
+
+    /// <summary>
+    /// Clears the candidate guard when the equipment candidate list opens, so its focused
+    /// item announces even if it matches the last candidate spoken.
+    /// </summary>
+    [HarmonyPatch(typeof(EquipmentWindowController), "SelectInit")]
+    public static class EquipmentWindowController_SelectInit_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() => AnnouncementDeduplicator.Reset(AnnouncementContexts.EQUIPMENT_SELECT);
+    }
+
+    /// <summary>
     /// Patches for item and equipment menu navigation.
     /// Announces item/equipment name, quantity, and description when browsing.
     /// </summary>
@@ -333,70 +365,118 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Store for I key equipment compatibility lookup
-                ItemMenuState.LastSelectedItem = itemData;
-
-                string itemName = itemData.Name;
-                if (string.IsNullOrEmpty(itemName))
-                {
-                    return;
-                }
-
-                // Remove icon markup from name (e.g., <ic_Drag>, <IC_DRAG>)
-                itemName = StripIconMarkup(itemName);
-
-                if (string.IsNullOrEmpty(itemName))
-                {
-                    return;
-                }
-
-                // Build announcement with item details
-                string announcement = itemName;
-
-                // Add quantity if available
-                int count = itemData.Count;
-                if (count > 0)
-                {
-                    announcement += $", {count}";
-                }
-
-                // Add description if available
-                string description = itemData.Description;
-                if (!string.IsNullOrEmpty(description))
-                {
-                    // Remove icon markup
-                    description = StripIconMarkup(description);
-
-                    if (!string.IsNullOrEmpty(description))
-                    {
-                        announcement += $", {description}";
-                    }
-                }
-
-                // Skip duplicates
-                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
-                {
-                    return;
-                }
-
-                // Set item menu state active
-                ItemMenuState.SetActive();
-
-                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, targetList.Count);
-                FFIV_ScreenReaderMod.SpeakText(announcement);
-
-                // Auto Detail: automatically read the equip-compatibility detail normally
-                // reached with the details key, queued after the name (interrupt: false) so it
-                // never cuts off the name. The content dedup guard above already returned early
-                // for a repeat of the same item, so this fires once per focused item.
-                if (PreferencesManager.AutoDetailEnabled)
-                {
-                    ItemDetailsAnnouncer.AnnounceEquipRequirements(interrupt: false);
-                }
+                Announce(itemData, index, targetList.Count);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in ItemListController.SelectContent patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Announces an item-list row: name, quantity, the description when Auto Detail is on
+        /// (otherwise on the details key), and position. Shared by cursor movement and the
+        /// list-entry reader; deduplicated on the announcement text.
+        /// </summary>
+        internal static void Announce(ItemListContentData itemData, int index, int listCount)
+        {
+            // Store for the details (I) and usable-by (U) keys
+            ItemMenuState.LastSelectedItem = itemData;
+
+            // Remove icon markup from name (e.g., <ic_Drag>, <IC_DRAG>)
+            string itemName = StripIconMarkup(itemData.Name);
+            if (string.IsNullOrEmpty(itemName))
+            {
+                return;
+            }
+
+            // Build announcement with item details
+            string announcement = itemName;
+
+            // Add quantity if available
+            int count = itemData.Count;
+            if (count > 0)
+            {
+                announcement += $", {count}";
+            }
+
+            // Auto Detail: include the description the details key would read
+            if (PreferencesManager.AutoDetailEnabled)
+            {
+                string description = StripIconMarkup(itemData.Description);
+                if (!string.IsNullOrEmpty(description))
+                {
+                    announcement += $", {description}";
+                }
+            }
+
+            // Skip duplicates
+            if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
+            {
+                return;
+            }
+
+            // Set item menu state active
+            ItemMenuState.SetActive();
+
+            announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, listCount);
+            FFIV_ScreenReaderMod.SpeakText(announcement);
+        }
+    }
+
+    /// <summary>
+    /// Re-announces the focused row when the item list (Use / Key Items / Sort) (re)gains focus —
+    /// on entry and on back-out from target selection. ItemListController.SelectContent only fires
+    /// on cursor movement, so (re)entry was silent. The prefix clears the row guard so a
+    /// SelectContent fired inside the Init body still speaks; the postfix reads the focused row one
+    /// frame later through the same deduplicated announcer, so the two paths never double up.
+    /// </summary>
+    [HarmonyPatch]
+    public static class ItemListController_ListInit_Patch
+    {
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
+        {
+            foreach (var name in new[] { "UseSelectInit", "ImportantSelectInit", "OrganizeSelectInit" })
+            {
+                var method = AccessTools.Method(typeof(Il2CppLast.UI.KeyInput.ItemListController), name);
+                if (method != null)
+                    yield return method;
+                else
+                    MelonLogger.Warning($"[ItemMenu] ItemListController.{name} not found");
+            }
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix() => AnnouncementDeduplicator.Reset(AnnouncementContexts.ITEM_LIST);
+
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.UI.KeyInput.ItemListController __instance)
+        {
+            CoroutineManager.StartManaged(AnnounceFocusAfterFrame(__instance));
+        }
+
+        private static System.Collections.IEnumerator AnnounceFocusAfterFrame(Il2CppLast.UI.KeyInput.ItemListController controller)
+        {
+            yield return null; // let the list and cursor settle
+
+            try
+            {
+                if (controller == null || controller.gameObject == null || !controller.gameObject.activeInHierarchy)
+                    yield break;
+
+                var dataList = controller.dataList;
+                var cursor = controller.selectCursor;
+                if (dataList == null || cursor == null)
+                    yield break;
+
+                var list = new Il2CppSystem.Collections.Generic.List<ItemListContentData>(dataList);
+                var itemData = SelectContentHelper.TryGetItem(list, cursor.Index);
+                if (itemData != null)
+                    ItemListController_SelectContent_Patch.Announce(itemData, cursor.Index, list.Count);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Error reading item list focus: {ex.Message}");
             }
         }
     }
@@ -457,17 +537,11 @@ namespace FFIV_ScreenReader.Patches
                     }
                 }
 
-                // Add description if available
-                string description = equipmentData.Description;
-                if (!string.IsNullOrEmpty(description))
+                // Description for the details (I) key; spoken on focus only with Auto Detail
+                string description = StripIconMarkup(equipmentData.Description);
+                if (PreferencesManager.AutoDetailEnabled && !string.IsNullOrEmpty(description))
                 {
-                    // Remove icon markup
-                    description = StripIconMarkup(description);
-
-                    if (!string.IsNullOrEmpty(description))
-                    {
-                        announcement += $", {description}";
-                    }
+                    announcement += $", {description}";
                 }
 
                 // Skip duplicates
@@ -478,6 +552,7 @@ namespace FFIV_ScreenReader.Patches
 
                 // Set equipment menu state active
                 EquipmentMenuState.SetActive();
+                EquipmentDetails.LastDescription = description;
 
                 announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, __instance.ContentDataList.Count);
                 FFIV_ScreenReaderMod.SpeakText(announcement);
@@ -522,7 +597,7 @@ namespace FFIV_ScreenReader.Patches
 
                     // Get item data from Data property
                     var itemData = contentView.Data;
-                    if (itemData != null)
+                    if (itemData != null && !string.IsNullOrEmpty(itemData.Name))
                     {
                         equippedItem = itemData.Name;
 
@@ -533,6 +608,15 @@ namespace FFIV_ScreenReader.Patches
                             equippedItem += ", " + paramMessage;
                         }
                     }
+                    else if (!string.IsNullOrEmpty(slotName))
+                    {
+                        // Nothing equipped in this slot
+                        equippedItem = T("Empty");
+                    }
+                    // Own try: the getter may throw on an empty-slot stub, which must not cost
+                    // the slot announcement below.
+                    try { EquipmentDetails.LastDescription = itemData?.Deiscription; } // game typo
+                    catch { EquipmentDetails.LastDescription = null; }
                 }
 
                 // Build announcement
@@ -602,32 +686,91 @@ namespace FFIV_ScreenReader.Patches
 
                 // Convert IEnumerable to List for indexed access
                 var targetList = new Il2CppSystem.Collections.Generic.List<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController>(targetContents);
-                var selectedController = SelectContentHelper.TryGetItem(targetList, index);
-                if (selectedController == null || selectedController.CurrentData == null)
-                    return;
-
-                var data = selectedController.CurrentData;
-                string characterName = data.Name;
-                if (string.IsNullOrEmpty(characterName))
-                {
-                    return;
-                }
-
-                // Build announcement with HP, MP, and status conditions using helper
-                string announcement = characterName;
-                announcement += CharacterStatusHelper.GetFullStatus(data.Parameter);
-
-                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
-                {
-                    return;
-                }
-
-                announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, targetList.Count);
-                FFIV_ScreenReaderMod.SpeakText(announcement);
+                Announce(targetList, index);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in ItemUseController.SelectContent patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Announces the item-use target at <paramref name="index"/> (name, HP/MP, status, position).
+        /// Shared by cursor movement and the target-entry reader; deduplicated on the text.
+        /// </summary>
+        internal static void Announce(Il2CppSystem.Collections.Generic.List<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController> targetList, int index)
+        {
+            var data = SelectContentHelper.TryGetItem(targetList, index)?.CurrentData;
+            string characterName = data?.Name;
+            if (string.IsNullOrEmpty(characterName))
+            {
+                return;
+            }
+
+            // Build announcement with HP, MP, and status conditions using helper
+            string announcement = characterName;
+            announcement += CharacterStatusHelper.GetFullStatus(data.Parameter);
+
+            if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
+            {
+                return;
+            }
+
+            announcement = FFIV_ScreenReader.Utils.MenuPosition.Format(announcement, index, targetList.Count);
+            FFIV_ScreenReaderMod.SpeakText(announcement);
+        }
+    }
+
+    /// <summary>
+    /// Re-announces the focused character when item-use target selection (single or all) begins.
+    /// Same prefix-reset / deferred-read pattern as ItemListController_ListInit_Patch. Reads the
+    /// targets through GetTargets(), the display-order list SelectContent itself receives.
+    /// </summary>
+    [HarmonyPatch]
+    public static class ItemUseController_TargetInit_Patch
+    {
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
+        {
+            foreach (var name in new[] { "SingleInit", "AllInit" })
+            {
+                var method = AccessTools.Method(typeof(Il2CppLast.UI.KeyInput.ItemUseController), name);
+                if (method != null)
+                    yield return method;
+                else
+                    MelonLogger.Warning($"[ItemMenu] ItemUseController.{name} not found");
+            }
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix() => AnnouncementDeduplicator.Reset(AnnouncementContexts.ITEM_USE_TARGET);
+
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppLast.UI.KeyInput.ItemUseController __instance)
+        {
+            CoroutineManager.StartManaged(AnnounceFocusAfterFrame(__instance));
+        }
+
+        private static System.Collections.IEnumerator AnnounceFocusAfterFrame(Il2CppLast.UI.KeyInput.ItemUseController controller)
+        {
+            yield return null; // let the target list and cursor settle
+
+            try
+            {
+                if (controller == null || controller.gameObject == null || !controller.gameObject.activeInHierarchy)
+                    yield break;
+
+                var targets = controller.GetTargets();
+                var cursor = controller.selectCursor;
+                if (targets == null || cursor == null)
+                    yield break;
+
+                ItemUseController_SelectContent_Patch.Announce(
+                    new Il2CppSystem.Collections.Generic.List<Il2CppLast.UI.KeyInput.ItemTargetSelectContentController>(targets),
+                    cursor.Index);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ItemMenu] Error reading item target focus: {ex.Message}");
             }
         }
     }

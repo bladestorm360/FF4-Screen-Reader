@@ -8,6 +8,7 @@ using Il2CppLast.Systems;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Menus;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using GameCursor = Il2CppLast.UI.Cursor;
 
 
@@ -89,7 +90,7 @@ namespace FFIV_ScreenReader.Patches
                     (currentState == PartySettingMenuBaseController.State.MemberSelect ||
                      currentState == PartySettingMenuBaseController.State.MemberSelect))
                 {
-                    announcement = "Entering character list.";
+                    announcement = T("Entering character list.");
                 }
                 else if ((lastState == PartySettingMenuBaseController.State.MemberSelect ||
                           lastState == PartySettingMenuBaseController.State.MemberSelect ||
@@ -97,7 +98,7 @@ namespace FFIV_ScreenReader.Patches
                          (currentState == PartySettingMenuBaseController.State.SlotSelect ||
                           currentState == PartySettingMenuBaseController.State.SlotSelect))
                 {
-                    announcement = "Entering party slot grid.";
+                    announcement = T("Entering party slot grid.");
                 }
 
                 lastState = currentState;
@@ -168,24 +169,20 @@ namespace FFIV_ScreenReader.Patches
                 // Get the character ID in this slot
                 int characterId = __instance.GetSlotPostionCharaterId(slotCount, index);
 
-                string announcement;
+                string occupant;
                 if (characterId == 0)
                 {
-                    announcement = $"Party {partyNumber}, Position {position}: Empty";
+                    occupant = T("Empty");
                 }
                 else
                 {
                     // Find the character name
                     string characterName = GetCharacterName(__instance, characterId);
-                    if (!string.IsNullOrEmpty(characterName))
-                    {
-                        announcement = $"Party {partyNumber}, Position {position}: {characterName}";
-                    }
-                    else
-                    {
-                        announcement = $"Party {partyNumber}, Position {position}: Character {characterId}";
-                    }
+                    occupant = !string.IsNullOrEmpty(characterName)
+                        ? characterName
+                        : string.Format(T("Character {0}"), characterId);
                 }
+                string announcement = string.Format(T("Party {0}, Position {1}: {2}"), partyNumber, position, occupant);
 
                 // Skip duplicate announcements
                 if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, announcement))
@@ -282,7 +279,7 @@ namespace FFIV_ScreenReader.Patches
             }
             else
             {
-                parts.Add($"Character {index + 1}");
+                parts.Add(string.Format(T("Character {0}"), index + 1));
             }
 
             // Level and stats
@@ -292,17 +289,17 @@ namespace FFIV_ScreenReader.Patches
 
                 // Level
                 int level = param.ConfirmedLevel();
-                parts.Add($"Level {level}");
+                parts.Add($"{T("Level")} {level}");
 
                 // HP
                 int currentHP = param.CurrentHP;
                 int maxHP = param.ConfirmedMaxHp();
-                parts.Add($"HP {currentHP}/{maxHP}");
+                parts.Add($"{T("HP")} {currentHP}/{maxHP}");
 
                 // MP
                 int currentMP = param.CurrentMP;
                 int maxMP = param.ConfirmedMaxMp();
-                parts.Add($"MP {currentMP}/{maxMP}");
+                parts.Add($"{T("MP")} {currentMP}/{maxMP}");
             }
 
             // Check party assignment
@@ -336,7 +333,7 @@ namespace FFIV_ScreenReader.Patches
                     {
                         if (controller.slot1Members[i] == characterId)
                         {
-                            return "Party 1";
+                            return string.Format(T("Party {0}"), 1);
                         }
                     }
                 }
@@ -348,7 +345,7 @@ namespace FFIV_ScreenReader.Patches
                     {
                         if (controller.slot2Members[i] == characterId)
                         {
-                            return "Party 2";
+                            return string.Format(T("Party {0}"), 2);
                         }
                     }
                 }
@@ -360,13 +357,13 @@ namespace FFIV_ScreenReader.Patches
                     {
                         if (controller.slot3Members[i] == characterId)
                         {
-                            return "Party 3";
+                            return string.Format(T("Party {0}"), 3);
                         }
                     }
                 }
 
                 // Not assigned to any party
-                return "not assigned";
+                return T("not assigned");
             }
             catch (Exception ex)
             {

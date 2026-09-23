@@ -201,6 +201,16 @@ namespace FFIV_ScreenReader.Core
                 // Clear speaker context on scene change to re-establish who is speaking
                 DialogueTracker.ClearLastAnnouncedSpeaker();
 
+                // A message window destroyed by a scene change never reaches MessageWindowManager.Close,
+                // which would leave dialogue mode stuck (navigation audio muted, controller mod mode
+                // preferring dialogue). Reset it here, but only when no window is actually open, so an
+                // additive scene load mid-dialogue can't wipe the pages being read. Runs before
+                // OnSceneTransition so the loops Reset restarts are stopped and restarted cleanly below.
+                if (DialogueTracker.IsInDialogue && !IsMessageWindowOpen())
+                {
+                    DialogueTracker.Reset();
+                }
+
                 // Clear ALL menu states on scene change to prevent stale state from suppressing announcements
                 // This fixes the issue where popups don't read on first game load
                 MenuState.ClearAllMenuStates();
@@ -213,6 +223,9 @@ namespace FFIV_ScreenReader.Core
 
                 // Reset footstep tracking for new map
                 FootstepPatches.ResetState();
+
+                // Drop the cached battle pause controller (it belongs to the old scene)
+                BattlePausePatches.Reset();
 
                 // If we were in battle and are now loading a non-battle scene, reset battle state
                 // This restores navigation settings (wall tones, footsteps, etc.) at the correct time
@@ -250,6 +263,23 @@ namespace FFIV_ScreenReader.Core
             catch (System.Exception ex)
             {
                 LoggerInstance.Error($"[ComponentCache] Error in OnSceneLoaded: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Whether the game's message window is currently shown. MessageWindowManager.IsOpen checks
+        /// currentWindowController (Unity-null once destroyed), isPlaying and the window's active state.
+        /// </summary>
+        private static bool IsMessageWindowOpen()
+        {
+            try
+            {
+                var manager = Il2CppLast.Message.MessageWindowManager.Instance;
+                return manager != null && manager.IsOpen();
+            }
+            catch
+            {
+                return false; // Manager torn down with the scene
             }
         }
 
@@ -337,10 +367,9 @@ namespace FFIV_ScreenReader.Core
         public static bool AnnounceOnBeaconRestartEnabled => PreferencesManager.AnnounceOnBeaconRestartEnabled;
 
         /// <summary>
-        /// Toggles the "Auto Detail" feature. When on, focusing an item in the item menu or a
-        /// shop entry automatically reads the detail normally reached with the details key
-        /// (equip compatibility for items, description and MP cost in shops), queued after the
-        /// name so it never interrupts it.
+        /// Toggles the "Auto Detail" feature (F7 / mod menu). When on, focusing an item, spell,
+        /// battle list entry or shop entry also reads the description normally reached with the
+        /// details key; when off, the description is only read on the details key.
         /// </summary>
         internal void ToggleAutoDetail()
         {
@@ -351,7 +380,7 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
-        /// Whether item/shop focus should automatically read the details-key detail.
+        /// Whether menu focus should automatically read the details-key description.
         /// </summary>
         public static bool AutoDetailEnabled => PreferencesManager.AutoDetailEnabled;
 
@@ -386,6 +415,14 @@ namespace FFIV_ScreenReader.Core
         public static void SpeakText(string text, bool interrupt = true)
         {
             tolk?.Speak(text, interrupt);
+        }
+
+        /// <summary>
+        /// Stops current speech without speaking anything (controller button/navigation interrupt).
+        /// </summary>
+        public static void InterruptSpeech()
+        {
+            tolk?.Silence();
         }
     }
 }

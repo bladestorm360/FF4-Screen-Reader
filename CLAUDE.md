@@ -9,11 +9,11 @@ Screen-reader/accessibility mod for FF4 Pixel Remaster. MelonLoader + Harmony pa
 - Moon pathfinding with step-by-step path validation
 - Battle: turn order, targeting, damage/heals, status effects
 - Battle: two-part abilities (Pray, Steal, Flee) with proper action/result separation
-- Victory screen: gil, items, XP, level-ups with stat growth
+- Victory screen: phased — gil + XP, level-ups with stat growth, items, learned spells (one page each)
 - Multiple vehicle support (Hovercraft, Enterprise, Falcon, Lunar Whale)
 
 ## TODO
-- **Multi-phase Victory Screen**: Break into phases (gil/items first, then per-character XP/level-ups) for better pacing
+- ~~**Multi-phase Victory Screen**~~ — done 2026-09-23 (`Patches/BattleResultPatches.cs`; see docs/debug.md "Phased Victory Screen")
 
 ## Documentation
 Update: `CLAUDE.md`, `docs/debug.md`, `docs/plan.md`. **NEVER edit `readme.md`** (user-maintained).

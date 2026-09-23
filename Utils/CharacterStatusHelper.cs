@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Il2CppLast.Data;
 using Il2CppLast.Management;
 using MelonLoader;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Utils
 {
@@ -29,7 +30,7 @@ namespace FFIV_ScreenReader.Utils
                 int currentMP = parameter.CurrentMP;
                 int maxMP = parameter.ConfirmedMaxMp();
 
-                return $"HP {currentHP}/{maxHP}, MP {currentMP}/{maxMP}";
+                return $"{T("HP")} {currentHP}/{maxHP}, {T("MP")} {currentMP}/{maxMP}";
             }
             catch (Exception ex)
             {

@@ -2,18 +2,20 @@ using System;
 using System.Collections.Generic;
 using MelonLoader;
 using FFIV_ScreenReader.Core;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 // Type aliases for IL2CPP types
 using UserDataManager = Il2CppLast.Management.UserDataManager;
 using EquipUtility = Il2CppLast.Systems.EquipUtility;
+using FieldController = Il2CppLast.Map.FieldController;
 using OwnedCharacterData = Il2CppLast.Data.User.OwnedCharacterData;
-using OwnedItemData = Il2CppLast.Data.User.OwnedItemData;
 
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
-    /// Announces equipment character requirements when 'I' key is pressed in Items menu.
-    /// Only works for equipment (weapons/armor), silent for consumables/key items.
+    /// Item-menu details: which party members can equip the focused item (U key) and the
+    /// focused item's description (I key). Also holds the party/announcement helpers shared
+    /// with the shop's usable-by lookup.
     /// </summary>
     public static class ItemDetailsAnnouncer
     {
@@ -25,12 +27,7 @@ namespace FFIV_ScreenReader.Patches
         /// Announces which party members can equip the currently selected item.
         /// Only announces for weapons and armor, silent for other items.
         /// </summary>
-        /// <param name="interrupt">
-        /// When true (the details key), the announcement interrupts current speech.
-        /// When false (Auto Detail on focus), it is queued after the item name so it never
-        /// cuts off the name announcement.
-        /// </param>
-        public static void AnnounceEquipRequirements(bool interrupt = true)
+        public static void AnnounceEquipRequirements()
         {
             try
             {
@@ -38,58 +35,23 @@ namespace FFIV_ScreenReader.Patches
                 if (itemData == null)
                     return;
 
-                int itemType = itemData.ItemType;
-                int contentId = itemData.contentId;
-
                 // Only process equipment (weapons and armor)
+                int itemType = itemData.ItemType;
                 if (itemType != CONTENT_TYPE_WEAPON && itemType != CONTENT_TYPE_ARMOR)
                     return;
 
-                // Get UserDataManager
                 var userDataManager = UserDataManager.Instance();
                 if (userDataManager == null)
                     return;
 
                 // Get OwnedItemData from contentId
-                var ownedItemData = userDataManager.SearchOwnedItem(contentId);
+                var ownedItemData = userDataManager.SearchOwnedItem(itemData.contentId);
                 if (ownedItemData == null)
                     return;
 
-                // Get party members
-                var partyMembers = GetPartyMembers(userDataManager);
-                if (partyMembers == null || partyMembers.Count == 0)
-                    return;
-
-                // Check each party member using EquipUtility.CanEquipped(OwnedItemData, jobId)
-                var canEquipNames = new List<string>();
-                foreach (var character in partyMembers)
-                {
-                    if (character == null)
-                        continue;
-
-                    try
-                    {
-                        int jobId = character.JobId;
-                        bool canEquip = EquipUtility.CanEquipped(ownedItemData, jobId);
-                        string characterName = character.Name;
-
-                        if (canEquip && !string.IsNullOrEmpty(characterName))
-                        {
-                            canEquipNames.Add(characterName);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        MelonLogger.Warning($"[ItemDetails] Error checking character: {ex.Message}");
-                    }
-                }
-
-                // Build and announce the result
-                string announcement = BuildAnnouncement(canEquipNames);
+                string announcement = BuildAnnouncement(character => EquipUtility.CanEquipped(ownedItemData, character.JobId));
                 if (!string.IsNullOrEmpty(announcement))
-                {
-                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: interrupt);
-                }
+                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
             }
             catch (Exception ex)
             {
@@ -98,40 +60,76 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
-        /// Gets the list of current party members.
+        /// Announces the description of the currently selected item (details key).
         /// </summary>
-        private static List<OwnedCharacterData> GetPartyMembers(UserDataManager userDataManager)
+        public static void AnnounceDescription()
+        {
+            SpeakDescription(ItemMenuState.LastSelectedItem?.Description);
+        }
+
+        /// <summary>
+        /// Speaks a description for the details key, or "No description" when there is none.
+        /// </summary>
+        internal static void SpeakDescription(string description)
+        {
+            description = Utils.TextUtils.StripIconMarkup(description);
+            FFIV_ScreenReaderMod.SpeakText(string.IsNullOrEmpty(description) ? T("No description") : description, interrupt: true);
+        }
+
+        /// <summary>
+        /// Builds "Can equip: A, B" over the current party in on-screen order, or the
+        /// "no party members" message. Returns null if the party can't be read.
+        /// </summary>
+        internal static string BuildAnnouncement(Func<OwnedCharacterData, bool> canEquip)
+        {
+            var partyMembers = GetPartyMembers();
+            if (partyMembers == null || partyMembers.Count == 0)
+                return null;
+
+            var canEquipNames = new List<string>();
+            foreach (var character in partyMembers)
+            {
+                try
+                {
+                    if (canEquip(character) && !string.IsNullOrEmpty(character.Name))
+                        canEquipNames.Add(character.Name);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[ItemDetails] Error checking character: {ex.Message}");
+                }
+            }
+
+            return canEquipNames.Count == 0
+                ? T("No party members can equip")
+                : string.Format(T("Can equip: {0}"), string.Join(", ", canEquipNames));
+        }
+
+        /// <summary>
+        /// Gets the current party members in display (apparent) order.
+        /// </summary>
+        private static List<OwnedCharacterData> GetPartyMembers()
         {
             try
             {
-                // GetCorpsListClone returns the current party corps
-                var corpsList = userDataManager.GetCorpsListClone();
-                if (corpsList == null || corpsList.Count == 0)
+                var userDataManager = UserDataManager.Instance();
+                var corpsList = FieldController.GetCorpsListCloneWithApparentOrder();
+                var allCharacters = userDataManager?.GetOwnedCharactersClone(false);
+                if (corpsList == null || allCharacters == null)
                     return null;
 
-                // Get owned characters and filter by those in party
-                var allCharacters = userDataManager.GetOwnedCharactersClone(false);
-                if (allCharacters == null)
-                    return null;
-
-                // Build a set of character IDs in the current party
-                var partyCharacterIds = new HashSet<int>();
-                foreach (var corps in corpsList)
-                {
-                    if (corps != null)
-                    {
-                        partyCharacterIds.Add(corps.CharacterId);
-                    }
-                }
-
-                // Filter to only party members
-                var partyMembers = new List<OwnedCharacterData>();
+                var charactersById = new Dictionary<int, OwnedCharacterData>();
                 foreach (var character in allCharacters)
                 {
-                    if (character != null && partyCharacterIds.Contains(character.Id))
-                    {
-                        partyMembers.Add(character);
-                    }
+                    if (character != null)
+                        charactersById[character.Id] = character;
+                }
+
+                var partyMembers = new List<OwnedCharacterData>();
+                foreach (var corps in corpsList)
+                {
+                    if (corps != null && charactersById.TryGetValue(corps.CharacterId, out var member))
+                        partyMembers.Add(member);
                 }
 
                 return partyMembers;
@@ -141,19 +139,6 @@ namespace FFIV_ScreenReader.Patches
                 MelonLogger.Warning($"[ItemDetails] Error getting party members: {ex.Message}");
                 return null;
             }
-        }
-
-        /// <summary>
-        /// Builds the announcement string from the list of equippable character names.
-        /// </summary>
-        private static string BuildAnnouncement(List<string> characterNames)
-        {
-            if (characterNames == null || characterNames.Count == 0)
-            {
-                return "No party members can equip";
-            }
-
-            return "Can equip: " + string.Join(", ", characterNames);
         }
     }
 }

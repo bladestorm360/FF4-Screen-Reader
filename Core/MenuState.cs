@@ -261,6 +261,7 @@ namespace FFIV_ScreenReader.Core
         {
             MenuStateRegistry.SetState("Equipment", false);
             Patches.EquipmentAnnouncementDeduplicator.Reset();
+            Patches.EquipmentDetails.LastDescription = null;
         }
 
         public static bool ShouldSuppress() => IsActive;

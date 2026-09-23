@@ -10,15 +10,103 @@ using static FFIV_ScreenReader.Utils.ModTextTranslator;
 namespace FFIV_ScreenReader.Menus
 {
     /// <summary>
-    /// Reads the visible key help tooltips displayed on screen (button icons + action labels).
-    /// Activated by Shift+I on any screen.
-    /// Uses GameObjectCache + transform navigation + GetComponentsInChildren&lt;Text&gt;()
-    /// to avoid IL2CPP Cast constraint errors from array-based access on game-specific types.
+    /// Reads the controls display. Two independent features:
+    ///   • Shift+I — reads the visible key help tooltips (button icons + action labels) at once.
+    ///     Uses GameObjectCache + transform navigation + GetComponentsInChildren&lt;Text&gt;()
+    ///     to avoid IL2CPP Cast constraint errors from array-based access on game-specific types.
+    ///   • Arrows/WASD — step through the config "Gamepad/Keyboard Controls" pop-up one entry at a
+    ///     time (KeyContext.KeyHelp). ConfigMenuPatches renders the pop-up's entries on open and
+    ///     hands them over via <see cref="OpenControlsHelp"/>.
     /// </summary>
     public static class KeyHelpReader
     {
         // KeyHelpController.view (KeyHelpView) — private field, no public accessor
         private const int OFFSET_VIEW = 0x18;
+
+        // Controls pop-up entries (action + binding) and the focused entry.
+        private static List<string> helpEntries = null;
+        private static int helpIndex = 0;
+        // Owner validates the pop-up is still on screen, so a missed close can't leave
+        // KeyContext.KeyHelp stuck.
+        private static ConfigKeysSettingController helpOwner = null;
+
+        /// <summary>
+        /// Called when the Gamepad/Keyboard Controls pop-up opens, with its rendered entries.
+        /// Announces the first entry as the initial focus.
+        /// </summary>
+        public static void OpenControlsHelp(ConfigKeysSettingController owner, List<string> entries)
+        {
+            if (entries == null || entries.Count == 0)
+            {
+                CloseControlsHelp();
+                return;
+            }
+
+            helpOwner = owner;
+            helpEntries = entries;
+            helpIndex = 0;
+            SpeakHelpEntry();
+        }
+
+        /// <summary>Called when the pop-up closes / returns to the controls list.</summary>
+        public static void CloseControlsHelp()
+        {
+            helpOwner = null;
+            helpEntries = null;
+            helpIndex = 0;
+        }
+
+        /// <summary>True while the controls pop-up is on screen — drives KeyContext.KeyHelp.</summary>
+        public static bool IsScreenActive
+        {
+            get
+            {
+                if (helpEntries == null)
+                    return false;
+                try
+                {
+                    if (helpOwner != null && helpOwner.gameObject != null && helpOwner.gameObject.activeInHierarchy)
+                        return true;
+                }
+                catch { } // Owner destroyed
+                CloseControlsHelp();
+                return false;
+            }
+        }
+
+        public static void NavigateNext()
+        {
+            if (helpEntries == null) return;
+            helpIndex = (helpIndex + 1) % helpEntries.Count;
+            SpeakHelpEntry();
+        }
+
+        public static void NavigatePrevious()
+        {
+            if (helpEntries == null) return;
+            helpIndex = (helpIndex + helpEntries.Count - 1) % helpEntries.Count;
+            SpeakHelpEntry();
+        }
+
+        public static void JumpToTop()
+        {
+            if (helpEntries == null) return;
+            helpIndex = 0;
+            SpeakHelpEntry();
+        }
+
+        public static void JumpToBottom()
+        {
+            if (helpEntries == null) return;
+            helpIndex = helpEntries.Count - 1;
+            SpeakHelpEntry();
+        }
+
+        private static void SpeakHelpEntry()
+        {
+            FFIV_ScreenReaderMod.SpeakText(
+                MenuPosition.Format(helpEntries[helpIndex], helpIndex, helpEntries.Count), interrupt: true);
+        }
 
         /// <summary>
         /// Public entry point — reads all visible key help controls and speaks them.

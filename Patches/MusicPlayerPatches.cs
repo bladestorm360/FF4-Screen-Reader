@@ -87,9 +87,9 @@ namespace FFIV_ScreenReader.Patches
                 {
                     IntPtr focusedPtr = MusicPlayerStateTracker.CachedFocusedPtr;
                     if (focusedPtr != IntPtr.Zero &&
-                        MusicPlayerReader.ReadContentFromPointer(focusedPtr, out string name, out int bgmId, out int idx))
+                        MusicPlayerReader.ReadContentFromPointer(focusedPtr, out string name, out int bgmId, out int idx, out float playTime))
                     {
-                        string entry = MusicPlayerReader.ReadSongEntry(name, bgmId, idx);
+                        string entry = MusicPlayerReader.ReadSongEntry(name, bgmId, idx, playTime);
                         if (!string.IsNullOrEmpty(entry))
                             FFIV_ScreenReaderMod.SpeakText(entry, false);
                         // Success — clear suppression and exit
@@ -145,10 +145,10 @@ namespace FFIV_ScreenReader.Patches
                 catch { return; }
                 if (ptr == IntPtr.Zero) return;
 
-                if (!MusicPlayerReader.ReadContentFromPointer(ptr, out string musicName, out int bgmId, out int index))
+                if (!MusicPlayerReader.ReadContentFromPointer(ptr, out string musicName, out int bgmId, out int index, out float playTime))
                     return;
 
-                string entry = MusicPlayerReader.ReadSongEntry(musicName, bgmId, index);
+                string entry = MusicPlayerReader.ReadSongEntry(musicName, bgmId, index, playTime);
                 if (!string.IsNullOrEmpty(entry))
                 {
                     AnnouncementDeduplicator.AnnounceIfNew(
@@ -221,9 +221,9 @@ namespace FFIV_ScreenReader.Patches
                 AnnouncementDeduplicator.Reset(AnnouncementContexts.MUSIC_LIST_ENTRY);
                 IntPtr focusedPtr = MusicPlayerStateTracker.CachedFocusedPtr;
                 if (focusedPtr != IntPtr.Zero &&
-                    MusicPlayerReader.ReadContentFromPointer(focusedPtr, out string name, out int bgmId, out int idx))
+                    MusicPlayerReader.ReadContentFromPointer(focusedPtr, out string name, out int bgmId, out int idx, out float playTime))
                 {
-                    string entry = MusicPlayerReader.ReadSongEntry(name, bgmId, idx);
+                    string entry = MusicPlayerReader.ReadSongEntry(name, bgmId, idx, playTime);
                     if (!string.IsNullOrEmpty(entry))
                         FFIV_ScreenReaderMod.SpeakText(entry, false);
                 }

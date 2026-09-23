@@ -24,9 +24,15 @@ namespace FFIV_ScreenReader.Core
 
         #region Menu Item Types
 
+        // Names, option labels and descriptions are English keys translated each time they are
+        // read: the menu is built at mod init, before the game language is known, so translating
+        // at construction would freeze every label in English.
         private abstract class MenuItem
         {
-            public string Name { get; protected set; }
+            protected string NameKey;
+            public string Name => T(NameKey);
+            /// <summary>Description read by the I key (null = none).</summary>
+            public virtual string Description => null;
             public abstract string GetValueString();
             public abstract void Adjust(int delta);
             public abstract void Toggle();
@@ -36,14 +42,19 @@ namespace FFIV_ScreenReader.Core
         {
             private readonly Func<bool> getter;
             private readonly Action toggle;
+            private readonly string onDescription;
+            private readonly string offDescription;
 
-            public ToggleItem(string name, Func<bool> getter, Action toggle)
+            public ToggleItem(string nameKey, Func<bool> getter, Action toggle, string onDescription, string offDescription)
             {
-                Name = name;
+                NameKey = nameKey;
                 this.getter = getter;
                 this.toggle = toggle;
+                this.onDescription = onDescription;
+                this.offDescription = offDescription;
             }
 
+            public override string Description => T(getter() ? onDescription : offDescription);
             public override string GetValueString() => getter() ? T("On") : T("Off");
             public override void Adjust(int delta) => toggle();
             public override void Toggle() => toggle();
@@ -54,13 +65,14 @@ namespace FFIV_ScreenReader.Core
             private readonly Func<int> getter;
             private readonly Action<int> setter;
 
-            public VolumeItem(string name, Func<int> getter, Action<int> setter)
+            public VolumeItem(string nameKey, Func<int> getter, Action<int> setter)
             {
-                Name = name;
+                NameKey = nameKey;
                 this.getter = getter;
                 this.setter = setter;
             }
 
+            public override string Description => T("Left and Right change the volume in steps of 5 percent. Enter mutes it, or sets it to 50 percent when muted.");
             public override string GetValueString() => $"{getter()}%";
 
             public override void Adjust(int delta)
@@ -80,23 +92,27 @@ namespace FFIV_ScreenReader.Core
 
         private class EnumItem : MenuItem
         {
-            private readonly string[] options;
+            private readonly string[] optionKeys;
             private readonly Func<int> getter;
             private readonly Action<int> setter;
+            private readonly string description;
 
-            public EnumItem(string name, string[] options, Func<int> getter, Action<int> setter)
+            public EnumItem(string nameKey, string[] optionKeys, Func<int> getter, Action<int> setter, string description)
             {
-                Name = name;
-                this.options = options;
+                NameKey = nameKey;
+                this.optionKeys = optionKeys;
                 this.getter = getter;
                 this.setter = setter;
+                this.description = description;
             }
+
+            public override string Description => T(description);
 
             public override string GetValueString()
             {
                 int index = getter();
-                if (index >= 0 && index < options.Length)
-                    return options[index];
+                if (index >= 0 && index < optionKeys.Length)
+                    return T(optionKeys[index]);
                 return T("Unknown");
             }
 
@@ -104,8 +120,8 @@ namespace FFIV_ScreenReader.Core
             {
                 int current = getter();
                 int newValue = current + delta;
-                if (newValue < 0) newValue = options.Length - 1;
-                if (newValue >= options.Length) newValue = 0;
+                if (newValue < 0) newValue = optionKeys.Length - 1;
+                if (newValue >= optionKeys.Length) newValue = 0;
                 setter(newValue);
             }
 
@@ -114,9 +130,9 @@ namespace FFIV_ScreenReader.Core
 
         private class SectionHeader : MenuItem
         {
-            public SectionHeader(string name)
+            public SectionHeader(string nameKey)
             {
-                Name = name;
+                NameKey = nameKey;
             }
 
             public override string GetValueString() => "";
@@ -127,13 +143,16 @@ namespace FFIV_ScreenReader.Core
         private class ActionItem : MenuItem
         {
             private readonly Action action;
+            private readonly string description;
 
-            public ActionItem(string name, Action action)
+            public ActionItem(string nameKey, Action action, string description)
             {
-                Name = name;
+                NameKey = nameKey;
                 this.action = action;
+                this.description = description;
             }
 
+            public override string Description => T(description);
             public override string GetValueString() => "";
             public override void Adjust(int delta) => action();
             public override void Toggle() => action();
@@ -150,78 +169,102 @@ namespace FFIV_ScreenReader.Core
             items = new List<MenuItem>
             {
                 // Audio Feedback section
-                new SectionHeader(T("Audio Feedback")),
-                new ToggleItem(T("Wall Tones"),
+                new SectionHeader("Audio Feedback"),
+                new ToggleItem("Wall Tones",
                     () => AudioLoopManager.WallTonesEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.ToggleWallTones()),
-                new ToggleItem(T("Footsteps"),
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleWallTones(),
+                    "On. Tones sound toward any wall right next to you.",
+                    "Off. No wall tones."),
+                new ToggleItem("Footsteps",
                     () => AudioLoopManager.FootstepsEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.ToggleFootsteps()),
-                new ToggleItem(T("Audio Beacons"),
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleFootsteps(),
+                    "On. A click plays for every tile you move.",
+                    "Off. Movement is silent."),
+                new ToggleItem("Beacon Navigation",
                     () => AudioLoopManager.AudioBeaconsEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.ToggleAudioBeacons()),
-                new ToggleItem(T("Beacon Destination Announcement"),
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleAudioBeacons(),
+                    "On. Choosing a destination starts an audio beacon instead of spoken directions.",
+                    "Off. Choosing a destination speaks step-by-step directions."),
+                new ToggleItem("Beacon Destination Announcement",
                     () => FFIV_ScreenReaderMod.AnnounceOnBeaconRestartEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.ToggleAnnounceOnBeaconRestart()),
-                new ToggleItem(T("Stick Click Normalization"),
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleAnnounceOnBeaconRestart(),
+                    "On. Restarting the beacon also speaks the destination.",
+                    "Off. Restarting the beacon only pings."),
+                new ToggleItem("Stick Click Normalization",
                     () => FFIV_ScreenReaderMod.StickClickNormalizationEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.ToggleStickClickNormalization()),
-                new ToggleItem(T("Menu Position Announcements"),
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleStickClickNormalization(),
+                    "On. L3 and R3 go to the game; their mod functions move to mod mode.",
+                    "Off. L3 toggles beacon navigation and R3 the pathfinding filter."),
+                new ToggleItem("Menu Position Announcements",
                     () => PreferencesManager.MenuPositionAnnouncementsEnabled,
-                    () => PreferencesManager.SaveMenuPositionAnnouncements(!PreferencesManager.MenuPositionAnnouncementsEnabled)),
-                new ToggleItem(T("Auto Detail"),
+                    () => PreferencesManager.SaveMenuPositionAnnouncements(!PreferencesManager.MenuPositionAnnouncementsEnabled),
+                    "On. Menu entries end with their position, such as 3 of 12.",
+                    "Off. Menu entries are read without their position."),
+                new ToggleItem("Auto Detail",
                     () => FFIV_ScreenReaderMod.AutoDetailEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.ToggleAutoDetail()),
+                    () => FFIV_ScreenReaderMod.Instance?.ToggleAutoDetail(),
+                    "On. Descriptions are read as soon as an item, spell or shop entry is focused.",
+                    "Off. Press I to hear the description of the focused entry."),
 
                 // Volume Controls section
-                new SectionHeader(T("Volume Controls")),
-                new VolumeItem(T("Wall Bump Volume"),
+                new SectionHeader("Volume Controls"),
+                new VolumeItem("Wall Bump Volume",
                     () => PreferencesManager.WallBumpVolume,
                     PreferencesManager.SetWallBumpVolume),
-                new VolumeItem(T("Footstep Volume"),
+                new VolumeItem("Footstep Volume",
                     () => PreferencesManager.FootstepVolume,
                     PreferencesManager.SetFootstepVolume),
-                new VolumeItem(T("Wall Tone Volume"),
+                new VolumeItem("Wall Tone Volume",
                     () => PreferencesManager.WallToneVolume,
                     PreferencesManager.SetWallToneVolume),
-                new VolumeItem(T("Beacon Volume"),
+                new VolumeItem("Beacon Volume",
                     () => PreferencesManager.BeaconVolume,
                     PreferencesManager.SetBeaconVolume),
 
                 // Navigation Filters section
-                new SectionHeader(T("Navigation Filters")),
-                new ToggleItem(T("Pathfinding Filter"),
+                new SectionHeader("Navigation Filters"),
+                new ToggleItem("Pathfinding Filter",
                     () => FFIV_ScreenReaderMod.PathfindingFilterEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.TogglePathfindingFilter()),
-                new ToggleItem(T("Map Exit Filter"),
+                    () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.TogglePathfindingFilter(),
+                    "On. Entity lists skip anything you cannot walk to.",
+                    "Off. Entity lists include unreachable entities."),
+                new ToggleItem("Map Exit Filter",
                     () => EntityNavigationFacade.MapExitFilterEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleMapExitFilter()),
-                new ToggleItem(T("Layer Transition Filter"),
+                    () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleMapExitFilter(),
+                    "On. Exits leading to the same place are merged into the closest one.",
+                    "Off. Every map exit is listed."),
+                new ToggleItem("Layer Transition Filter",
                     () => EntityNavigationFacade.ToLayerFilterEnabled,
-                    () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleToLayerFilter()),
+                    () => FFIV_ScreenReaderMod.Instance?.entityNavFacade?.ToggleToLayerFilter(),
+                    "On. Layer transition points are hidden from entity lists.",
+                    "Off. Layer transition points are listed."),
 
                 // Battle Results section
-                new SectionHeader(T("Battle Results")),
-                new ToggleItem(T("EXP Counter Sound"),
+                new SectionHeader("Battle Results"),
+                new ToggleItem("EXP Counter Sound",
                     () => FFIV_ScreenReaderMod.ExpCounterEnabled,
-                    FFIV_ScreenReaderMod.ToggleExpCounter),
-                new VolumeItem(T("EXP Counter Volume"),
+                    FFIV_ScreenReaderMod.ToggleExpCounter,
+                    "On. A beep ticks while the EXP bar fills after battle.",
+                    "Off. The EXP bar fills silently."),
+                new VolumeItem("EXP Counter Volume",
                     () => PreferencesManager.ExpCounterVolume,
                     PreferencesManager.SetExpCounterVolume),
 
                 // Battle Settings section
-                new SectionHeader(T("Battle Settings")),
-                new EnumItem(T("Enemy HP Display"),
-                    new[] { T("Numbers"), T("Percentage"), T("Hidden") },
+                new SectionHeader("Battle Settings"),
+                new EnumItem("Enemy HP Display",
+                    new[] { "Numbers", "Percentage", "Hidden" },
                     () => PreferencesManager.EnemyHPDisplay,
-                    PreferencesManager.SetEnemyHPDisplay),
-                new EnumItem(T("Multi-hit Damage"),
-                    new[] { T("Total only"), T("With hit count") },
+                    PreferencesManager.SetEnemyHPDisplay,
+                    "How enemy HP is read while targeting: as numbers, as a percentage, or not at all."),
+                new EnumItem("Multi-hit Damage",
+                    new[] { "Total only", "With hit count" },
                     () => PreferencesManager.DamageDisplay,
-                    PreferencesManager.SetDamageDisplay),
+                    PreferencesManager.SetDamageDisplay,
+                    "Whether damage from multi-hit attacks includes the number of hits, such as 4x250 damage."),
 
                 // Close Menu action
-                new ActionItem(T("Close Menu"), Close)
+                new ActionItem("Close Menu", Close, "Closes the mod menu and returns to the game.")
             };
         }
 
@@ -325,7 +368,24 @@ namespace FFIV_ScreenReader.Core
                 return true;
             }
 
+            // I - describe the current setting
+            if (GamepadManager.IsKeyCodePressed(KeyCode.I))
+            {
+                AnnounceCurrentItemDescription();
+                return true;
+            }
+
             return true; // Consume all input while menu is open
+        }
+
+        private static void AnnounceCurrentItemDescription()
+        {
+            if (currentIndex < 0 || currentIndex >= items.Count) return;
+
+            string description = items[currentIndex].Description;
+            FFIV_ScreenReaderMod.SpeakText(
+                string.IsNullOrWhiteSpace(description) ? T("No description") : description,
+                interrupt: true);
         }
 
         internal static void NavigateNext()

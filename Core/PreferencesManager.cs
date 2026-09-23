@@ -49,11 +49,15 @@ namespace FFIV_ScreenReader.Core
             prefToLayerFilter = prefsCategory.CreateEntry<bool>("ToLayerFilter", false, "Layer Transition Filter", "Hide layer transition entities from navigation list");
             prefWallTones = prefsCategory.CreateEntry<bool>("WallTones", false, "Wall Tones", "Play directional tones when approaching walls");
             prefFootsteps = prefsCategory.CreateEntry<bool>("Footsteps", false, "Footsteps", "Play click sound on each tile movement");
-            prefAudioBeacons = prefsCategory.CreateEntry<bool>("AudioBeacons", false, "Audio Beacons", "Play directional pings toward selected entity");
+            prefAudioBeacons = prefsCategory.CreateEntry<bool>("AudioBeacons", false, "Beacon Navigation", "Use an audio beacon toward the selected destination instead of spoken directions");
             prefStickClickNormalization = prefsCategory.CreateEntry<bool>("StickClickNormalization", false, "Stick Click Normalization", "Pass L3/R3 through to game (auto-dash / encounter toggle); mod functions require mod mode");
             prefAnnounceOnBeaconRestart = prefsCategory.CreateEntry<bool>("AnnounceOnBeaconRestart", false, "Beacon Destination Announcement", "Re-speak the current destination when the beacon is restarted");
             prefMenuPositionAnnouncements = prefsCategory.CreateEntry<bool>("MenuPositionAnnouncements", true, "Menu Position Announcements", "Append the cursor's position in a list when navigating menus, e.g. (3 of 12)");
-            prefAutoDetail = prefsCategory.CreateEntry<bool>("AutoDetail", false, "Auto Detail", "Automatically read the details normally behind the details key (equip compatibility in the item menu, descriptions and MP cost in shops) when focusing an entry");
+            // Stored as "AutoDetailOnFocus", not "AutoDetail": Auto Detail now gates the item, spell and
+            // battle-list descriptions that used to be spoken unconditionally, and MelonPreferences had
+            // already written the old off-by-default "AutoDetail" into every install. A new entry gives
+            // everyone FF1's default (on) once; turning it off afterwards sticks as usual.
+            prefAutoDetail = prefsCategory.CreateEntry<bool>("AutoDetailOnFocus", true, "Auto Detail", "Read the description normally behind the details key (items, spells, battle lists, shops) when focusing an entry");
             prefExpCounter = prefsCategory.CreateEntry<bool>("ExpCounter", true, "EXP Counter Sound", "Play rapid beeping while the EXP bar animates on battle results");
 
             prefWallBumpVolume = prefsCategory.CreateEntry<int>("WallBumpVolume", 50, "Wall Bump Volume", "Volume for wall bump sounds (0-100)");
@@ -63,7 +67,10 @@ namespace FFIV_ScreenReader.Core
             prefExpCounterVolume = prefsCategory.CreateEntry<int>("ExpCounterVolume", 50, "EXP Counter Volume", "Volume for EXP counter beep (0-100)");
 
             prefEnemyHPDisplay = prefsCategory.CreateEntry<int>("EnemyHPDisplay", 0, "Enemy HP Display", "0=Numbers, 1=Percentage, 2=Hidden");
-            prefDamageDisplay = prefsCategory.CreateEntry<int>("DamageDisplay", 0, "Multi-hit Damage", "0=Total only, 1=With hit count (e.g. 14x1552 damage)");
+            // Stored as "MultiHitDamage" (default: with hit count) rather than the old off-by-default
+            // "DamageDisplay", which MelonPreferences had already written into every install, so the
+            // hit count is announced once after updating; choosing "Total only" afterwards sticks.
+            prefDamageDisplay = prefsCategory.CreateEntry<int>("MultiHitDamage", 1, "Multi-hit Damage", "0=Total only, 1=With hit count (e.g. 14x1552 damage)");
         }
 
         #region Toggle Getters (live saved preference values)
@@ -77,7 +84,7 @@ namespace FFIV_ScreenReader.Core
         public static bool StickClickNormalizationEnabled => prefStickClickNormalization?.Value ?? false;
         public static bool AnnounceOnBeaconRestartEnabled => prefAnnounceOnBeaconRestart?.Value ?? false;
         public static bool MenuPositionAnnouncementsEnabled => prefMenuPositionAnnouncements?.Value ?? true;
-        public static bool AutoDetailEnabled => prefAutoDetail?.Value ?? false;
+        public static bool AutoDetailEnabled => prefAutoDetail?.Value ?? true;
         public static bool ExpCounterEnabled => prefExpCounter?.Value ?? true;
 
         #endregion
@@ -95,7 +102,7 @@ namespace FFIV_ScreenReader.Core
         #region Battle Getters
 
         public static int EnemyHPDisplay => prefEnemyHPDisplay?.Value ?? 0;
-        public static int DamageDisplay => prefDamageDisplay?.Value ?? 0;
+        public static int DamageDisplay => prefDamageDisplay?.Value ?? 1;
 
         #endregion
 

@@ -8,6 +8,7 @@ using Il2CppLast.Map;
 using MelonLoader;
 using UnityEngine;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FieldPlayerController = Il2CppLast.Map.FieldPlayerController;
 using MapRouteSearcher = Il2Cpp.MapRouteSearcher;
 
@@ -41,8 +42,10 @@ namespace FFIV_ScreenReader.Field
         {
             var results = new List<FieldEntity>();
 
-            // Get the game's master entity list from FieldController
+            // Get the game's master entity list from FieldController (refresh the cache on a miss)
             var fieldMap = Utils.GameObjectCache.Get<FieldMap>();
+            if (fieldMap == null)
+                fieldMap = Utils.GameObjectCache.Refresh<FieldMap>();
             if (fieldMap?.fieldController == null)
                 return results;
 
@@ -360,7 +363,7 @@ namespace FFIV_ScreenReader.Field
                     {
                         pathInfo.ErrorMessage = "Path crosses one-way ledge";
                         pathInfo.StepCount = 0;
-                        pathInfo.Description = "Path blocked by ledge";
+                        pathInfo.Description = T("Path blocked by ledge");
                         return pathInfo;
                     }
                 }
@@ -386,7 +389,7 @@ namespace FFIV_ScreenReader.Field
         private static string DescribePath(List<Vector3> worldPath)
         {
             if (worldPath == null || worldPath.Count < 2)
-                return "No movement needed";
+                return T("No movement needed");
 
             var segments = new List<string>();
             Vector3 currentDir = Vector3.zero;
@@ -435,23 +438,23 @@ namespace FFIV_ScreenReader.Field
             // A normalized diagonal has components around ±0.707
             if (Mathf.Abs(dir.x) > 0.4f && Mathf.Abs(dir.y) > 0.4f)
             {
-                if (dir.y > 0 && dir.x > 0) return "Northeast";
-                if (dir.y > 0 && dir.x < 0) return "Northwest";
-                if (dir.y < 0 && dir.x > 0) return "Southeast";
-                if (dir.y < 0 && dir.x < 0) return "Southwest";
+                if (dir.y > 0 && dir.x > 0) return T("Northeast");
+                if (dir.y > 0 && dir.x < 0) return T("Northwest");
+                if (dir.y < 0 && dir.x > 0) return T("Southeast");
+                if (dir.y < 0 && dir.x < 0) return T("Southwest");
             }
 
             // Cardinal directions (when primarily on one axis)
             if (Mathf.Abs(dir.y) > Mathf.Abs(dir.x))
             {
-                return dir.y > 0 ? "North" : "South";
+                return dir.y > 0 ? T("North") : T("South");
             }
             else if (Mathf.Abs(dir.x) > 0.1f)  // Avoid "Unknown" for tiny movements
             {
-                return dir.x > 0 ? "East" : "West";
+                return dir.x > 0 ? T("East") : T("West");
             }
 
-            return "Unknown";
+            return T("Unknown");
         }
 
         /// <summary>

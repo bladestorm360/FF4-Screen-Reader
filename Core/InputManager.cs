@@ -47,6 +47,20 @@ namespace FFIV_ScreenReader.Core
             registry.Register(KeyCode.UpArrow, KeyModifier.Ctrl, KeyContext.Status, StatusNavigationReader.JumpToTop, "Jump to first stat");
             registry.Register(KeyCode.DownArrow, KeyModifier.Ctrl, KeyContext.Status, StatusNavigationReader.JumpToBottom, "Jump to last stat");
 
+            // --- Bestiary detail: navigation ---
+            registry.Register(KeyCode.UpArrow, KeyContext.BestiaryDetail, BestiaryNavigationReader.NavigatePrevious, "Previous stat (bestiary)");
+            registry.Register(KeyCode.DownArrow, KeyContext.BestiaryDetail, BestiaryNavigationReader.NavigateNext, "Next stat (bestiary)");
+            registry.Register(KeyCode.UpArrow, KeyModifier.Shift, KeyContext.BestiaryDetail, BestiaryNavigationReader.JumpToPreviousGroup, "Jump to previous group (bestiary)");
+            registry.Register(KeyCode.DownArrow, KeyModifier.Shift, KeyContext.BestiaryDetail, BestiaryNavigationReader.JumpToNextGroup, "Jump to next group (bestiary)");
+            registry.Register(KeyCode.UpArrow, KeyModifier.Ctrl, KeyContext.BestiaryDetail, BestiaryNavigationReader.JumpToTop, "Jump to first stat (bestiary)");
+            registry.Register(KeyCode.DownArrow, KeyModifier.Ctrl, KeyContext.BestiaryDetail, BestiaryNavigationReader.JumpToBottom, "Jump to last stat (bestiary)");
+
+            // --- Controls pop-up: navigation (flat list, no groups) ---
+            registry.Register(KeyCode.UpArrow, KeyContext.KeyHelp, KeyHelpReader.NavigatePrevious, "Previous control");
+            registry.Register(KeyCode.DownArrow, KeyContext.KeyHelp, KeyHelpReader.NavigateNext, "Next control");
+            registry.Register(KeyCode.UpArrow, KeyModifier.Ctrl, KeyContext.KeyHelp, KeyHelpReader.JumpToTop, "Jump to first control");
+            registry.Register(KeyCode.DownArrow, KeyModifier.Ctrl, KeyContext.KeyHelp, KeyHelpReader.JumpToBottom, "Jump to last control");
+
             // --- Field: entity navigation (brackets + backslash) — field-only ---
             RegisterFieldOnly(KeyCode.LeftBracket, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category");
             RegisterFieldOnly(KeyCode.LeftBracket, KeyModifier.None, entityNav.CyclePrevious, "Previous entity");
@@ -56,12 +70,16 @@ namespace FFIV_ScreenReader.Core
             RegisterFieldOnly(KeyCode.Backslash, KeyModifier.Shift, entityNav.TogglePathfindingFilter, "Toggle pathfinding filter");
             RegisterFieldOnly(KeyCode.Backslash, KeyModifier.None, entityNav.AnnounceCurrentEntity, "Announce current entity");
 
+            // --- Field: manual entity rescan (backtick) ---
+            RegisterFieldOnly(KeyCode.BackQuote, KeyModifier.None, RescanEntities, "Force entity rescan");
+
             // --- Field: alternate keys (J/K/L/P) — field-only ---
             RegisterFieldOnly(KeyCode.J, KeyModifier.Shift, entityNav.CyclePreviousCategory, "Previous entity category (alt)");
             RegisterFieldOnly(KeyCode.J, KeyModifier.None, entityNav.CyclePrevious, "Previous entity (alt)");
             RegisterFieldOnly(KeyCode.K, KeyModifier.None, entityNav.AnnounceEntityOnly, "Announce entity name (alt)");
             RegisterFieldOnly(KeyCode.L, KeyModifier.Shift, entityNav.CycleNextCategory, "Next entity category (alt)");
             RegisterFieldOnly(KeyCode.L, KeyModifier.None, entityNav.CycleNext, "Next entity (alt)");
+            RegisterFieldOnly(KeyCode.P, KeyModifier.Ctrl, entityNav.ToggleToLayerFilter, "Toggle layer filter (alt)");
             RegisterFieldOnly(KeyCode.P, KeyModifier.Shift, entityNav.TogglePathfindingFilter, "Toggle pathfinding filter (alt)");
             RegisterFieldOnly(KeyCode.P, KeyModifier.None, entityNav.AnnounceCurrentEntity, "Announce current entity (alt)");
 
@@ -90,13 +108,21 @@ namespace FFIV_ScreenReader.Core
             registry.Register(KeyCode.T, KeyModifier.Shift, KeyContext.Global, TimerHelper.ToggleTimerFreeze, "Toggle timer freeze");
             registry.Register(KeyCode.T, KeyModifier.None, KeyContext.Global, () => TimerHelper.AnnounceActiveTimers(), "Announce active timers");
             registry.Register(KeyCode.V, KeyContext.Global, AnnounceVehicleState, "Announce vehicle state");
-            registry.Register(KeyCode.I, KeyModifier.Shift, KeyContext.Global, KeyHelpReader.AnnounceKeyHelp, "Announce controls");
+            registry.Register(KeyCode.Tab, KeyContext.Global, HandleTabKey, "Clear battle state fallback");
+            registry.Register(KeyCode.R, KeyContext.Global, () =>
+            {
+                if (DialogueTracker.IsInDialogue)
+                    DialogueTracker.RepeatLastDialogue();
+            }, "Repeat dialogue");
+            registry.Register(KeyCode.I, KeyModifier.Shift, KeyContext.Global, ControllerRouter.AnnounceContextControls, "Announce controls");
             registry.Register(KeyCode.I, KeyModifier.None, KeyContext.Global, HandleItemDetailsKey, "Item details");
+            registry.Register(KeyCode.U, KeyContext.Global, UsableByAnnouncer.AnnounceForCurrentContext, "Usable by");
 
             // --- Field-only toggles ---
             RegisterFieldOnly(KeyCode.Quote, KeyModifier.None, mod.ToggleFootsteps, "Toggle footsteps");
             RegisterFieldOnly(KeyCode.Semicolon, KeyModifier.None, mod.ToggleWallTones, "Toggle wall tones");
             RegisterFieldOnly(KeyCode.Alpha9, KeyModifier.None, mod.ToggleAudioBeacons, "Toggle audio beacons");
+            RegisterFieldOnly(KeyCode.F6, KeyModifier.None, mod.ToggleAudioBeacons, "Toggle audio beacons (F6)");
 
             // --- Field-only category shortcuts ---
             RegisterFieldOnly(KeyCode.K, KeyModifier.Shift, entityNav.ResetToAllCategory, "Reset to All category");
@@ -201,9 +227,19 @@ namespace FFIV_ScreenReader.Core
 
         private KeyContext DetermineContext()
         {
+            // The gamepad/keyboard controls pop-up takes priority while shown.
+            if (KeyHelpReader.IsScreenActive)
+                return KeyContext.KeyHelp;
+
+            // ValidateState confirms the status screen is still on screen, so a stuck flag can't
+            // keep hijacking the arrow keys after the screen closes.
             var tracker = StatusNavigationTracker.Instance;
-            if (tracker.IsNavigationActive)
+            if (tracker.IsNavigationActive && tracker.ValidateState())
                 return KeyContext.Status;
+
+            var bestiaryTracker = BestiaryNavigationTracker.Instance;
+            if (bestiaryTracker.IsNavigationActive && bestiaryTracker.ValidateState())
+                return KeyContext.BestiaryDetail;
 
             if (BattleState.IsInBattle)
                 return KeyContext.Battle;
@@ -217,9 +253,28 @@ namespace FFIV_ScreenReader.Core
             return KeyContext.Global;
         }
 
+        // Frame of the last cache-miss refresh; see IsOnValidMap.
+        private static int lastFieldRefreshFrame = -1000;
+
         private static bool IsOnValidMap()
         {
-            return GameObjectCache.Get<Il2CppLast.Map.FieldPlayerController>()?.fieldPlayer != null;
+            // Self-heal the cache (like every other FieldPlayerController reader) so a cleared or
+            // stale entry can't wedge the field context into Global and silently disable field hotkeys.
+            // DetermineContext calls this every frame, so a miss is retried at most every 30 frames:
+            // scenes with no field player (the title screen) would otherwise pay a scene-wide object
+            // search per frame.
+            try
+            {
+                var pc = GameObjectCache.Get<Il2CppLast.Map.FieldPlayerController>();
+                if (pc == null && Time.frameCount - lastFieldRefreshFrame >= 30)
+                {
+                    lastFieldRefreshFrame = Time.frameCount;
+                    pc = GameObjectCache.Refresh<Il2CppLast.Map.FieldPlayerController>();
+                }
+                return pc?.fieldPlayer != null;
+            }
+            catch { }
+            return false;
         }
 
         private KeyModifier GetCurrentModifiers()
@@ -233,6 +288,9 @@ namespace FFIV_ScreenReader.Core
             return KeyModifier.None;
         }
 
+        private static bool IsBufferContext(KeyContext ctx)
+            => ctx == KeyContext.Status || ctx == KeyContext.BestiaryDetail || ctx == KeyContext.KeyHelp;
+
         private void DispatchRegisteredBindings(KeyContext activeContext, KeyModifier currentModifiers)
         {
             foreach (var key in registry.RegisteredKeys)
@@ -240,10 +298,25 @@ namespace FFIV_ScreenReader.Core
                 if (GamepadManager.IsKeyCodePressed(key))
                     registry.TryExecute(key, currentModifiers, activeContext);
             }
+
+            // W/S as alternative Up/Down arrows — ONLY in the navigation-buffer screens, so game WASD
+            // movement and letter hotkeys elsewhere are untouched. Reuses the arrow bindings, so
+            // modifiers carry (Shift+W = Shift+Up = previous group, etc.).
+            if (IsBufferContext(activeContext))
+            {
+                if (GamepadManager.IsKeyCodePressed(KeyCode.W)) registry.TryExecute(KeyCode.UpArrow, currentModifiers, activeContext);
+                if (GamepadManager.IsKeyCodePressed(KeyCode.S)) registry.TryExecute(KeyCode.DownArrow, currentModifiers, activeContext);
+            }
         }
 
         private void HandleFunctionKeyInput()
         {
+            if (GamepadManager.IsKeyCodePressed(KeyCode.F7))
+            {
+                mod.ToggleAutoDetail();
+                return;
+            }
+
             if (GamepadManager.IsKeyCodePressed(KeyCode.F1))
             {
                 CoroutineManager.StartUntracked(AnnounceWalkRunState());
@@ -275,7 +348,26 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
-        private void AnnounceVehicleState()
+        /// <summary>
+        /// Backtick: rescans the field entities on demand.
+        /// </summary>
+        private void RescanEntities()
+        {
+            mod.ForceEntityRescan();
+            FFIV_ScreenReaderMod.SpeakText(T("Entity scan complete"), interrupt: true);
+        }
+
+        /// <summary>
+        /// Tab opens the field menu, so a battle flag still set outside the battle scene is stale
+        /// (a missed battle-end hook): clear it so field keys and audio come back.
+        /// </summary>
+        private static void HandleTabKey()
+        {
+            if (BattleState.IsInBattle && !UnityEngine.SceneManagement.SceneManager.GetActiveScene().name.Contains("Battle"))
+                BattleState.Reset();
+        }
+
+        internal static void AnnounceVehicleState()
         {
             try
             {
@@ -290,23 +382,27 @@ namespace FFIV_ScreenReader.Core
             }
         }
 
-        private void HandleItemDetailsKey()
+        /// <summary>
+        /// Details key (I / right stick up): reads the description of whatever is focused —
+        /// shop entry, equipment, spell, item, battle list entry — else the config tooltip.
+        /// </summary>
+        internal static void HandleItemDetailsKey()
         {
             if (ShopMenuTracker.ValidateState())
-            {
                 ShopDetailsAnnouncer.AnnounceCurrentItemDetails();
-            }
+            else if (EquipmentMenuState.IsActive)
+                ItemDetailsAnnouncer.SpeakDescription(EquipmentDetails.LastDescription);
+            else if (MenuStates.Ability.IsActive && AbilityContentListController_SelectContent_Patch.LastDescription != null)
+                ItemDetailsAnnouncer.SpeakDescription(AbilityContentListController_SelectContent_Patch.LastDescription);
             else if (ItemMenuState.IsActive)
-            {
-                ItemDetailsAnnouncer.AnnounceEquipRequirements();
-            }
+                ItemDetailsAnnouncer.AnnounceDescription();
+            else if (BattleState.IsInBattle && BattleListDetails.LastDescription != null)
+                ItemDetailsAnnouncer.SpeakDescription(BattleListDetails.LastDescription);
             else
-            {
                 AnnounceConfigTooltip();
-            }
         }
 
-        private void AnnounceConfigTooltip()
+        private static void AnnounceConfigTooltip()
         {
             try
             {

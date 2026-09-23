@@ -1,6 +1,6 @@
 using System;
 using System.Collections;
-using System.Linq;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using HarmonyLib;
 using MelonLoader;
@@ -9,20 +9,34 @@ using Il2CppLast.Data;
 using Il2CppLast.Data.User;
 using Il2CppLast.UI.KeyInput;
 using Il2CppLast.Management;
-using Il2CppLast.Systems;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using static FFIV_ScreenReader.Utils.TextUtils;
 
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
-    /// Shared state for the EXP-counter sound across the battle-result patch classes.
+    /// Shared state for the battle-result patch classes: the EXP-counter sound and the
+    /// per-battle one-shot guards of the phased victory screen.
     /// </summary>
     internal static class BattleResultState
     {
         // True only while the EXP counter sound is actually playing.
         internal static bool ExpCounterPlaying;
+
+        // Per-battle one-shots. Each phase's *Init can fire more than once while its page is up,
+        // so each phase announces the first time and stays quiet afterwards. Cleared by ResetState
+        // at battle start (BattleController.StartBattle), and by ResetIfNewResult whenever the
+        // result screen is showing a different BattleResultData than last time -- so a battle
+        // that skips that StartBattle overload still gets its victory screen read.
+        internal static bool PointsAnnounced;
+        internal static bool ItemsAnnounced;
+        internal static bool AbilitiesAnnounced;
+        internal static readonly HashSet<string> AnnouncedLevelUps = new HashSet<string>();
+
+        // BattleResultData the guards above currently belong to.
+        private static IntPtr lastResultDataPtr = IntPtr.Zero;
 
         /// <summary>
         /// Stops the EXP counter sound if it is currently playing.
@@ -35,238 +49,56 @@ namespace FFIV_ScreenReader.Patches
             SoundPlayer.StopExpCounter();
             MelonLogger.Msg("[BattleResult] EXP counter stopped");
         }
-    }
 
-    /// <summary>
-    /// Patches for battle result announcements (XP, gil, level ups, stat growth)
-    /// TODO: Implement multi-phase victory screen announcements in future update
-    /// </summary>
-
-    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.Show))]
-    public static class ResultMenuController_Show_Patch
-    {
-        internal static string lastAnnouncement = "";
-        internal static BattleResultData lastBattleData = null;
-
-        [HarmonyPostfix]
-        public static void Postfix(BattleResultData data, bool isReverse)
+        /// <summary>
+        /// Clears the per-battle guards. Called at battle start.
+        /// </summary>
+        internal static void ResetState()
         {
-            try
-            {
-                // NOTE: Do NOT call BattleState.Reset() here!
-                // The victory screen is still part of the Battle scene.
-                // BattleState.Reset() is called in OnSceneLoaded when transitioning
-                // to a non-battle scene, which properly restores navigation features.
-
-                if (data == null || isReverse)
-                {
-                    return;
-                }
-
-                ProcessBattleResult(data, "Show");
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Error in ResultMenuController.Show patch: {ex.Message}");
-            }
+            ResetGuards();
+            // Hard stop any counter left over from an abnormally-ended result screen.
+            StopExpCounterIfPlaying();
         }
 
         /// <summary>
-        /// Shared method to process battle results from both Show and ShowPointsInit
+        /// Clears the guards when the result screen's data object differs from the one they were
+        /// set for. Called by every phase postfix before its guard check.
         /// </summary>
-        internal static void ProcessBattleResult(BattleResultData data, string source)
-        {
-            // Build announcement message
-            var messageParts = new System.Collections.Generic.List<string>();
-
-            // Announce gil gained
-            int gil = data._GetGil_k__BackingField;
-            if (gil > 0)
-            {
-                messageParts.Add($"{gil:N0} gil");
-            }
-
-            // Announce items dropped
-            if (data._ItemList_k__BackingField != null && data._ItemList_k__BackingField.Count > 0)
-            {
-                var messageManager = MessageManager.Instance;
-                if (messageManager != null)
-                {
-                    var itemContentList = ListItemFormatter.GetContentDataList(data._ItemList_k__BackingField, messageManager);
-                    if (itemContentList != null && itemContentList.Count > 0)
-                    {
-                        foreach (var itemContent in itemContentList)
-                        {
-                            if (itemContent == null) continue;
-
-                            string itemName = itemContent.Name;
-                            if (string.IsNullOrEmpty(itemName)) continue;
-
-                            itemName = StripIconMarkup(itemName);
-
-                            if (!string.IsNullOrEmpty(itemName))
-                            {
-                                int quantity = itemContent.Count;
-                                if (quantity > 1)
-                                {
-                                    messageParts.Add($"{itemName} x{quantity}");
-                                }
-                                else
-                                {
-                                    messageParts.Add(itemName);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Announce character results
-            if (data._CharacterList_k__BackingField != null)
-            {
-                var characterResults = data._CharacterList_k__BackingField;
-
-                foreach (var charResult in characterResults)
-                {
-                    if (charResult == null) continue;
-
-                    var afterData = charResult.AfterData;
-                    if (afterData == null) continue;
-
-                    string charName = afterData.Name;
-                    int charExp = charResult.GetExp;
-
-                    // Always announce XP first
-                    messageParts.Add($"{charName} gained {charExp:N0} XP");
-
-                    // Check if leveled up - announce with stat growth
-                    if (charResult.IsLevelUp)
-                    {
-                        int newLevel = afterData.parameter?.ConfirmedLevel() ?? 0;
-                        string levelUpMessage = $"{charName} leveled up to level {newLevel}";
-
-                        // Calculate and announce stat growth
-                        string statGrowth = CalculateStatGrowth(charResult);
-                        if (!string.IsNullOrEmpty(statGrowth))
-                        {
-                            levelUpMessage += $". {statGrowth}";
-                        }
-
-                        messageParts.Add(levelUpMessage);
-                    }
-
-                    // Check if learned any abilities
-                    var learningList = charResult.LearningList;
-                    if (learningList != null && learningList.Count > 0)
-                    {
-                        var messageManager = MessageManager.Instance;
-                        if (messageManager != null && afterData.OwnedAbilityList != null)
-                        {
-                            foreach (int abilityId in learningList)
-                            {
-                                OwnedAbility ownedAbility = null;
-                                for (int i = 0; i < afterData.OwnedAbilityList.Count; i++)
-                                {
-                                    var ability = afterData.OwnedAbilityList[i];
-                                    if (ability != null && ability.Ability != null && ability.Ability.Id == abilityId)
-                                    {
-                                        ownedAbility = ability;
-                                        break;
-                                    }
-                                }
-
-                                if (ownedAbility != null)
-                                {
-                                    string abilityName = messageManager.GetMessage(ownedAbility.MesIdName);
-                                    if (!string.IsNullOrWhiteSpace(abilityName))
-                                    {
-                                        messageParts.Add($"{charName} learned {abilityName}");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (messageParts.Count == 0) return;
-
-            string announcement = string.Join(", ", messageParts);
-
-            // Skip duplicate
-            if (data == lastBattleData && announcement == lastAnnouncement)
-            {
-                return;
-            }
-
-            lastBattleData = data;
-            lastAnnouncement = announcement;
-            FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
-        }
-
-        /// <summary>
-        /// Calculates stat growth between before and after level-up.
-        /// Returns a formatted string like "HP +25, Strength +2, Agility +1"
-        /// </summary>
-        private static string CalculateStatGrowth(BattleResultData.BattleResultCharacterData charResult)
+        internal static void ResetIfNewResult(ResultMenuController instance)
         {
             try
             {
-                var beforeData = charResult.BeforData; // Note: typo in original game code
-                var afterData = charResult.AfterData;
-
-                if (beforeData?.parameter == null || afterData?.parameter == null)
-                {
-                    return null;
-                }
-
-                var beforeParam = beforeData.parameter;
-                var afterParam = afterData.parameter;
-
-                var statChanges = new System.Collections.Generic.List<string>();
-
-                // HP
-                int hpDiff = afterParam.BaseMaxHp - beforeParam.BaseMaxHp;
-                if (hpDiff > 0) statChanges.Add($"HP +{hpDiff}");
-
-                // MP
-                int mpDiff = afterParam.BaseMaxMp - beforeParam.BaseMaxMp;
-                if (mpDiff > 0) statChanges.Add($"MP +{mpDiff}");
-
-                // Strength (Power)
-                int strDiff = afterParam.BasePower - beforeParam.BasePower;
-                if (strDiff > 0) statChanges.Add($"Strength +{strDiff}");
-
-                // Stamina (Vitality)
-                int staDiff = afterParam.BaseVitality - beforeParam.BaseVitality;
-                if (staDiff > 0) statChanges.Add($"Stamina +{staDiff}");
-
-                // Agility
-                int agiDiff = afterParam.BaseAgility - beforeParam.BaseAgility;
-                if (agiDiff > 0) statChanges.Add($"Agility +{agiDiff}");
-
-                // Intelligence
-                int intDiff = afterParam.BaseIntelligence - beforeParam.BaseIntelligence;
-                if (intDiff > 0) statChanges.Add($"Intelligence +{intDiff}");
-
-                // Spirit
-                int sprDiff = afterParam.BaseSpirit - beforeParam.BaseSpirit;
-                if (sprDiff > 0) statChanges.Add($"Spirit +{sprDiff}");
-
-                if (statChanges.Count == 0) return null;
-
-                return string.Join(", ", statChanges);
+                var data = instance?.targetData;
+                if (data == null) return;
+                IntPtr ptr = data.Pointer;
+                if (ptr == lastResultDataPtr) return;
+                lastResultDataPtr = ptr;
+                ResetGuards();
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"Error calculating stat growth: {ex.Message}");
-                return null;
+                MelonLogger.Warning($"[BattleResult] ResetIfNewResult error: {ex.Message}");
             }
+        }
+
+        private static void ResetGuards()
+        {
+            PointsAnnounced = false;
+            ItemsAnnounced = false;
+            AbilitiesAnnounced = false;
+            AnnouncedLevelUps.Clear();
         }
     }
 
-    // Patch ShowPointsInit to catch cases where the controller is reused/pooled, and to start
-    // the EXP counter sound when the EXP tally animation begins.
+    // ----------------------------------------------------------------
+    //  Phased victory screen. Each page announces what it shows, when it shows it:
+    //    ShowPointsInit      → gil + per-character EXP (and starts the EXP counter)
+    //    ShowStatusUpInit    → level-ups with stat gains
+    //    ShowGetItemsInit    → dropped items
+    //    ShowGetAbilitysInit → spells learned (ResultSkillController.Show → SetLearningList)
+    //  The later phases also stop the EXP counter as safety nets.
+    // ----------------------------------------------------------------
+
     [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowPointsInit))]
     public static class ResultMenuController_ShowPointsInit_Patch
     {
@@ -275,10 +107,30 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
+                BattleResultState.ResetIfNewResult(__instance);
+                if (BattleResultState.PointsAnnounced) return;
+
                 var data = __instance.targetData;
                 if (data == null) return;
+                BattleResultState.PointsAnnounced = true;
 
-                ResultMenuController_Show_Patch.ProcessBattleResult(data, "ShowPointsInit");
+                int gil = data._GetGil_k__BackingField;
+                if (gil > 0)
+                    FFIV_ScreenReaderMod.SpeakText(string.Format(T("Gained {0} gil"), gil.ToString("N0")), interrupt: false);
+
+                var characterList = data._CharacterList_k__BackingField;
+                if (characterList != null)
+                {
+                    foreach (var charResult in characterList)
+                    {
+                        string charName = charResult?.AfterData?.Name;
+                        if (string.IsNullOrEmpty(charName)) continue;
+
+                        int charExp = charResult.GetExp;
+                        if (charExp > 0)
+                            FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0} gained {1} XP"), charName, charExp.ToString("N0")), interrupt: false);
+                    }
+                }
 
                 // Start the EXP counter sound if enabled and this battle awarded EXP.
                 int totalExp = data.GetExp;
@@ -381,26 +233,198 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
-    // ----------------------------------------------------------------
-    //  Safety-net stop hooks: once the result screen advances past the
-    //  EXP-tally phase, the counter sound must stop.
-    // ----------------------------------------------------------------
+    /// <summary>
+    /// Level-up page: announces each character that leveled up, with the new level and stat gains.
+    /// </summary>
     [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowStatusUpInit))]
     public static class ResultMenuController_ShowStatusUpInit_Patch
     {
+        // Stat label key (existing status-screen keys) with its Base* reader and Confirmed*() fallback.
+        private static readonly (string Label, Func<CharacterParameterBase, int> Base, Func<CharacterParameterBase, int> Confirmed)[] Stats =
+        {
+            ("HP", p => p.BaseMaxHp, p => p.ConfirmedMaxHp()),
+            ("MP", p => p.BaseMaxMp, p => p.ConfirmedMaxMp()),
+            ("Strength", p => p.BasePower, p => p.ConfirmedPower()),
+            ("Agility", p => p.BaseAgility, p => p.ConfirmedAgility()),
+            ("Stamina", p => p.BaseVitality, p => p.ConfirmedVitality()),
+            ("Intellect", p => p.BaseIntelligence, p => p.ConfirmedIntelligence()),
+            ("Spirit", p => p.BaseSpirit, p => p.ConfirmedSpirit()),
+        };
+
         [HarmonyPostfix]
-        public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();
+        public static void Postfix(ResultMenuController __instance)
+        {
+            // Safety net: the EXP tally is finished by the time this phase begins.
+            BattleResultState.StopExpCounterIfPlaying();
+
+            try
+            {
+                BattleResultState.ResetIfNewResult(__instance);
+                var characterList = __instance.targetData?._CharacterList_k__BackingField;
+                if (characterList == null) return;
+
+                foreach (var charResult in characterList)
+                {
+                    if (charResult == null || !charResult.IsLevelUp) continue;
+
+                    var afterData = charResult.AfterData;
+                    string charName = afterData?.Name;
+                    if (string.IsNullOrEmpty(charName)) continue;
+                    if (!BattleResultState.AnnouncedLevelUps.Add(charName)) continue;
+
+                    var afterParam = afterData.parameter;
+                    int newLevel = afterParam?.ConfirmedLevel() ?? 0;
+                    string announcement = string.Format(T("{0} leveled up to level {1}"), charName, newLevel);
+
+                    string statGains = CalculateStatGains(charResult.BeforData?.parameter, afterParam); // BeforData: game typo
+                    if (!string.IsNullOrEmpty(statGains))
+                        announcement += ". " + statGains;
+
+                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ResultMenuController.ShowStatusUpInit patch: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Stat gains between the before/after snapshots, e.g. "HP +25, Strength +2".
+        /// Base* values are the exact level-up growth (Confirmed*() folds in equipment and caps);
+        /// Confirmed*() is the fallback for builds where the Base* auto-property getter throws.
+        /// </summary>
+        private static string CalculateStatGains(CharacterParameterBase before, CharacterParameterBase after)
+        {
+            if (before == null || after == null) return null;
+
+            var gains = new List<string>();
+            foreach (var stat in Stats)
+            {
+                int diff = ReadStat(after, stat.Base, stat.Confirmed) - ReadStat(before, stat.Base, stat.Confirmed);
+                if (diff > 0)
+                    gains.Add(string.Format(T("{0} +{1}"), T(stat.Label), diff));
+            }
+            return gains.Count > 0 ? string.Join(", ", gains) : null;
+        }
+
+        private static int ReadStat(CharacterParameterBase param, Func<CharacterParameterBase, int> baseValue, Func<CharacterParameterBase, int> confirmed)
+        {
+            try { return baseValue(param); }
+            catch
+            {
+                try { return confirmed(param); }
+                catch { return 0; }
+            }
+        }
     }
 
+    /// <summary>
+    /// Items page: announces each dropped item.
+    /// </summary>
+    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowGetItemsInit))]
+    public static class ResultMenuController_ShowGetItemsInit_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(ResultMenuController __instance)
+        {
+            // Safety net: the EXP tally is finished by the time this phase begins.
+            BattleResultState.StopExpCounterIfPlaying();
+
+            try
+            {
+                BattleResultState.ResetIfNewResult(__instance);
+                if (BattleResultState.ItemsAnnounced) return;
+
+                var itemList = __instance.targetData?._ItemList_k__BackingField;
+                var messageManager = MessageManager.Instance;
+                if (itemList == null || itemList.Count == 0 || messageManager == null) return;
+                BattleResultState.ItemsAnnounced = true;
+
+                var itemContentList = ListItemFormatter.GetContentDataList(itemList, messageManager);
+                if (itemContentList == null) return;
+
+                foreach (var itemContent in itemContentList)
+                {
+                    string itemName = StripIconMarkup(itemContent?.Name);
+                    if (string.IsNullOrEmpty(itemName)) continue;
+
+                    int quantity = itemContent.Count;
+                    string announcement = quantity > 1
+                        ? string.Format(T("Found {0} x{1}"), itemName, quantity)
+                        : string.Format(T("Found {0}"), itemName);
+                    FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ResultMenuController.ShowGetItemsInit patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Learned-abilities page: FF4 learns spells on level-up (BattleResultCharacterData.LearningList),
+    /// which the skill controller lists on this page.
+    /// </summary>
     [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowGetAbilitysInit))]
     public static class ResultMenuController_ShowGetAbilitysInit_Patch
     {
         [HarmonyPostfix]
-        public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();
+        public static void Postfix(ResultMenuController __instance)
+        {
+            // Safety net: the EXP tally is finished by the time this phase begins.
+            BattleResultState.StopExpCounterIfPlaying();
+
+            try
+            {
+                BattleResultState.ResetIfNewResult(__instance);
+                if (BattleResultState.AbilitiesAnnounced) return;
+
+                var characterList = __instance.targetData?._CharacterList_k__BackingField;
+                var messageManager = MessageManager.Instance;
+                if (characterList == null || messageManager == null) return;
+                BattleResultState.AbilitiesAnnounced = true;
+
+                foreach (var charResult in characterList)
+                {
+                    var afterData = charResult?.AfterData;
+                    var learningList = charResult?.LearningList;
+                    if (afterData?.OwnedAbilityList == null || learningList == null) continue;
+
+                    foreach (int abilityId in learningList)
+                    {
+                        string abilityName = GetOwnedAbilityName(afterData, abilityId, messageManager);
+                        if (!string.IsNullOrWhiteSpace(abilityName))
+                            FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0} learned {1}"), afterData.Name, abilityName), interrupt: false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ResultMenuController.ShowGetAbilitysInit patch: {ex.Message}");
+            }
+        }
+
+        private static string GetOwnedAbilityName(OwnedCharacterData character, int abilityId, MessageManager messageManager)
+        {
+            var abilities = character.OwnedAbilityList;
+            for (int i = 0; i < abilities.Count; i++)
+            {
+                var owned = abilities[i];
+                if (owned?.Ability != null && owned.Ability.Id == abilityId)
+                    return StripIconMarkup(messageManager.GetMessage(owned.MesIdName));
+            }
+            return null;
+        }
     }
 
-    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowGetItemsInit))]
-    public static class ResultMenuController_ShowGetItemsInit_Patch
+    // ----------------------------------------------------------------
+    //  Safety-net stop hooks: once the result screen advances past the
+    //  EXP-tally phase, the counter sound must stop.
+    // ----------------------------------------------------------------
+    [HarmonyPatch(typeof(ResultMenuController), nameof(ResultMenuController.ShowLevelUpAbilitysInit))]
+    public static class ResultMenuController_ShowLevelUpAbilitysInit_Patch
     {
         [HarmonyPostfix]
         public static void Postfix() => BattleResultState.StopExpCounterIfPlaying();

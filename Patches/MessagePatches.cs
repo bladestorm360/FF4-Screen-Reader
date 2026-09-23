@@ -9,6 +9,7 @@ using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Utils;
 using Il2CppInterop.Runtime;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Patches
 {
@@ -236,6 +237,25 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
+        /// Re-speaks the most recently announced dialogue page, with its speaker when known.
+        /// Used by the R key and controller mod mode + X while a message window is open.
+        /// </summary>
+        public static void RepeatLastDialogue()
+        {
+            string pageText = isInDialogue ? GetPageText(lastAnnouncedPageIndex) : null;
+            if (string.IsNullOrWhiteSpace(pageText))
+            {
+                FFIV_ScreenReaderMod.SpeakText(T("Nothing to repeat"), interrupt: true);
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(lastAnnouncedSpeaker))
+                pageText = $"{lastAnnouncedSpeaker}: {pageText}";
+
+            FFIV_ScreenReaderMod.SpeakText(pageText, interrupt: true);
+        }
+
+        /// <summary>
         /// Clear last announced speaker to force re-announcement on next dialogue.
         /// Call on scene transitions and after auto-scroll events to re-establish context.
         /// </summary>
@@ -448,6 +468,28 @@ namespace FFIV_ScreenReader.Patches
     }
 
     /// <summary>
+    /// Patch MessageWindowManager.Close to end the dialogue sequence.
+    /// Resets DialogueTracker so IsInDialogue clears and the navigation audio suppressed by
+    /// StoreMessages (wall tones, beacons, wall bumps) resumes once the window closes.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.Message.MessageWindowManager), nameof(Il2CppLast.Message.MessageWindowManager.Close))]
+    public static class MessageWindowManager_Close_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            try
+            {
+                DialogueTracker.Reset();
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in MessageWindowManager.Close patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Patch FadeMessageManager for location names, chapter titles, etc.
     /// Records message for content-based deduplication with SystemMessage.
     /// </summary>
@@ -533,20 +575,14 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                var sb = new System.Text.StringBuilder("Choices: ");
-                for (int i = 0; i < values.Length; i++)
+                var choices = new List<string>();
+                foreach (var value in values)
                 {
-                    if (!string.IsNullOrWhiteSpace(values[i]))
-                    {
-                        sb.Append(values[i].Trim());
-                        if (i < values.Length - 1)
-                        {
-                            sb.Append(", ");
-                        }
-                    }
+                    if (!string.IsNullOrWhiteSpace(value))
+                        choices.Add(value.Trim());
                 }
 
-                string choicesText = sb.ToString();
+                string choicesText = string.Format(T("Choices: {0}"), string.Join(", ", choices));
                 FFIV_ScreenReaderMod.SpeakText(choicesText, interrupt: true);
             }
             catch (Exception ex)

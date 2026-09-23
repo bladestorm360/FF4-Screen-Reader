@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Il2Cpp;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Field
@@ -124,22 +125,22 @@ namespace FFIV_ScreenReader.Field
             // Add shop indicator
             if (IsShop)
             {
-                details.Add("shop");
+                details.Add(T("shop"));
             }
 
             // Add movement type
             if (MovementType == Il2Cpp.FieldEntityConstants.MoveType.None)
             {
-                details.Add("stationary");
+                details.Add(T("stationary"));
             }
             else if (MovementType == Il2Cpp.FieldEntityConstants.MoveType.Stamp)
             {
-                details.Add("wandering");
+                details.Add(T("wandering"));
             }
             else if (MovementType == Il2Cpp.FieldEntityConstants.MoveType.Area ||
                      MovementType == Il2Cpp.FieldEntityConstants.MoveType.Route)
             {
-                details.Add("patrolling");
+                details.Add(T("patrolling"));
             }
 
             string detailStr = details.Count > 0 ? $" ({string.Join(", ", details)})" : "";
@@ -148,7 +149,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            return "NPC";
+            return T("NPC");
         }
     }
 }

@@ -11,6 +11,7 @@ using Il2CppLast.Management;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Patches
 {
@@ -18,6 +19,17 @@ namespace FFIV_ScreenReader.Patches
     /// Controller-based patches for battle menus (commands, abilities, items).
     /// Uses direct controller access instead of hierarchy walking.
     /// </summary>
+
+    /// <summary>
+    /// Description of the item or spell focused in a battle list, read by the details (I) key.
+    /// Null while focus is on the command menu (no list entry focused).
+    /// </summary>
+    internal static class BattleListDetails
+    {
+        internal static string LastDescription;
+
+        internal static void Clear() => LastDescription = null;
+    }
 
     /// <summary>
     /// Patch for battle command selection (Attack, Magic, Item, Defend, etc.)
@@ -52,6 +64,13 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
+                // Focus is on the command menu: no list entry is focused for the details key
+                BattleListDetails.Clear();
+
+                // The first command after the per-turn reset queues behind "X's turn";
+                // cursor movement after that interrupts as usual.
+                bool firstOfTurn = AnnouncementDeduplicator.GetLastIndex(DEDUP_CONTEXT) < 0;
+
                 // Skip duplicate announcements
                 if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, index))
                     return;
@@ -80,7 +99,7 @@ namespace FFIV_ScreenReader.Patches
                 }
 
                 commandName = FFIV_ScreenReader.Utils.MenuPosition.Format(commandName, index, __instance.contentList.Count);
-                FFIV_ScreenReaderMod.SpeakText(commandName);
+                FFIV_ScreenReaderMod.SpeakText(commandName, interrupt: !firstOfTurn);
             }
             catch (Exception ex)
             {
@@ -159,7 +178,7 @@ namespace FFIV_ScreenReader.Patches
                 // Build announcement
                 string announcement = itemName;
 
-                // Add quantity and description
+                // Add quantity
                 if (contentData != null)
                 {
                     // Add quantity if available (for items)
@@ -175,26 +194,14 @@ namespace FFIV_ScreenReader.Patches
                     {
                         // Not an item with count, continue
                     }
+                }
 
-                    // Add description if available
-                    try
-                    {
-                        string description = contentData.Description;
-                        if (!string.IsNullOrWhiteSpace(description))
-                        {
-                            // Remove icon markup
-                            description = StripIconMarkup(description);
-
-                            if (!string.IsNullOrWhiteSpace(description))
-                            {
-                                announcement += $", {description}";
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // No description available
-                    }
+                // Description for the details (I) key; spoken on focus only with Auto Detail
+                string description = StripIconMarkup(contentData?.Description);
+                BattleListDetails.LastDescription = description;
+                if (PreferencesManager.AutoDetailEnabled && !string.IsNullOrWhiteSpace(description))
+                {
+                    announcement += $", {description}";
                 }
 
                 // Skip duplicate announcements
@@ -211,6 +218,17 @@ namespace FFIV_ScreenReader.Patches
                 MelonLogger.Warning($"Error in BattleItemInfomationController.SelectContent patch: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Clears the battle item guard each time the item list opens, so re-entering the list
+    /// re-announces the focused item instead of treating it as a duplicate.
+    /// </summary>
+    [HarmonyPatch(typeof(BattleItemInfomationController), nameof(BattleItemInfomationController.ShowUseSelect))]
+    public static class BattleItemInfomationController_ShowUseSelect_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() => AnnouncementDeduplicator.Reset(AnnouncementContexts.BATTLE_ITEM_SELECT);
     }
 
     /// <summary>
@@ -277,15 +295,21 @@ namespace FFIV_ScreenReader.Patches
                 // Build announcement
                 string announcement = abilityName;
 
-                // Add description if available
-                if (!string.IsNullOrWhiteSpace(mesIdDescription))
+                // MP cost from master data
+                int mpCost = abilityData.Ability?.UseValue ?? 0;
+                if (mpCost > 0)
                 {
-                    string description = StripIconMarkup(messageManager.GetMessage(mesIdDescription));
+                    announcement += $", {T("MP")} {mpCost}";
+                }
 
-                    if (!string.IsNullOrWhiteSpace(description))
-                    {
-                        announcement += $", {description}";
-                    }
+                // Description for the details (I) key; spoken on focus only with Auto Detail
+                string description = string.IsNullOrWhiteSpace(mesIdDescription)
+                    ? null
+                    : StripIconMarkup(messageManager.GetMessage(mesIdDescription));
+                BattleListDetails.LastDescription = description;
+                if (PreferencesManager.AutoDetailEnabled && !string.IsNullOrWhiteSpace(description))
+                {
+                    announcement += $", {description}";
                 }
 
                 // Skip duplicate announcements
@@ -302,5 +326,16 @@ namespace FFIV_ScreenReader.Patches
                 MelonLogger.Warning($"Error in BattleQuantityAbilityInfomationController.SelectContent patch: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Clears the battle ability guard each time a magic/ability list opens, so re-entering
+    /// the list re-announces the focused spell instead of treating it as a duplicate.
+    /// </summary>
+    [HarmonyPatch(typeof(BattleQuantityAbilityInfomationController), nameof(BattleQuantityAbilityInfomationController.ShowUseSelect))]
+    public static class BattleQuantityAbilityInfomationController_ShowUseSelect_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix() => AnnouncementDeduplicator.Reset(AnnouncementContexts.BATTLE_ABILITY_SELECT);
     }
 }

@@ -13,7 +13,6 @@ using MainMenuSaveController = Il2CppLast.UI.KeyInput.SaveWindowController;   //
 using InterruptionController = Il2CppLast.UI.KeyInput.InterruptionWindowController;  // QuickSave (savePopup at 0x38)
 using SaveListController = Il2CppLast.UI.KeyInput.SaveListController;  // Save slot list navigation
 using SavePopup = Il2CppLast.UI.KeyInput.SavePopup;
-using CommonPopup = Il2CppLast.UI.KeyInput.CommonPopup;
 using OverwriteSaveController = Il2CppLast.UI.Save.KeyInput.SaveWindowController;
 using GameCursor = Il2CppLast.UI.Cursor;
 
@@ -68,9 +67,6 @@ namespace FFIV_ScreenReader.Patches
         private const int COMMON_COMMAND_TEXT_OFFSET = 0x18;
 
         // CommonPopup field offsets (from dump.cs line 458986)
-        // selectCursor: 0x68 (Cursor), commandList: 0x70 (List<CommonCommand>)
-        private const int COMMON_POPUP_SELECT_CURSOR_OFFSET = 0x68;
-        private const int COMMON_POPUP_COMMAND_LIST_OFFSET = 0x70;
         private const int COMMON_POPUP_MESSAGE_TEXT_OFFSET = 0x40;
 
         // OverwriteSaveController field offset for its CommonPopup
@@ -101,9 +97,6 @@ namespace FFIV_ScreenReader.Patches
 
                 // Patch SavePopup.UpdateCommand for button navigation (covers ALL save/load popups)
                 TryPatchSavePopupUpdateCommand(harmony);
-
-                // Patch CommonPopup.UpdateCommand for overwrite confirmation button navigation
-                TryPatchCommonPopupUpdateCommand(harmony);
 
                 // Patch OverwriteConfirmInit on Save.KeyInput.SaveWindowController for overwrite popup text
                 TryPatchOverwriteConfirmInit(harmony);
@@ -638,10 +631,6 @@ namespace FFIV_ScreenReader.Patches
             PatchHelper.TryPatchPostfix(harmony, typeof(SavePopup), "UpdateCommand",
                 typeof(SaveLoadPatches), nameof(SavePopupUpdateCommand_Postfix), "[SaveLoad]");
 
-        private static void TryPatchCommonPopupUpdateCommand(HarmonyLib.Harmony harmony) =>
-            PatchHelper.TryPatchPostfix(harmony, typeof(CommonPopup), "UpdateCommand",
-                typeof(SaveLoadPatches), nameof(CommonPopupUpdateCommand_Postfix), "[SaveLoad]");
-
         /// <summary>
         /// Patches OverwriteConfirmInit on the Save.KeyInput.SaveWindowController
         /// to clear SaveLoadMenuState and let the generic popup system handle navigation.
@@ -651,8 +640,9 @@ namespace FFIV_ScreenReader.Patches
                 typeof(SaveLoadPatches), nameof(OverwriteConfirmInit_Postfix), "[SaveLoad]");
 
         /// <summary>
-        /// Postfix for OverwriteConfirmInit - keeps SaveLoadMenuState active so CommonPopupUpdateCommand_Postfix
-        /// handles button navigation, and reads the popup text via coroutine.
+        /// Postfix for OverwriteConfirmInit - keeps SaveLoadMenuState active so the generic cursor
+        /// reader stays out (PopupPatches.CommonPopup_UpdateFocus_Postfix reads the Yes/No buttons),
+        /// and reads the popup text via coroutine.
         /// </summary>
         public static void OverwriteConfirmInit_Postfix(object __instance)
         {
@@ -664,7 +654,7 @@ namespace FFIV_ScreenReader.Patches
                 IntPtr controllerPtr = controller.Pointer;
                 if (controllerPtr == IntPtr.Zero) return;
 
-                // Keep SaveLoadMenuState active so CommonPopupUpdateCommand_Postfix reads buttons
+                // Keep SaveLoadMenuState active; CommonPopup.UpdateFocus reads the buttons
                 SaveLoadMenuState.IsActive = true;
                 SaveLoadMenuState.IsInConfirmation = true;
                 AnnouncementDeduplicator.Reset(DEDUP_COMMON_POPUP_BUTTON);
@@ -718,47 +708,6 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[SaveLoad] Error in SavePopupUpdateCommand: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Postfix for CommonPopup.UpdateCommand - reads button text for overwrite confirmation.
-        /// Only fires when SaveLoadMenuState.IsActive to avoid interfering with other CommonPopup uses.
-        /// </summary>
-        public static void CommonPopupUpdateCommand_Postfix(object __instance)
-        {
-            try
-            {
-                // Only handle during save/load flow — other CommonPopups
-                // (Return to Title, font change) are handled by the generic popup system
-                if (!SaveLoadMenuState.IsActive) return;
-
-                var popup = __instance as CommonPopup;
-                if (popup == null) return;
-
-                IntPtr ptr = popup.Pointer;
-                if (ptr == IntPtr.Zero) return;
-
-                unsafe
-                {
-                    IntPtr cursorPtr = *(IntPtr*)((byte*)ptr.ToPointer() + COMMON_POPUP_SELECT_CURSOR_OFFSET);
-                    if (cursorPtr == IntPtr.Zero) return;
-
-                    var cursor = new GameCursor(cursorPtr);
-                    int index = cursor.Index;
-
-                    if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_COMMON_POPUP_BUTTON, index)) return;
-
-                    string buttonText = ReadPopupButton(ptr, COMMON_POPUP_COMMAND_LIST_OFFSET, index);
-                    if (!string.IsNullOrWhiteSpace(buttonText))
-                    {
-                        FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: false);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[SaveLoad] Error in CommonPopupUpdateCommand: {ex.Message}");
             }
         }
 

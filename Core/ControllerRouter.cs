@@ -145,21 +145,27 @@ namespace FFIV_ScreenReader.Core
         private static void AnnounceModModeControls()
         {
             string back = ControllerLabels.GetButtonLabel(SDL3.SDL_GAMEPAD_BUTTON_BACK);
+            string west = ControllerLabels.GetButtonLabel(SDL3.SDL_GAMEPAD_BUTTON_WEST);
 
-            if (BattleState.IsInBattle)
+            if (DialogueTracker.IsInDialogue)
             {
-                string west = ControllerLabels.GetButtonLabel(SDL3.SDL_GAMEPAD_BUTTON_WEST);
+                FFIV_ScreenReaderMod.SpeakText(
+                    string.Format(T("{0} to repeat dialogue. {1} to cancel."), west, back),
+                    interrupt: true);
+            }
+            else if (BattleState.IsInBattle)
+            {
                 FFIV_ScreenReaderMod.SpeakText(
                     string.Format(T("{0} for party HP. {1} to cancel."), west, back),
                     interrupt: true);
             }
             else
             {
-                string west = ControllerLabels.GetButtonLabel(SDL3.SDL_GAMEPAD_BUTTON_WEST);
                 string north = ControllerLabels.GetButtonLabel(SDL3.SDL_GAMEPAD_BUTTON_NORTH);
+                string south = ControllerLabels.GetButtonLabel(SDL3.SDL_GAMEPAD_BUTTON_SOUTH);
                 FFIV_ScreenReaderMod.SpeakText(
-                    string.Format(T("{0} for Gil. {1} for location. Right stick to teleport. {2} to cancel."),
-                    west, north, back),
+                    string.Format(T("{0} for Gil. {1} for location. {2} for vehicle. Right stick to teleport. {3} to cancel."),
+                    west, north, south, back),
                     interrupt: true);
             }
         }
@@ -249,7 +255,7 @@ namespace FFIV_ScreenReader.Core
              || GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_EAST)
              || GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_WEST)
              || GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_NORTH))
-                FFIV_ScreenReaderMod.SpeakText("", interrupt: true);
+                FFIV_ScreenReaderMod.InterruptSpeech();
 
             if (IsFieldActive)
                 HandleNormalField();
@@ -300,7 +306,7 @@ namespace FFIV_ScreenReader.Core
                 || GamepadManager.RStickLeftPressed || GamepadManager.RStickRightPressed;
 
             if (anyNavInput)
-                FFIV_ScreenReaderMod.SpeakText("", interrupt: true);
+                FFIV_ScreenReaderMod.InterruptSpeech();
 
             // D-pad → waypoint navigation (consumed). The callees mark the tracker.
             if (GamepadManager.DpadUpPressed && waypointFacade != null)
@@ -345,13 +351,39 @@ namespace FFIV_ScreenReader.Core
 
         private static void HandleNormalNonField(KeyContext context)
         {
-            // D-pad and left stick → virtual buffer navigation in Status
+            // Right stick up → details (I key equivalent)
+            if (GamepadManager.RStickUpPressed)
+                InputManager.HandleItemDetailsKey();
+
+            // Right stick down → read controls (Shift+I equivalent)
+            if (GamepadManager.RStickDownPressed)
+                KeyHelpReader.AnnounceKeyHelp();
+
+            // Right stick left → who can equip (U key equivalent)
+            if (GamepadManager.RStickLeftPressed)
+                UsableByAnnouncer.AnnounceForCurrentContext();
+
+            // D-pad and left stick → virtual buffer navigation in Status / Bestiary / controls pop-up
             if (context == KeyContext.Status)
             {
                 if (GamepadManager.DpadUpPressed || GamepadManager.LeftStickUpPressed)
                 { ConsumeButton(SDL3.SDL_GAMEPAD_BUTTON_DPAD_UP); StatusNavigationReader.NavigatePrevious(); }
                 if (GamepadManager.DpadDownPressed || GamepadManager.LeftStickDownPressed)
                 { ConsumeButton(SDL3.SDL_GAMEPAD_BUTTON_DPAD_DOWN); StatusNavigationReader.NavigateNext(); }
+            }
+            else if (context == KeyContext.BestiaryDetail)
+            {
+                if (GamepadManager.DpadUpPressed || GamepadManager.LeftStickUpPressed)
+                { ConsumeButton(SDL3.SDL_GAMEPAD_BUTTON_DPAD_UP); BestiaryNavigationReader.NavigatePrevious(); }
+                if (GamepadManager.DpadDownPressed || GamepadManager.LeftStickDownPressed)
+                { ConsumeButton(SDL3.SDL_GAMEPAD_BUTTON_DPAD_DOWN); BestiaryNavigationReader.NavigateNext(); }
+            }
+            else if (context == KeyContext.KeyHelp)
+            {
+                if (GamepadManager.DpadUpPressed || GamepadManager.LeftStickUpPressed)
+                { ConsumeButton(SDL3.SDL_GAMEPAD_BUTTON_DPAD_UP); KeyHelpReader.NavigatePrevious(); }
+                if (GamepadManager.DpadDownPressed || GamepadManager.LeftStickDownPressed)
+                { ConsumeButton(SDL3.SDL_GAMEPAD_BUTTON_DPAD_DOWN); KeyHelpReader.NavigateNext(); }
             }
         }
 
@@ -368,7 +400,14 @@ namespace FFIV_ScreenReader.Core
             var mod = FFIV_ScreenReaderMod.Instance;
             if (mod == null) return;
 
-            if (BattleState.IsInBattle)
+            // Dialogue takes precedence over battle/field — if a message window is up,
+            // the player wants to repeat the message, not check HP or Gil.
+            if (DialogueTracker.IsInDialogue)
+            {
+                if (GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_WEST))
+                { DialogueTracker.RepeatLastDialogue(); State = ControllerState.Normal; return; }
+            }
+            else if (BattleState.IsInBattle)
             {
                 // Battle mod mode: X = party HP check
                 if (GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_WEST))
@@ -376,12 +415,15 @@ namespace FFIV_ScreenReader.Core
             }
             else
             {
-                // Field mod mode: X=Gil, Y=Location
+                // Field mod mode: X=Gil, Y=Location, A=Vehicle
                 if (GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_WEST))
                 { GameAnnouncementHelper.AnnounceGilAmount(); State = ControllerState.Normal; return; }
 
                 if (GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_NORTH))
                 { GameAnnouncementHelper.AnnounceCurrentMap(); State = ControllerState.Normal; return; }
+
+                if (GamepadManager.IsButtonPressed(SDL3.SDL_GAMEPAD_BUTTON_SOUTH))
+                { InputManager.AnnounceVehicleState(); State = ControllerState.Normal; return; }
 
                 // When Stick Click Normalization is on, the stick-click mod functions move
                 // here so the player can still reach them via mod button + R3/L3.

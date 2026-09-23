@@ -58,7 +58,10 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         private bool EnsureFieldContextAndScan()
         {
+            // Refresh on a cache miss so a cleared entry can't report "Not on map" on a live field.
             var fieldMap = GameObjectCache.Get<Il2Cpp.FieldMap>();
+            if (fieldMap == null)
+                fieldMap = GameObjectCache.Refresh<Il2Cpp.FieldMap>();
             if (fieldMap == null || !fieldMap.gameObject.activeInHierarchy)
             {
                 FFIV_ScreenReaderMod.SpeakText(T("Not on map"));
@@ -66,6 +69,8 @@ namespace FFIV_ScreenReader.Core
             }
 
             var playerController = GameObjectCache.Get<FieldPlayerController>();
+            if (playerController == null)
+                playerController = GameObjectCache.Refresh<FieldPlayerController>();
             if (playerController?.fieldPlayer == null)
             {
                 FFIV_ScreenReaderMod.SpeakText(T("Not on map"));

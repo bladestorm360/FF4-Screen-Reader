@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using HarmonyLib;
 using MelonLoader;
@@ -10,6 +11,7 @@ using Il2CppLast.Data.User;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
 using static FFIV_ScreenReader.Utils.TextUtils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 
 // Type alias for window controller (FF4-specific namespace)
@@ -93,44 +95,43 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (__instance == null)
-                    return;
-
-                var contentView = SelectContentHelper.TryGetItem(__instance.contentList, index);
-                if (contentView == null || contentView.text == null)
-                    return;
-
-                // Get the command name from the text component
-                string commandName = contentView.text.text;
-                if (string.IsNullOrWhiteSpace(commandName))
-                {
-                    return;
-                }
-
-                // Remove icon markup
-                commandName = StripIconMarkup(commandName);
-
-                if (string.IsNullOrWhiteSpace(commandName))
-                {
-                    return;
-                }
-
-                // Skip duplicate announcements
-                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, commandName))
-                {
-                    return;
-                }
-
-                // Set ability menu state active
-                MenuStates.Ability.SetActive();
-
-                commandName = FFIV_ScreenReader.Utils.MenuPosition.Format(commandName, index, __instance.contentList.Count);
-                FFIV_ScreenReaderMod.SpeakText(commandName);
+                Announce(__instance, index);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in AbilityCommandController.SelectContent patch: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Announces the ability command at <paramref name="index"/>. Shared by cursor movement and
+        /// the command-bar entry reader; deduplicated on the command name.
+        /// </summary>
+        internal static void Announce(AbilityCommandController controller, int index)
+        {
+            var contentView = SelectContentHelper.TryGetItem(controller?.contentList, index);
+            if (contentView == null || contentView.text == null)
+                return;
+
+            // Get the command name from the text component, without icon markup
+            string commandName = StripIconMarkup(contentView.text.text);
+            if (string.IsNullOrWhiteSpace(commandName))
+            {
+                return;
+            }
+
+            // Skip duplicate announcements
+            if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, commandName))
+            {
+                return;
+            }
+
+            // Set ability menu state active; the command bar has no spell focused for the details key
+            MenuStates.Ability.SetActive();
+            AbilityContentListController_SelectContent_Patch.LastDescription = null;
+
+            commandName = FFIV_ScreenReader.Utils.MenuPosition.Format(commandName, index, controller.contentList.Count);
+            FFIV_ScreenReaderMod.SpeakText(commandName);
         }
     }
 
@@ -143,6 +144,12 @@ namespace FFIV_ScreenReader.Patches
     public static class AbilityContentListController_SelectContent_Patch
     {
         private const string DEDUP_CONTEXT = AnnouncementContexts.ABILITY_CONTENT;
+
+        /// <summary>
+        /// Description of the focused spell, read by the details (I) key.
+        /// Null while no spell is focused (command bar).
+        /// </summary>
+        internal static string LastDescription;
 
         [HarmonyPostfix]
         public static void Postfix(AbilityContentListController __instance, Cursor targetCursor)
@@ -164,20 +171,8 @@ namespace FFIV_ScreenReader.Patches
                     return;
                 }
 
-                // Get message IDs
-                string mesIdName = abilityData.MesIdName;
-                string mesIdDescription = abilityData.MesIdDescription;
-
-                // Get localized name
-                string abilityName = MessageHelper.GetLocalizedMessage(mesIdName);
-                if (string.IsNullOrEmpty(abilityName))
-                {
-                    return;
-                }
-
-                // Remove icon markup
-                abilityName = StripIconMarkup(abilityName);
-
+                // Get localized name, without icon markup
+                string abilityName = StripIconMarkup(MessageHelper.GetLocalizedMessage(abilityData.MesIdName));
                 if (string.IsNullOrWhiteSpace(abilityName))
                 {
                     return;
@@ -186,38 +181,20 @@ namespace FFIV_ScreenReader.Patches
                 // Build announcement
                 string announcement = abilityName;
 
-                // Try to get MP cost if available from the controller's view
-                try
+                // MP cost from master data (the controller-level MP text can lag one entry behind)
+                int mpCost = abilityData.Ability?.UseValue ?? 0;
+                if (mpCost > 0)
                 {
-                    var controllerView = __instance.view;
-                    if (controllerView != null && controllerView.mpValueText != null)
-                    {
-                        string mpText = controllerView.mpValueText.text;
-                        if (!string.IsNullOrWhiteSpace(mpText))
-                        {
-                            mpText = mpText.Trim();
-                            if (mpText != "0" && mpText != "-")
-                            {
-                                announcement += $", MP {mpText}";
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    // MP cost not available, continue without it
+                    announcement += $", {T("MP")} {mpCost}";
                 }
 
-                // Add description if available
-                if (!string.IsNullOrWhiteSpace(mesIdDescription))
-                {
-                    string rawDesc = MessageHelper.GetLocalizedMessage(mesIdDescription);
-                    string description = rawDesc != null ? StripIconMarkup(rawDesc) : null;
+                string description = StripIconMarkup(MessageHelper.GetLocalizedMessage(abilityData.MesIdDescription));
+                LastDescription = description;
 
-                    if (!string.IsNullOrWhiteSpace(description))
-                    {
-                        announcement += $". {description}";
-                    }
+                // Auto Detail: include the description the details key would read
+                if (PreferencesManager.AutoDetailEnabled && !string.IsNullOrWhiteSpace(description))
+                {
+                    announcement += $". {description}";
                 }
 
                 // Skip duplicate announcements
@@ -235,6 +212,67 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in AbilityContentListController.SelectContent patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears the ability-menu guards as each ability screen (re)gains focus, so its focused entry
+    /// re-announces on entry and on back-out instead of being swallowed as a duplicate. On command
+    /// (re)entry the postfix also reads the focused command one frame later (placing the cursor
+    /// doesn't fire SelectContent); that read is deduplicated, so a SelectContent inside the Init
+    /// body and the deferred read never double up.
+    /// </summary>
+    [HarmonyPatch]
+    public static class AbilityWindowController_StateInit_Patch
+    {
+        static System.Collections.Generic.IEnumerable<MethodBase> TargetMethods()
+        {
+            foreach (var name in new[] { "CommandInit", "UseListInit", "UseTargetInit" })
+            {
+                var method = AccessTools.Method(typeof(AbilityWindowController), name);
+                if (method != null)
+                    yield return method;
+                else
+                    MelonLogger.Warning($"[AbilityMenu] AbilityWindowController.{name} not found");
+            }
+        }
+
+        [HarmonyPrefix]
+        public static void Prefix(MethodBase __originalMethod)
+        {
+            switch (__originalMethod.Name)
+            {
+                case "CommandInit": AnnouncementDeduplicator.Reset(AnnouncementContexts.ABILITY_COMMAND); break;
+                case "UseListInit": AnnouncementDeduplicator.Reset(AnnouncementContexts.ABILITY_CONTENT); break;
+                case "UseTargetInit": AnnouncementDeduplicator.Reset(AnnouncementContexts.ABILITY_USE_TARGET); break;
+            }
+        }
+
+        [HarmonyPostfix]
+        public static void Postfix(AbilityWindowController __instance, MethodBase __originalMethod)
+        {
+            if (__originalMethod.Name == "CommandInit")
+                CoroutineManager.StartManaged(AnnounceCommandFocusAfterFrame(__instance));
+        }
+
+        private static IEnumerator AnnounceCommandFocusAfterFrame(AbilityWindowController window)
+        {
+            yield return null; // let the command bar cursor settle
+
+            try
+            {
+                if (window == null || window.gameObject == null || !window.gameObject.activeInHierarchy)
+                    yield break;
+
+                var controller = window.commandController;
+                var cursor = controller?.selectCursor;
+                if (cursor != null)
+                    AbilityCommandController_SelectContent_Patch.Announce(controller, cursor.Index);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[AbilityMenu] Error reading ability command focus: {ex.Message}");
             }
         }
     }

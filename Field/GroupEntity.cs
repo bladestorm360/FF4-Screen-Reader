@@ -3,6 +3,7 @@ using System.Linq;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Core.Filters;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using Il2Cpp;
 using Il2CppLast.Entity.Field;
 using Il2CppLast.Map;
@@ -159,7 +160,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            return GetRepresentative()?.EntityTypeName ?? "Group";
+            return GetRepresentative()?.EntityTypeName ?? T("Group");
         }
     }
 }

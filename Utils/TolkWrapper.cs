@@ -59,6 +59,27 @@ namespace FFIV_ScreenReader.Utils
             }
         }
 
+        /// <summary>
+        /// Silences current speech immediately.
+        /// </summary>
+        public void Silence()
+        {
+            try
+            {
+                if (tolk.IsLoaded())
+                {
+                    lock (tolkLock)
+                    {
+                        tolk.Silence();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"Error silencing speech: {ex.Message}");
+            }
+        }
+
         public bool IsLoaded() => tolk.IsLoaded();
     }
 }

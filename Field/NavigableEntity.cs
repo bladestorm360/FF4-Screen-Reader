@@ -3,6 +3,7 @@ using Il2CppLast.Entity.Field;
 using UnityEngine;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Field
 {
@@ -135,21 +136,19 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetDisplayName()
         {
-            string status = IsOpened ? "Opened" : "Unopened";
-            return $"{status} {GetEntityTypeName()}";
+            return string.Format(IsOpened ? T("Opened {0}") : T("Unopened {0}"), GetEntityTypeName());
         }
 
         protected override string GetEntityTypeName()
         {
-            return "Treasure Chest";
+            return T("Treasure Chest");
         }
 
         public override string FormatDescription(Vector3 playerPos)
         {
             float distance = Vector3.Distance(playerPos, Position);
             string direction = PlayerPositionHelper.GetDirection(playerPos, Position);
-            string status = IsOpened ? "Opened" : "Unopened";
-            return $"{status} {GetEntityTypeName()} ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
+            return $"{GetDisplayName()} ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
         }
     }
 
@@ -184,7 +183,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            return "Map Exit";
+            return T("Map Exit");
         }
     }
 
@@ -206,14 +205,14 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            return "Save Point";
+            return T("Save Point");
         }
 
         public override string FormatDescription(Vector3 playerPos)
         {
             float distance = Vector3.Distance(playerPos, Position);
             string direction = PlayerPositionHelper.GetDirection(playerPos, Position);
-            return $"Save Point ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
+            return $"{GetEntityTypeName()} ({PlayerPositionHelper.FormatSteps(distance)} {direction})";
         }
     }
 
@@ -235,7 +234,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            return "Door/Trigger";
+            return T("Door/Trigger");
         }
     }
 
@@ -273,9 +272,9 @@ namespace FFIV_ScreenReader.Field
             switch (type)
             {
                 case Il2Cpp.MapConstants.ObjectType.TelepoPoint:
-                    return "Teleport";
+                    return T("Teleport");
                 case Il2Cpp.MapConstants.ObjectType.Event:
-                    return "Event";
+                    return T("Event");
                 default:
                     return type.ToString();
             }

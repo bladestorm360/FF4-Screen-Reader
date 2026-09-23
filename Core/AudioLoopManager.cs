@@ -202,8 +202,11 @@ namespace FFIV_ScreenReader.Core
 
             while (PreferencesManager.AudioBeaconsEnabled)
             {
-                // Silence during battle, NPC dialogue, or transient suppression.
-                if (suppressed || BattleState.IsInBattle || DialogueTracker.IsInDialogue)
+                // Silence during battle, NPC dialogue, transient suppression, any open game menu
+                // (IsFieldActive), or a mod dialog (SuppressGameInput: mod menu / text input /
+                // confirmation, where the per-tick work would also stutter keyboard polling).
+                if (suppressed || BattleState.IsInBattle || DialogueTracker.IsInDialogue
+                    || !ControllerRouter.IsFieldActive || ControllerRouter.SuppressGameInput)
                 {
                     yield return null;
                     continue;
@@ -369,8 +372,11 @@ namespace FFIV_ScreenReader.Core
 
             while (PreferencesManager.WallTonesEnabled)  // Exit when disabled
             {
-                // Silence during battle, NPC dialogue, or transient suppression.
-                if (suppressed || BattleState.IsInBattle || DialogueTracker.IsInDialogue)
+                // Silence during battle, NPC dialogue, transient suppression, any open game menu
+                // (IsFieldActive), or a mod dialog (SuppressGameInput: mod menu / text input /
+                // confirmation, where the per-tick work would also stutter keyboard polling).
+                if (suppressed || BattleState.IsInBattle || DialogueTracker.IsInDialogue
+                    || !ControllerRouter.IsFieldActive || ControllerRouter.SuppressGameInput)
                 {
                     if (SoundPlayer.IsWallTonePlaying())
                         SoundPlayer.StopWallTone();
@@ -537,7 +543,7 @@ namespace FFIV_ScreenReader.Core
             else
                 StopBeaconLoop();
 
-            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Audio beacons {0}"), newVal ? T("on") : T("off")));
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("Beacon navigation {0}"), newVal ? T("on") : T("off")));
         }
 
         // Public static accessors for enabled state — single source of truth is PreferencesManager.

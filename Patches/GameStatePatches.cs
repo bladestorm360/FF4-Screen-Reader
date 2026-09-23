@@ -3,6 +3,7 @@ using HarmonyLib;
 using MelonLoader;
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using FFIV_ScreenReader.Field;
 using SubSceneManagerMainGame = Il2CppLast.Management.SubSceneManagerMainGame;
 using UserDataManager = Il2CppLast.Management.UserDataManager;
@@ -121,7 +122,7 @@ namespace FFIV_ScreenReader.Patches
                 {
                     // Map has changed - announce new map
                     string mapName = MapNameResolver.GetCurrentMapName();
-                    string fullMessage = $"Entering {mapName}";
+                    string fullMessage = string.Format(T("Entering {0}"), mapName);
 
                     FFIV_ScreenReaderMod.SpeakText(fullMessage, interrupt: false);
                     lastAnnouncedMapId = currentMapId;

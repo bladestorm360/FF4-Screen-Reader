@@ -1,5 +1,6 @@
 using FFIV_ScreenReader.Core;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using UnityEngine;
 
 namespace FFIV_ScreenReader.Field
@@ -32,7 +33,7 @@ namespace FFIV_ScreenReader.Field
 
         protected override string GetEntityTypeName()
         {
-            return "Vehicle";
+            return T("Vehicle");
         }
 
         /// <summary>
@@ -56,19 +57,19 @@ namespace FFIV_ScreenReader.Field
             // Fall back to type-based generic name
             switch (id)
             {
-                case 1: return "Player";
-                case 2: return "Ship";
-                case 3: return "Enterprise";
-                case 4: return "Symbol";
-                case 5: return "Content";
-                case 6: return "Submarine";
-                case 7: return "Hovercraft";
-                case 8: return "Special Airship";
-                case 9: return "Yellow Chocobo";
-                case 10: return "Black Chocobo";
-                case 11: return "Boko";
-                case 12: return "Magical Armor";
-                default: return $"Vehicle {id}";
+                case 1: return T("Player");
+                case 2: return T("Ship");
+                case 3: return T("Enterprise");
+                case 4: return T("Symbol");
+                case 5: return T("Content");
+                case 6: return T("Submarine");
+                case 7: return T("Hovercraft");
+                case 8: return T("Special Airship");
+                case 9: return T("Yellow Chocobo");
+                case 10: return T("Black Chocobo");
+                case 11: return T("Boko");
+                case 12: return T("Magical Armor");
+                default: return string.Format(T("Vehicle {0}"), id);
             }
         }
     }

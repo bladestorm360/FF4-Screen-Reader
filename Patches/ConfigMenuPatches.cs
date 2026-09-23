@@ -109,6 +109,17 @@ namespace FFIV_ScreenReader.Patches
                 PatchKeysSetting("KeyboardSettingInit", nameof(KeyboardSettingInit_Postfix));
                 PatchKeysSetting("GamePadSettingInit", nameof(GamePadSettingInit_Postfix));
 
+                // Gamepad/Keyboard "Controls" pop-up (read-only list of every control): entering the
+                // Help state renders the list once for KeyHelpReader's arrow/WASD navigation; returning
+                // to the select list or closing the screen tears it down.
+                PatchKeysSetting("GamePadHelpInit", nameof(GamePadHelpInit_Postfix));
+                PatchKeysSetting("KeyboardHelpInit", nameof(KeyboardHelpInit_Postfix));
+                PatchKeysSetting("GamePadSelectInit", nameof(ControlsHelpClose_Postfix));
+                PatchKeysSetting("KeyboardSelectInit", nameof(ControlsHelpClose_Postfix));
+                PatchKeysSetting("Close", nameof(ControlsHelpClose_Postfix));
+                // NoneInit (the idle state; unique RVA 0x461EC0, real body) is another way out of Help.
+                PatchKeysSetting("NoneInit", nameof(ControlsHelpClose_Postfix));
+
                 // ChangeKeySetting is overloaded — patch every overload with the same __instance-only
                 // postfix (avoids AmbiguousMatchException without needing an exact Type[]).
                 try
@@ -227,6 +238,51 @@ namespace FFIV_ScreenReader.Patches
             catch (Exception ex)
             {
                 MelonLogger.Warning($"Error in assign-prompt patch: {ex.Message}");
+            }
+        }
+
+        // ── Gamepad/Keyboard Controls pop-up → KeyHelpReader navigation ──
+        public static void GamePadHelpInit_Postfix(ConfigKeysSettingController __instance)
+            => CoroutineManager.StartManaged(DelayedOpenControlsHelp(__instance, gamepad: true));
+
+        public static void KeyboardHelpInit_Postfix(ConfigKeysSettingController __instance)
+            => CoroutineManager.StartManaged(DelayedOpenControlsHelp(__instance, gamepad: false));
+
+        public static void ControlsHelpClose_Postfix() => KeyHelpReader.CloseControlsHelp();
+
+        /// <summary>
+        /// One frame after the Help state opens (so each row's binding text is populated), renders
+        /// the help list through the same builder the remap list uses. The state machine can cycle
+        /// its Help Init during scene construction, so only build while the screen is on-screen.
+        /// </summary>
+        private static System.Collections.IEnumerator DelayedOpenControlsHelp(ConfigKeysSettingController inst, bool gamepad)
+        {
+            yield return null;
+
+            try
+            {
+                if (inst == null || inst.gameObject == null || !inst.gameObject.activeInHierarchy)
+                {
+                    KeyHelpReader.CloseControlsHelp();
+                    yield break;
+                }
+
+                var list = gamepad ? inst.HelpContentList : inst.KeyboardHelpContentList;
+                var entries = new System.Collections.Generic.List<string>();
+                if (list != null)
+                {
+                    foreach (var command in list)
+                    {
+                        string entry = ConfigKeysSettingController_SelectContent_Patch.BuildCommandAnnouncement(inst, command);
+                        if (!string.IsNullOrWhiteSpace(entry))
+                            entries.Add(entry);
+                    }
+                }
+                KeyHelpReader.OpenControlsHelp(inst, entries);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error reading controls help list: {ex.Message}");
             }
         }
 

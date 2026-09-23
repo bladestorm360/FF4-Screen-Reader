@@ -51,12 +51,19 @@ namespace FFIV_ScreenReader.Patches
                 if (instance == null || instance.gameObject == null || instance.transform == null)
                     return;
 
+                // Battle pause menu: checked before suppression, since the battle state
+                // suppresses the generic reader.
+                if (BattleState.IsInBattle && BattlePausePatches.TryHandleCursor(instance))
+                    return;
+
                 if (SaveLoadMenuState.IsActive)
                     return;
 
                 if (PopupState.ShouldSuppress())
                 {
-                    PopupPatches.ReadCurrentButton(instance);
+                    // KeyInput CommonPopup buttons are read by its own UpdateFocus hook
+                    if (PopupState.CurrentPopupType != "CommonPopup")
+                        PopupPatches.ReadCurrentButton(instance);
                     return;
                 }
 

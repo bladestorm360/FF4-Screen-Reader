@@ -5,6 +5,7 @@ using UnityEngine;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Core.Filters;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 using Il2Cpp;
 using Il2CppLast.Map;
 
@@ -469,19 +470,19 @@ namespace FFIV_ScreenReader.Core
             switch (category)
             {
                 case EntityCategory.All:
-                    return "All";
+                    return T("All");
                 case EntityCategory.Chests:
-                    return "Chests";
+                    return T("Chests");
                 case EntityCategory.NPCs:
-                    return "NPCs";
+                    return T("NPCs");
                 case EntityCategory.MapExits:
-                    return "Map Exits";
+                    return T("Map Exits");
                 case EntityCategory.Events:
-                    return "Events";
+                    return T("Events");
                 case EntityCategory.Vehicles:
-                    return "Vehicles";
+                    return T("Vehicles");
                 default:
-                    return "Unknown";
+                    return T("Unknown");
             }
         }
     }

@@ -5,6 +5,7 @@ using UnityEngine;
 using MelonLoader;
 using FFIV_ScreenReader.Field;
 using FFIV_ScreenReader.Utils;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 namespace FFIV_ScreenReader.Core
 {
@@ -121,7 +122,7 @@ namespace FFIV_ScreenReader.Core
             int nextVal = ((int)currentCategory + 1) % CategoryCount;
             currentCategory = (WaypointCategory)nextVal;
             RefreshList(mapId);
-            return CategoryNames[(int)currentCategory];
+            return T(CategoryNames[(int)currentCategory]);
         }
 
         /// <summary>
@@ -132,7 +133,7 @@ namespace FFIV_ScreenReader.Core
             int prevVal = ((int)currentCategory - 1 + CategoryCount) % CategoryCount;
             currentCategory = (WaypointCategory)prevVal;
             RefreshList(mapId);
-            return CategoryNames[(int)currentCategory];
+            return T(CategoryNames[(int)currentCategory]);
         }
 
         /// <summary>
@@ -142,7 +143,7 @@ namespace FFIV_ScreenReader.Core
         {
             var waypoint = SelectedWaypoint;
             if (waypoint == null)
-                return "No waypoints";
+                return T("No waypoints on this map");
 
             Vector3 playerPos = PlayerPositionHelper.GetLocalPosition();
             string description = waypoint.FormatDescription(playerPos);
@@ -160,9 +161,9 @@ namespace FFIV_ScreenReader.Core
         /// </summary>
         public string GetCategoryAnnouncement()
         {
-            string categoryName = CategoryNames[(int)currentCategory];
+            string categoryName = T(CategoryNames[(int)currentCategory]);
             int count = currentList.Count;
-            string plural = count == 1 ? "waypoint" : "waypoints";
+            string plural = count == 1 ? T("waypoint") : T("waypoints");
             return $"{categoryName}: {count} {plural}";
         }
 

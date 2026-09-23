@@ -5,6 +5,7 @@ using FFIV_ScreenReader.Utils;
 using System.Collections;
 using MelonLoader;
 using System;
+using static FFIV_ScreenReader.Utils.ModTextTranslator;
 
 // Import MenuState classes
 using ShopState = FFIV_ScreenReader.Core.ShopState;
@@ -49,6 +50,28 @@ namespace FFIV_ScreenReader.Patches
             LastItemMpCost = null;
             LastItemName = null;
             LastItemPrice = null;
+        }
+
+        // ShopController.State values
+        public const int STATE_SELECT_COMMAND = 1;
+        public const int STATE_SELECT_SELL_ITEM = 3;
+
+        /// <summary>
+        /// Current ShopController state (the game's own "which panel has focus"), or -1 if the
+        /// shop controller isn't available.
+        /// </summary>
+        public static int GetShopState()
+        {
+            try
+            {
+                var shop = UnityEngine.Object.FindObjectOfType<ShopController>();
+                var current = shop?.stateMachine?.current;
+                return current != null ? (int)current.Tag : -1;
+            }
+            catch
+            {
+                return -1; // Controller torn down mid-transition
+            }
         }
     }
 
@@ -125,6 +148,13 @@ namespace FFIV_ScreenReader.Patches
                     return; // Generic cursor already announced, don't duplicate
                 }
 
+                // Only announce while the command bar has focus. On shop entry the state goes
+                // straight to the product list, so the setup-time cursor placement stays silent
+                // (no double "Buy"); cancelling back to the bar is SelectCommand and announces.
+                int state = ShopMenuTracker.GetShopState();
+                if (state >= 0 && state != ShopMenuTracker.STATE_SELECT_COMMAND)
+                    return;
+
                 if (__instance?.contentList == null || index < 0 || index >= __instance.contentList.Count)
                     return;
 
@@ -156,8 +186,9 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                // Empty description means returning to command menu - don't announce stale item data
-                if (string.IsNullOrEmpty(value))
+                // Empty description means returning to command menu - don't announce stale item data.
+                // In the sell list it can also be an empty slot, which is announced below.
+                if (string.IsNullOrEmpty(value) && ShopMenuTracker.GetShopState() != ShopMenuTracker.STATE_SELECT_SELL_ITEM)
                 {
                     // Also reset dedup so next submenu entry announces first item
                     AnnouncementDeduplicator.Reset(DEDUP_CONTEXT);
@@ -166,14 +197,7 @@ namespace FFIV_ScreenReader.Patches
 
                 // Set shop state active first (handles ClearOtherMenuStates)
                 ShopState.SetActive();
-
-                // Store the controller and description for 'I' key access
                 ShopMenuTracker.ActiveInfoController = __instance;
-                ShopMenuTracker.LastItemDescription = value;
-
-                // Also get MP cost if available
-                string mpCost = __instance.itemInfoController?.shopItemInfoView?.mpText?.text;
-                ShopMenuTracker.LastItemMpCost = mpCost;
 
                 // Try to find the currently selected item by searching for active ShopListMainContentController
                 string itemName = null;
@@ -194,7 +218,16 @@ namespace FFIV_ScreenReader.Patches
                         {
                             int index = cursor.Index;
                             shopItemIndex = index;
-                            shopItemCount = productList.Count;
+
+                            // productContentList is a fixed pool whose unused entries still hold
+                            // other products' names, so count only the active (shown) entries.
+                            for (int i = 0; i < productList.Count; i++)
+                            {
+                                var entry = productList[i];
+                                if (entry != null && entry.gameObject != null && entry.gameObject.activeInHierarchy)
+                                    shopItemCount++;
+                            }
+
                             if (index >= 0 && index < productList.Count)
                             {
                                 var item = productList[index];
@@ -212,7 +245,26 @@ namespace FFIV_ScreenReader.Patches
                     }
                 }
 
-                // Store for later
+                // An empty sell-list slot must not touch any I/U target, so the description,
+                // MP cost and item name all keep referring to the same last item.
+                bool emptySlot = string.IsNullOrEmpty(itemName) && shopItemIndex >= 0;
+
+                // Store the description and MP cost for the I key
+                if (!emptySlot)
+                {
+                    ShopMenuTracker.LastItemDescription = value;
+                    ShopMenuTracker.LastItemMpCost = __instance.itemInfoController?.shopItemInfoView?.mpText?.text;
+                }
+
+                if (string.IsNullOrEmpty(itemName))
+                {
+                    if (emptySlot && AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, shopItemIndex, T("Empty")))
+                        CoroutineManager.StartManaged(DelayedSpeak(
+                            FFIV_ScreenReader.Utils.MenuPosition.Format(T("Empty"), shopItemIndex, shopItemCount)));
+                    return;
+                }
+
+                // Store for later (the U key resolves the item by name)
                 ShopMenuTracker.LastItemName = itemName;
                 ShopMenuTracker.LastItemPrice = price;
 
@@ -236,6 +288,16 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
+        /// Announces the starting quantity and total when the buy/sell trade window opens.
+        /// </summary>
+        [HarmonyPatch(typeof(ShopTradeWindowController), nameof(ShopTradeWindowController.Show))]
+        [HarmonyPostfix]
+        private static void AfterTradeWindowShow(ShopTradeWindowController __instance)
+        {
+            AnnounceTradeWindowQuantity(__instance);
+        }
+
+        /// <summary>
         /// Announces quantity changes in the buy/sell trade window.
         /// </summary>
         [HarmonyPatch(typeof(ShopTradeWindowController), nameof(ShopTradeWindowController.AddCount))]
@@ -256,21 +318,8 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (controller?.view == null)
-                    return;
-
-                // Get quantity and total price
-                string quantity = controller.view.selectCountText?.text;
-                string totalPrice = controller.view.totarlPriceText?.text;
-
-                if (!string.IsNullOrEmpty(quantity))
-                {
-                    string announcement = string.IsNullOrEmpty(totalPrice)
-                        ? quantity
-                        : $"{quantity}, {totalPrice}";
-
-                    CoroutineManager.StartManaged(DelayedAnnounceQuantity(announcement));
-                }
+                if (controller != null)
+                    CoroutineManager.StartManaged(DelayedAnnounceQuantity(controller));
             }
             catch (Exception ex)
             {
@@ -299,10 +348,34 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        private static IEnumerator DelayedAnnounceQuantity(string quantityText)
+        private static IEnumerator DelayedSpeak(string text)
         {
             yield return null; // Wait one frame for UI to update
-            FFIV_ScreenReaderMod.SpeakText($"{quantityText}");
+            FFIV_ScreenReaderMod.SpeakText(text);
+        }
+
+        private static IEnumerator DelayedAnnounceQuantity(ShopTradeWindowController controller)
+        {
+            yield return null; // Wait one frame for the count and total text to update
+
+            try
+            {
+                if (controller == null)
+                    yield break;
+
+                // Quantity from the controller's count; total from the view's rendered price text
+                int quantity = controller.selectedCount;
+                string totalPrice = controller.view?.totarlPriceText?.text;
+                string announcement = string.IsNullOrEmpty(totalPrice)
+                    ? string.Format(T("Quantity: {0}"), quantity)
+                    : string.Format(T("Quantity: {0}, Total: {1}"), quantity, totalPrice);
+
+                FFIV_ScreenReaderMod.SpeakText(announcement);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"Error announcing trade quantity: {ex.Message}");
+            }
         }
     }
 
