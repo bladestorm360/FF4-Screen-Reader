@@ -26,44 +26,32 @@ namespace FFIV_ScreenReader.Core
         private static bool selectedYes = true; // Default selection is Yes
 
         /// <summary>
-        /// Opens the confirmation dialog. If a dialog is already open (a callback chained into a
-        /// new prompt), the new prompt is announced immediately instead of via the delayed coroutine.
+        /// Opens the confirmation dialog and announces the prompt. If a dialog is already open (a
+        /// callback chained into a new prompt), the dialog simply stays open with the new prompt.
         /// </summary>
         /// <param name="promptText">Prompt to display to user (spoken via TTS)</param>
         /// <param name="onYes">Callback when user confirms Yes</param>
         /// <param name="onNo">Callback when user confirms No</param>
         public static void Open(string promptText, Action onYes, Action onNo = null)
         {
-            bool wasAlreadyOpen = IsOpen;
-
             IsOpen = true;
             prompt = promptText ?? "";
             onYesCallback = onYes;
             onNoCallback = onNo;
             selectedYes = true; // Default to Yes
 
-            if (!wasAlreadyOpen)
-            {
-                // First open — announce prompt with a short delay so it settles cleanly.
-                CoroutineManager.StartManaged(DelayedPromptAnnouncement(string.Format(T("{0} Yes or No"), prompt)));
-            }
-            else
-            {
-                // Continuation — dialog already open, just announce the new prompt immediately.
-                FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0} Yes or No"), prompt), interrupt: true);
-            }
-        }
-
-        private static IEnumerator DelayedPromptAnnouncement(string text)
-        {
-            yield return new WaitForSeconds(0.1f);
-            FFIV_ScreenReaderMod.SpeakText(text, interrupt: true);
+            // Announce the prompt right away (first open or a chained prompt). The dialog is virtual
+            // (no window focus change), so there is nothing to wait for (the 0.1 s WaitForSeconds
+            // was removed 2026-09-24, FF4 rule 3).
+            FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0} Yes or No"), prompt), interrupt: true);
         }
 
         /// <summary>
-        /// Announces the chosen option after a short delay, then invokes the callback. If the
+        /// Announces the chosen option on the next frame, then invokes the callback. If the
         /// callback opened a new prompt (chained confirmation), this dialog stays open (the new
-        /// prompt re-announced itself); otherwise the dialog closes.
+        /// prompt re-announced itself); otherwise the dialog closes. The one frame keeps the dialog
+        /// (and so SuppressGameInput) up through the frame the confirming key was pressed, so the
+        /// game never sees that key press.
         /// </summary>
         private static IEnumerator DelayedCloseAnnouncement(string text, Action callback)
         {
@@ -72,7 +60,7 @@ namespace FFIV_ScreenReader.Core
             onYesCallback = null;
             onNoCallback = null;
 
-            yield return new WaitForSeconds(0.1f);
+            yield return null;
             FFIV_ScreenReaderMod.SpeakText(text, interrupt: true);
             callback?.Invoke();
 

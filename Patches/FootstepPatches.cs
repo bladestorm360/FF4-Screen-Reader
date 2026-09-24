@@ -1,9 +1,9 @@
 using System;
-using System.Collections;
 using HarmonyLib;
 using MelonLoader;
 using UnityEngine;
 using Il2CppLast.Map;
+using Il2CppLast.Management;
 using Il2CppLast.Entity.Field;
 using FFIV_ScreenReader.Utils;
 using FFIV_ScreenReader.Core;
@@ -11,8 +11,17 @@ using FFIV_ScreenReader.Core;
 namespace FFIV_ScreenReader.Patches
 {
     /// <summary>
-    /// Patches for playing footstep sounds during player movement.
-    /// Hooks FieldPlayerKeyController.OnTouchPadCallback to detect tile changes.
+    /// Plays a footstep sound each time the player steps onto a new tile.
+    ///
+    /// Hook (2026-09-24): FieldController.OnPlayerMoveFinished(FieldEntity) (RVA 0x289400, unique),
+    /// the controlled player's move-finished callback. FieldController.SetControlPlayer registers it
+    /// with FieldEntity.AddDelegateMoveFinished, and its body runs the per-step logic (foot monitors,
+    /// hidden passages, UpdateStateSwitchLandable), so it fires once per completed step. It replaces
+    /// a prefix on the per-frame input callback FieldPlayerKeyController.OnTouchPadCallback that
+    /// started a coroutine waiting 0.08 s (WaitForSeconds) before comparing positions.
+    ///
+    /// The old hook only ran on player input, so steps are gated on the game's own Player state
+    /// (SubSceneManagerMainGame.State.Player = 3): scripted moves in events don't click.
     /// Does NOT include wall bump logic - FF4 uses OnPlayerHitCollider for that.
     /// </summary>
     [HarmonyPatch]
@@ -20,11 +29,11 @@ namespace FFIV_ScreenReader.Patches
     {
         private const float TILE_SIZE = Constants.CellSize;
         private const float FOOTSTEP_COOLDOWN = 0.15f;
+        private const int MAIN_GAME_STATE_PLAYER = 3;
 
         private static float lastFootstepTime = 0f;
         private static Vector2Int lastTilePosition = Vector2Int.zero;
         private static bool tileTrackingInitialized = false;
-        private static bool checkPending = false;
 
         /// <summary>
         /// Converts world position to tile coordinates.
@@ -37,96 +46,64 @@ namespace FFIV_ScreenReader.Patches
             );
         }
 
-        /// <summary>
-        /// Prefix patch on FieldPlayerKeyController.OnTouchPadCallback.
-        /// Captures pre-movement position and starts a coroutine to check for tile change.
-        /// </summary>
-        [HarmonyPatch(typeof(FieldPlayerKeyController), nameof(FieldPlayerKeyController.OnTouchPadCallback))]
-        [HarmonyPrefix]
-        private static void OnTouchPadCallback_Prefix(FieldPlayerKeyController __instance, Vector2 axis)
+        /// <summary>True unless the game's main sub-scene is readable and not in its Player state.</summary>
+        private static bool IsPlayerControlled()
         {
             try
             {
-                // Only check if there's actual movement input
-                if (Mathf.Abs(axis.x) < 0.1f && Mathf.Abs(axis.y) < 0.1f)
-                    return;
-
-                if (__instance?.fieldPlayer?.transform == null)
-                    return;
-
-                // Don't stack coroutines
-                if (checkPending)
-                    return;
-
-                checkPending = true;
-                Vector3 positionBefore = __instance.fieldPlayer.transform.localPosition;
-                CoroutineManager.StartManaged(CheckFootstepAfterFrame(__instance.fieldPlayer, positionBefore));
+                var sub = Il2CppLast.Management.SceneManager.Instance?.GetCurrentSubSceneManager();
+                var mainGame = sub?.TryCast<SubSceneManagerMainGame>();
+                if (mainGame == null) return true;
+                return (int)mainGame.GetCurrentState() == MAIN_GAME_STATE_PLAYER;
             }
-            catch (Exception ex)
+            catch
             {
-                MelonLogger.Error($"Error in FootstepPatches.OnTouchPadCallback_Prefix: {ex.Message}");
+                return true; // state unreadable: keep footsteps working
             }
         }
 
         /// <summary>
-        /// Coroutine that waits one frame for movement to process, then checks tile change.
+        /// Postfix on FieldController.OnPlayerMoveFinished: the player finished a move.
         /// </summary>
-        private static IEnumerator CheckFootstepAfterFrame(FieldPlayer player, Vector3 positionBefore)
+        [HarmonyPatch(typeof(FieldController), nameof(FieldController.OnPlayerMoveFinished))]
+        [HarmonyPostfix]
+        private static void OnPlayerMoveFinished_Postfix(FieldEntity __0)
         {
-            // Wait for movement animation to complete
-            yield return new WaitForSeconds(0.08f);
-
             try
             {
-                if (player == null || player.transform == null)
-                {
-                    checkPending = false;
-                    yield break;
-                }
+                if (!AudioLoopManager.FootstepsEnabled)
+                    return;
 
-                Vector3 positionAfter = player.transform.localPosition;
-                float distanceMoved = Vector3.Distance(positionBefore, positionAfter);
+                if (__0 == null || __0.transform == null)
+                    return;
 
-                // Only check footsteps if player actually moved
-                if (distanceMoved < 0.1f)
-                {
-                    checkPending = false;
-                    yield break;
-                }
-
-                Vector2Int currentTile = GetTilePosition(positionAfter);
+                Vector2Int currentTile = GetTilePosition(__0.transform.localPosition);
 
                 // Initialize tile tracking if needed
                 if (!tileTrackingInitialized)
                 {
                     lastTilePosition = currentTile;
                     tileTrackingInitialized = true;
-                    checkPending = false;
-                    yield break;
+                    return;
                 }
 
-                if (currentTile != lastTilePosition)
-                {
-                    lastTilePosition = currentTile;
+                if (currentTile == lastTilePosition)
+                    return;
+                lastTilePosition = currentTile;
 
-                    if (AudioLoopManager.FootstepsEnabled)
-                    {
-                        float currentTime = Time.time;
-                        if (currentTime - lastFootstepTime >= FOOTSTEP_COOLDOWN)
-                        {
-                            SoundPlayer.PlayFootstep();
-                            lastFootstepTime = currentTime;
-                        }
-                    }
+                if (!IsPlayerControlled())
+                    return;
+
+                float currentTime = Time.time;
+                if (currentTime - lastFootstepTime >= FOOTSTEP_COOLDOWN)
+                {
+                    SoundPlayer.PlayFootstep();
+                    lastFootstepTime = currentTime;
                 }
             }
             catch (Exception ex)
             {
-                MelonLogger.Error($"Error in CheckFootstepAfterFrame: {ex.Message}");
-            }
-            finally
-            {
-                checkPending = false;
+                MelonLogger.Error($"Error in FootstepPatches.OnPlayerMoveFinished_Postfix: {ex.Message}");
             }
         }
 
@@ -138,7 +115,6 @@ namespace FFIV_ScreenReader.Patches
             lastFootstepTime = 0f;
             lastTilePosition = Vector2Int.zero;
             tileTrackingInitialized = false;
-            checkPending = false;
         }
     }
 }

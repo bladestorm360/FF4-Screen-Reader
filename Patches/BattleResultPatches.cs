@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using HarmonyLib;
 using MelonLoader;
@@ -139,8 +140,13 @@ namespace FFIV_ScreenReader.Patches
                     SoundPlayer.PlayExpCounter();
                     BattleResultState.ExpCounterPlaying = true;
 
-                    // Stop the counter when the tally animation finishes.
-                    CoroutineManager.StartUntracked(MonitorExpCounterAnimation(__instance.Pointer));
+                    // The character list whose tally ends the counter: pointController @0x20 →
+                    // characterListConteroller @0x30 (key_battle prefab: point_root / character_list).
+                    ResultCharacterListController_PerformanceEnd_Patch.ExpectedList = ReadCharacterListPtr(__instance.Pointer);
+
+                    // Keep the beep stream fed; ResultCharacterListController_PerformanceEnd_Patch
+                    // stops it when the tally animation ends (and the later pages are safety nets).
+                    CoroutineManager.StartUntracked(FeedExpCounter());
                 }
             }
             catch (Exception ex)
@@ -150,86 +156,111 @@ namespace FFIV_ScreenReader.Patches
         }
 
         /// <summary>
-        /// Polls the unsafe pointer chain from ResultMenuController to detect when the EXP
-        /// counting animation finishes, then stops the counter sound. FF4's KeyInput result
-        /// graph mirrors FF5's exactly, so the offsets are identical:
-        /// Chain: instance -> +0x20 (pointController) -> +0x30 (characterListConteroller)
-        ///   -> +0x20 (contentList, count at +0x18) ; perormanceEndCount at +0x30.
-        /// Animation done when: perormanceEndCount >= contentList.Count &amp;&amp; Count > 0.
+        /// ResultMenuController (KeyInput) → pointController @0x20 (Serial.FF0.UI.KeyInput
+        /// ResultPointController) → characterListConteroller @0x30. Zero if the chain can't be read.
         /// </summary>
-        private static IEnumerator MonitorExpCounterAnimation(IntPtr instancePtr)
+        private static IntPtr ReadCharacterListPtr(IntPtr resultMenuPtr)
         {
-            var wait = new WaitForSeconds(0.1f);
-            bool loggedOnce = false;
-
-            if (instancePtr == IntPtr.Zero)
+            try
             {
-                MelonLogger.Warning("[BattleResult] MonitorExp: instancePtr is null");
-                yield break;
+                if (resultMenuPtr == IntPtr.Zero) return IntPtr.Zero;
+                IntPtr point = Marshal.ReadIntPtr(resultMenuPtr, 0x20);
+                return point == IntPtr.Zero ? IntPtr.Zero : Marshal.ReadIntPtr(point, 0x30);
             }
-
-            IntPtr pointControllerPtr = Marshal.ReadIntPtr(instancePtr, 0x20);
-            if (pointControllerPtr == IntPtr.Zero)
+            catch
             {
-                MelonLogger.Warning("[BattleResult] MonitorExp: pointController is null");
-                yield break;
+                return IntPtr.Zero;
             }
+        }
 
-            IntPtr charListCtrlPtr = Marshal.ReadIntPtr(pointControllerPtr, 0x30);
-            if (charListCtrlPtr == IntPtr.Zero)
-            {
-                MelonLogger.Warning("[BattleResult] MonitorExp: characterListController is null");
-                yield break;
-            }
-
-            IntPtr contentListPtr = Marshal.ReadIntPtr(charListCtrlPtr, 0x20);
-            if (contentListPtr == IntPtr.Zero)
-            {
-                MelonLogger.Warning("[BattleResult] MonitorExp: contentList is null");
-                yield break;
-            }
-
-            // contentList.Count (List._size) at contentListPtr + 0x18
-            int contentCount = Marshal.ReadInt32(contentListPtr, 0x18);
-            if (contentCount <= 0)
-            {
-                MelonLogger.Warning($"[BattleResult] MonitorExp: contentCount={contentCount}, aborting");
-                yield break;
-            }
-
-            MelonLogger.Msg($"[BattleResult] MonitorExp: chain OK. charListCtrl=0x{charListCtrlPtr:X}, contentCount={contentCount}");
-
-            // Poll until animation finishes or the counter was already stopped by a safety net.
+        /// <summary>
+        /// The EXP counter's audio loop: tops the Counter stream up each frame while the counter
+        /// plays (TopUpExpCounter only submits when fewer than two beep buffers are queued). It
+        /// reads no game state and has no timer: the stop comes from the game's own
+        /// end-of-performance events (2026-09-24; this used to poll perormanceEndCount every
+        /// 0.1 s with WaitForSeconds).
+        /// </summary>
+        private static IEnumerator FeedExpCounter()
+        {
             while (BattleResultState.ExpCounterPlaying)
             {
-                yield return wait;
-
-                // Keep the Counter stream fed so the loop never drains between ticks.
                 SoundPlayer.TopUpExpCounter();
-
-                try
-                {
-                    int endCount = Marshal.ReadInt32(charListCtrlPtr, 0x30);
-
-                    if (!loggedOnce)
-                    {
-                        MelonLogger.Msg($"[BattleResult] MonitorExp: first poll endCount={endCount}/{contentCount}");
-                        loggedOnce = true;
-                    }
-
-                    if (endCount >= contentCount)
-                    {
-                        MelonLogger.Msg($"[BattleResult] MonitorExp: animation done (endCount={endCount} >= contentCount={contentCount})");
-                        BattleResultState.StopExpCounterIfPlaying();
-                        yield break;
-                    }
-                }
-                catch
-                {
-                    // Pointer became invalid -- bail out; the phase-init safety nets will stop it.
-                    yield break;
-                }
+                yield return null;
             }
+        }
+    }
+
+    /// <summary>
+    /// Stops the EXP counter when the victory screen's EXP tally ends, from the game's own events
+    /// on the KeyInput ResultCharacterListController (Serial.FF0.UI.KeyInput, reached from
+    /// ResultMenuController → pointController @0x20 → characterListConteroller @0x30):
+    ///   &lt;PlayPerformance&gt;b__6_0 (RVA 0x40CC70, shared only with the Touch class's identical
+    ///     lambda): each character's tally coroutine calls it when it finishes; its body is
+    ///     perormanceEndCount++ (@0x30). The tally is over when that reaches performanceList.Count
+    ///     (@0x28, List._size @0x18) — the game's own IsEndPerformance test.
+    ///   ForcedEndPerformance (RVA 0x48A4C0, unique; called from ResultPointController.PointsUpdate
+    ///     when the player skips): stops the coroutines and completes every row at once
+    ///     (ResultCharacterListController_ForcedEndPerformance_Patch).
+    /// Prepare() skips the lambda patch (instead of failing PatchAll) if the method is missing.
+    /// </summary>
+    [HarmonyPatch]
+    public static class ResultCharacterListController_PerformanceEnd_Patch
+    {
+        private const int OFFSET_PERFORMANCE_LIST = 0x28;
+        private const int OFFSET_PERFORMANCE_END_COUNT = 0x30;
+        private const int LIST_SIZE_OFFSET = 0x18;
+
+        /// <summary>Set by ShowPointsInit: the character list whose tally ends the counter (0 = any).</summary>
+        internal static IntPtr ExpectedList;
+
+        private static MethodBase CountUp => AccessTools.Method(
+            typeof(Il2CppSerial.FF0.UI.KeyInput.ResultCharacterListController), "_PlayPerformance_b__6_0");
+
+        static bool Prepare()
+        {
+            bool ok = CountUp != null;
+            if (!ok)
+                MelonLogger.Warning("[BattleResult] ResultCharacterListController <PlayPerformance>b__6_0 not found; the EXP counter stops on the next result page");
+            return ok;
+        }
+
+        static MethodBase TargetMethod() => CountUp;
+
+        [HarmonyPostfix]
+        public static void Postfix(Il2CppSerial.FF0.UI.KeyInput.ResultCharacterListController __instance)
+        {
+            try
+            {
+                if (!BattleResultState.ExpCounterPlaying || __instance == null) return;
+
+                IntPtr ptr = __instance.Pointer;
+                if (ptr == IntPtr.Zero) return;
+                // key_battle has two ResultCharacterListController objects (character_list and
+                // character_view); only the one the results page tallies on ends the counter.
+                if (ExpectedList != IntPtr.Zero && ptr != ExpectedList) return;
+                IntPtr listPtr = Marshal.ReadIntPtr(ptr, OFFSET_PERFORMANCE_LIST);
+                if (listPtr == IntPtr.Zero) return;
+                int total = Marshal.ReadInt32(listPtr, LIST_SIZE_OFFSET);
+                int ended = Marshal.ReadInt32(ptr, OFFSET_PERFORMANCE_END_COUNT);
+                if (ended >= total)
+                    BattleResultState.StopExpCounterIfPlaying();
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[BattleResult] Error in performance-end patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>The player skipped the EXP tally (see ResultCharacterListController_PerformanceEnd_Patch).</summary>
+    [HarmonyPatch(typeof(Il2CppSerial.FF0.UI.KeyInput.ResultCharacterListController),
+        nameof(Il2CppSerial.FF0.UI.KeyInput.ResultCharacterListController.ForcedEndPerformance))]
+    public static class ResultCharacterListController_ForcedEndPerformance_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix()
+        {
+            BattleResultState.StopExpCounterIfPlaying();
         }
     }
 

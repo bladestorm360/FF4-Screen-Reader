@@ -257,11 +257,6 @@ namespace FFIV_ScreenReader.Core
                     () => PreferencesManager.EnemyHPDisplay,
                     PreferencesManager.SetEnemyHPDisplay,
                     "How enemy HP is read while targeting: as numbers, as a percentage, or not at all."),
-                new EnumItem("Multi-hit Damage",
-                    new[] { "Total only", "With hit count" },
-                    () => PreferencesManager.DamageDisplay,
-                    PreferencesManager.SetDamageDisplay,
-                    "Whether damage from multi-hit attacks includes the number of hits, such as 4x250 damage."),
 
                 // Close Menu action
                 new ActionItem("Close Menu", Close, "Closes the mod menu and returns to the game.")

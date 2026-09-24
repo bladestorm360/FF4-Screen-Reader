@@ -39,22 +39,18 @@ namespace FFIV_ScreenReader.Core
             onCancelCallback = onCancel;
             cursorPosition = inputBuffer.Length;
 
-            CoroutineManager.StartManaged(DelayedPromptAnnouncement(prompt, inputBuffer.ToString()));
-        }
-
-        private static IEnumerator DelayedPromptAnnouncement(string promptText, string initialText)
-        {
-            yield return new WaitForSeconds(0.3f);
-            string announcement = promptText;
-            if (!string.IsNullOrEmpty(initialText))
-                announcement += $": {initialText}";
+            // Announced right away: the window is virtual (no focus change for NVDA to announce first),
+            // so the old 0.3 s WaitForSeconds had nothing to wait for (removed 2026-09-24, FF4 rule 3).
+            string announcement = prompt;
+            string initial = inputBuffer.ToString();
+            if (!string.IsNullOrEmpty(initial))
+                announcement += $": {initial}";
             FFIV_ScreenReaderMod.SpeakText(announcement, interrupt: true);
         }
 
-        private static IEnumerator DelayedCloseAnnouncement(string text, Action callback)
+        private static void CloseAndAnnounce(string text, Action callback)
         {
             Close();
-            yield return new WaitForSeconds(0.3f);
             FFIV_ScreenReaderMod.SpeakText(text, interrupt: true);
             callback?.Invoke();
         }
@@ -116,14 +112,14 @@ namespace FFIV_ScreenReader.Core
                     return true;
                 }
                 var callback = onConfirmCallback;
-                CoroutineManager.StartManaged(DelayedCloseAnnouncement(string.Format(T("Confirmed: {0}"), finalText), () => callback?.Invoke(finalText)));
+                CloseAndAnnounce(string.Format(T("Confirmed: {0}"), finalText), () => callback?.Invoke(finalText));
                 return true;
             }
 
             if (GamepadManager.IsKeyCodePressed(KeyCode.Escape))
             {
                 var callback = onCancelCallback;
-                CoroutineManager.StartManaged(DelayedCloseAnnouncement(T("Cancelled"), callback));
+                CloseAndAnnounce(T("Cancelled"), callback);
                 return true;
             }
 

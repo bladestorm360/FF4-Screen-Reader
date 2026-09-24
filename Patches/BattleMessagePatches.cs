@@ -472,94 +472,21 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
+    /// <summary>
+    /// Damage / recovery / miss for each target. Damage is always the total: FF4's calc results carry
+    /// hit count 0 (CalcControllerProvider.GetFightStatus, RVA 0x429080, drops PhysicalExecution's
+    /// landed count) and the game's own ×N display never runs in ATB battles, so there is no
+    /// per-hit breakdown to read (the Multi-hit Damage setting was removed 2026-09-24).
+    /// </summary>
     [HarmonyPatch(typeof(Il2CppLast.Battle.Function.BattleBasicFunction), nameof(Il2CppLast.Battle.Function.BattleBasicFunction.CreateDamageView))]
     public static class BattleBasicFunction_CreateDamageView_Patch
     {
-        // BattleBaseFunction.<battleActData>k__BackingField — a protected property, so read by offset.
-        private const int OFFSET_BATTLE_ACT_DATA = 0x28;
-        // Ability.TypeId of weapon attacks (the Fight command's ability 1 has this type).
-        private const int WEAPON_ABILITY_TYPE = 4;
-
-        /// <summary>
-        /// The attack's own hit count against this target, from the function's calculation results
-        /// (ICalcResultDic → ICalcResult.GetHitCount). FF4 is an ATB game, and the game only draws
-        /// the on-screen ×N (BattleBasicFunction.CreateHitCount) when SystemConfigData.GetBattleType()
-        /// is Command — FF4's returns ATB — so CreateHitCount never fires here. Weapon attacks only,
-        /// the same rule the ×N display uses; 1 for anything else or on any failure.
-        ///
-        /// Offline finding (2026-09-23, session 2): in FF4 this is always 0 for a Fight result, so this
-        /// returns 1 and the damage reads as the total only. ClacExecuteFF4.PhysicalExecution (RVA
-        /// 0xA097F0) does compute the hits LANDED (attacker hit rolls minus target evasion rolls) as
-        /// Item3 of its ValueTuple, but CalcControllerProvider.GetFightStatus (RVA 0x429080) drops it
-        /// and calls ICalcResult.SetStatus with hitCount = 0, and FunctionBase.GetCalcResult /
-        /// SetupValueToDisplay only copy that 0. Kept so a game build that fills the count works.
-        /// </summary>
-        private static int ReadWeaponHitCount(Il2CppLast.Battle.Function.BattleBasicFunction function, Il2CppLast.Battle.BattleUnitData target)
-        {
-            try
-            {
-                if (function == null || target == null) return 1;
-                IntPtr actPtr = System.Runtime.InteropServices.Marshal.ReadIntPtr(function.Pointer, OFFSET_BATTLE_ACT_DATA);
-                if (actPtr == IntPtr.Zero) return 1;
-                var abilities = new BattleActData(actPtr).abilityList;
-                if (abilities == null || abilities.Count == 0 || abilities[0] == null
-                    || abilities[0].TypeId != WEAPON_ABILITY_TYPE)
-                    return 1;
-                var results = function.ICalcResultDic;
-                if (results == null || !results.ContainsKey(target)) return 1;
-                var result = results[target];
-                return result != null ? Math.Max(1, result.GetHitCount()) : 1;
-            }
-            catch
-            {
-                return 1;
-            }
-        }
-
-        /// <summary>
-        /// One diagnostic line per unspoken value-0 view: its hit type and the ids of the conditions
-        /// its calc result carries (a status cure's result lists the cured condition).
-        /// </summary>
-        private static void LogValueZeroView(Il2CppLast.Battle.Function.BattleBasicFunction function,
-            Il2CppLast.Battle.BattleUnitData target, Il2CppLast.Systems.HitType hitType, bool isRecovery, string targetName)
-        {
-            string conditions = "?";
-            try
-            {
-                var results = function?.ICalcResultDic;
-                if (results != null && target != null && results.ContainsKey(target))
-                {
-                    var list = results[target]?.GetConditions();
-                    if (list != null)
-                    {
-                        var ids = new List<string>();
-                        foreach (var c in list)
-                            if (c != null) ids.Add(c.Id.ToString());
-                        conditions = "[" + string.Join(",", ids) + "]";
-                    }
-                }
-            }
-            catch { }
-            MelonLogger.Msg($"[Battle] value-0 view: hitType={(int)hitType} isRecovery={isRecovery} target={targetName} conditions={conditions}");
-        }
-
         [HarmonyPostfix]
         public static void Postfix(Il2CppLast.Battle.Function.BattleBasicFunction __instance, Il2CppLast.Battle.BattleUnitData data, int value, Il2CppLast.Systems.HitType hitType, bool isRecovery)
         {
             try
             {
                 string targetName = BattleUnitHelper.GetUnitName(data) ?? T("Unknown");
-
-                // Consume the multi-hit count captured by CreateHitCount (fires just before this view,
-                // on the same or adjacent frame). Reject a stale count from an earlier action that never
-                // produced a damage view, then reset to 1 so a later damage with no fresh hit count
-                // defaults to single. In practice FF4 never draws the ×N (see ReadWeaponHitCount), so
-                // the count comes from the attack's calculation.
-                bool fresh = UnityEngine.Time.frameCount - DamageViewUIManager_CreateHitCount_Patch.PendingHitCountFrame <= 1;
-                int hitCount = fresh ? DamageViewUIManager_CreateHitCount_Patch.PendingHitCount : 1;
-                DamageViewUIManager_CreateHitCount_Patch.PendingHitCount = 1;
-                if (hitCount <= 1)
-                    hitCount = ReadWeaponHitCount(__instance, data);
 
                 string message;
                 if (hitType == Il2CppLast.Systems.HitType.Miss)
@@ -569,25 +496,14 @@ namespace FFIV_ScreenReader.Patches
                 else if (value == 0)
                 {
                     // Value-0 views (offline analysis, debug.md "Open-issues pass (2026-09-23, session 2)"):
-                    // buffs/debuffs carry Hit (AddConditionExection returns Hit/Miss), a status cure
-                    // carries Non (CalcControllerProvider.GetRecoveryCondition), and nothing in FF4's calc
-                    // writes RecoveryCondition. Zero is written only for a genuine 0 result (a recovery
-                    // reversed on an undead target that comes to 0, MagicAbsorptionFunction).
-                    if (hitType == Il2CppLast.Systems.HitType.Zero)
-                    {
-                        message = string.Format(T("{0}: {1} damage"), targetName, 0);
-                    }
-                    else if (hitType == Il2CppLast.Systems.HitType.RecoveryCondition)
-                    {
-                        message = string.Format(T("{0}: cured"), targetName);
-                    }
-                    else
-                    {
-                        // Buff/debuff (announced by the condition hooks) or status cure: stay silent,
-                        // but log it so one in-game test can confirm what a status cure carries.
-                        LogValueZeroView(__instance, data, hitType, isRecovery, targetName);
+                    // buffs/debuffs carry Hit and status cures carry Non; both stay silent here because
+                    // the condition hooks announce them (BattleConditionController.Add for the status,
+                    // RemoveFunction for "X: Poison removed"). Zero is written only for a genuine 0
+                    // result (a recovery reversed on an undead target that comes to 0,
+                    // MagicAbsorptionFunction).
+                    if (hitType != Il2CppLast.Systems.HitType.Zero)
                         return;
-                    }
+                    message = string.Format(T("{0}: {1} damage"), targetName, 0);
                 }
                 else if (hitType == Il2CppLast.Systems.HitType.Recovery)
                 {
@@ -599,11 +515,7 @@ namespace FFIV_ScreenReader.Patches
                 }
                 else
                 {
-                    // HP DAMAGE — optionally prepend the multi-hit "{N}x" multiplier (e.g. "14x1552 damage")
-                    // when the Multi-hit Damage setting is on; otherwise keep just the total.
-                    message = (PreferencesManager.DamageDisplay == 1 && hitCount > 1)
-                        ? string.Format(T("{0}: {1}x{2} damage"), targetName, hitCount, value)
-                        : string.Format(T("{0}: {1} damage"), targetName, value);
+                    message = string.Format(T("{0}: {1} damage"), targetName, value);
                 }
 
                 FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
@@ -615,39 +527,51 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
-    [HarmonyPatch(typeof(DamageViewUIManager), nameof(DamageViewUIManager.CreateHitCount))]
-    public static class DamageViewUIManager_CreateHitCount_Patch
-    {
-        // Multi-hit "×N" multiplier captured here, consumed (and reset to 1) by the
-        // CreateDamageView postfix. CreateHitCount fires just before the matching CreateDamageView.
-        // Buffered instead of spoken directly so the count appears inline on the damage line
-        // (e.g. "14x1552 damage") only when the Multi-hit Damage setting is enabled.
-        public static int PendingHitCount = 1;
-        // Frame the multiplier was captured on. Used to reject a stale count that was never
-        // consumed by a CreateDamageView (e.g. a fully-evaded multi-hit) so it can't leak into
-        // an unrelated later attack's damage announcement.
-        public static int PendingHitCountFrame = -1;
-
-        [HarmonyPostfix]
-        public static void Postfix(int hitCountValue, Il2CppLast.Battle.BattleSpriteEntity attack, Il2CppLast.Battle.BattleSpriteEntity target)
-        {
-            try
-            {
-                PendingHitCount = hitCountValue;
-                PendingHitCountFrame = UnityEngine.Time.frameCount;
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Error in CreateHitCount patch: {ex.Message}");
-            }
-        }
-    }
-
     // Patch BattleConditionController.Add to announce status effects with target names
     [HarmonyPatch(typeof(Il2CppLast.Battle.BattleConditionController), nameof(Il2CppLast.Battle.BattleConditionController.Add))]
     public static class BattleConditionController_Add_Patch
     {
         private const string DEDUP_CONTEXT = AnnouncementContexts.BATTLE_CONDITION_ADD;
+
+        /// <summary>
+        /// The spoken name of a condition, shared by the add and removal announcements so both use the
+        /// same words. Returns false for a hidden/internal condition (no name message: Defend, Escape,
+        /// Dying and the unnamed system conditions), which is never announced. Otherwise the localized
+        /// name, or "Status {id}" when the condition or its message can't be resolved.
+        /// </summary>
+        internal static bool TryGetConditionName(Il2CppLast.Data.Master.Condition condition, int id, out string name)
+        {
+            name = null;
+            try
+            {
+                if (condition != null)
+                {
+                    string conditionMesId = condition.MesIdName;
+                    if (string.IsNullOrEmpty(conditionMesId) || conditionMesId == "None")
+                        return false;
+
+                    var messageManager = MessageManager.Instance;
+                    if (messageManager != null)
+                    {
+                        string localizedConditionName = messageManager.GetMessage(conditionMesId);
+                        if (!string.IsNullOrEmpty(localizedConditionName))
+                            name = localizedConditionName;
+                    }
+                }
+            }
+            catch (Exception condEx)
+            {
+                MelonLogger.Warning($"Error resolving condition ID {id}: {condEx.Message}");
+            }
+
+            if (name == null)
+            {
+                // Final fallback: the raw ID if the name couldn't be resolved
+                name = string.Format(T("Status {0}"), id);
+                MelonLogger.Warning($"[Status] Could not resolve condition ID {id}, announcing as raw ID");
+            }
+            return true;
+        }
 
         [HarmonyPostfix]
         public static void Postfix(BattleUnitData battleUnitData, int id)
@@ -662,56 +586,32 @@ namespace FFIV_ScreenReader.Patches
                 // Get target name
                 string targetName = BattleUnitHelper.GetUnitName(battleUnitData) ?? T("Unknown");
 
-                // Get condition name from ID - look up from ConfirmedConditionList (includes equipment statuses)
-                string conditionName = null;
+                // Get the condition from ConfirmedConditionList (includes equipment statuses)
+                Il2CppLast.Data.Master.Condition added = null;
                 try
                 {
-                    var unitDataInfo = battleUnitData.BattleUnitDataInfo;
-                    if (unitDataInfo != null && unitDataInfo.Parameter != null)
+                    var confirmedList = battleUnitData.BattleUnitDataInfo?.Parameter?.ConfirmedConditionList();
+                    if (confirmedList != null)
                     {
-                        var param = unitDataInfo.Parameter;
-                        var confirmedList = param.ConfirmedConditionList();
-                        if (confirmedList != null && confirmedList.Count > 0)
+                        foreach (var condition in confirmedList)
                         {
-                            // Look for a condition matching our ID
-                            foreach (var condition in confirmedList)
+                            if (condition != null && condition.Id == id)
                             {
-                                if (condition != null && condition.Id == id)
-                                {
-                                    string conditionMesId = condition.MesIdName;
-
-                                    // Skip conditions with no message ID (internal/hidden statuses)
-                                    if (string.IsNullOrEmpty(conditionMesId) || conditionMesId == "None")
-                                    {
-                                        return; // Skip this status announcement entirely
-                                    }
-
-                                    var messageManager = MessageManager.Instance;
-                                    if (messageManager != null)
-                                    {
-                                        string localizedConditionName = messageManager.GetMessage(conditionMesId);
-                                        if (!string.IsNullOrEmpty(localizedConditionName))
-                                        {
-                                            conditionName = localizedConditionName;
-                                        }
-                                    }
-                                    break;
-                                }
+                                added = condition;
+                                break;
                             }
                         }
-                    }
-
-                    // Final fallback: Announce the raw ID if we couldn't resolve the name
-                    if (conditionName == null)
-                    {
-                        conditionName = string.Format(T("Status {0}"), id);
-                        MelonLogger.Warning($"[Status] Could not resolve condition ID {id}, announcing as raw ID");
                     }
                 }
                 catch (Exception condEx)
                 {
                     MelonLogger.Warning($"Error resolving condition ID {id}: {condEx.Message}");
-                    conditionName = string.Format(T("Status {0}"), id);
+                }
+
+                // Skip conditions with no message ID (internal/hidden statuses)
+                if (!TryGetConditionName(added, id, out string conditionName))
+                {
+                    return;
                 }
 
                 string announcement = string.Format(T("{0}: {1}"), targetName, conditionName);
@@ -728,6 +628,127 @@ namespace FFIV_ScreenReader.Patches
             {
                 MelonLogger.Warning($"Error in BattleConditionController.Add patch: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>
+    /// "X: Poison removed" when a status leaves a unit in battle: cures (items, spells, abilities),
+    /// natural wear-off, conflicts (Haste cancelling Slow) and revive (KO removed).
+    ///
+    /// Hook: BattleConditionController.RemoveFunction(BattleUnitData, int id) (private, RVA 0x3602A0,
+    /// unique), the mirror of the Add hook above. FF4 removes conditions from the unit's
+    /// CurrentConditionList in many places (RecoveryConditionFunction/UniqueFunction/DispelFunction
+    /// .UpdateParameter for cures, BattleConditionFunction.NaturalRemove and Recovery(untilType) for
+    /// wear-off, ConditionUtility for conflicts, Remove(unit, id, isNegate) for the controller's own
+    /// removals); none of those but Remove go through one method. What they share is the controller's
+    /// sync: CheckConditionFunction → RemoveConditionFunction → RemoveFunction destroys the effect
+    /// function of every condition that left the list (Add creates it on the way in), and Remove
+    /// tail-calls RemoveFunction. So RemoveFunction runs once per status that really goes, and only
+    /// for statuses whose function (and so whose add announcement) exists.
+    ///
+    /// Prefix, so the function being removed is still in BattleUnitDataInfo.BattleConditionFunction
+    /// to name it; the condition list is already in its after-removal state at that point on both
+    /// paths. Silent for: the battle-end clean-up (BattleEndRecoveryCondition); statuses cleared by
+    /// KO (the unit's list holds a ConditionType.UnableFight condition); a condition still present
+    /// (one of two stacked instances going); unnamed conditions; the same unit and condition twice
+    /// in one frame. Remove's isNegate is false at every call site in FF4, and negated/immune
+    /// conditions leave the list before a function (and an add announcement) is ever created.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.Battle.BattleConditionController), nameof(Il2CppLast.Battle.BattleConditionController.RemoveFunction))]
+    public static class BattleConditionController_RemoveFunction_Patch
+    {
+        // ConditionType.UnableFight (KO); Condition.ConditionType is an int.
+        private const int CONDITION_TYPE_KO = 5;
+
+        /// <summary>
+        /// Set when the battle-end clean-up starts (victory or escape); cleared when the next battle
+        /// starts or a player's turn begins.
+        /// </summary>
+        internal static bool BattleEnding;
+
+        private static int lastFrame = -1;
+        private static readonly HashSet<(IntPtr unit, int id)> spokenThisFrame = new HashSet<(IntPtr unit, int id)>();
+
+        [HarmonyPrefix]
+        public static void Prefix(BattleUnitData battleUnitData, int id)
+        {
+            try
+            {
+                if (BattleEnding || battleUnitData == null)
+                    return;
+
+                var info = battleUnitData.BattleUnitDataInfo;
+                var functions = info?.BattleConditionFunction;
+                if (functions == null)
+                    return;
+
+                // RemoveFunction removes the LAST function with this condition id, and does nothing
+                // when there is none.
+                Il2CppLast.Data.Master.Condition removed = null;
+                for (int i = functions.Count - 1; i >= 0; i--)
+                {
+                    var condition = functions[i]?.condition;
+                    if (condition != null && condition.Id == id)
+                    {
+                        removed = condition;
+                        break;
+                    }
+                }
+                if (removed == null)
+                    return;
+
+                var current = info.Parameter?.CurrentConditionList;
+                if (current != null)
+                {
+                    bool knockedOut = false;
+                    foreach (var condition in current)
+                    {
+                        if (condition == null) continue;
+                        if (condition.Id == id) return; // still has it
+                        if (condition.ConditionType == CONDITION_TYPE_KO) knockedOut = true;
+                    }
+                    if (knockedOut && removed.ConditionType != CONDITION_TYPE_KO)
+                        return;
+                }
+
+                if (!BattleConditionController_Add_Patch.TryGetConditionName(removed, id, out string conditionName))
+                    return;
+
+                int frame = UnityEngine.Time.frameCount;
+                if (frame != lastFrame)
+                {
+                    lastFrame = frame;
+                    spokenThisFrame.Clear();
+                }
+                if (!spokenThisFrame.Add((battleUnitData.Pointer, id)))
+                    return;
+
+                string targetName = BattleUnitHelper.GetUnitName(battleUnitData) ?? T("Unknown");
+                FFIV_ScreenReaderMod.SpeakText(string.Format(T("{0}: {1} removed"), targetName, conditionName), interrupt: false);
+
+                // The status is gone, so adding it again is news: don't let the add announcement's
+                // duplicate guard swallow a second "X: Poison".
+                AnnouncementDeduplicator.Reset(AnnouncementContexts.BATTLE_CONDITION_ADD);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in BattleConditionController.RemoveFunction patch: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// BattleConditionController.BattleEndRecoveryCondition (RVA 0x35C990, unique; called from
+    /// BattleController.StartWinResult, EndWinFadeOutCallback and EndEscapeFadeOut) clears the party's
+    /// battle-only statuses through Remove → RemoveFunction. Those are clean-up, not news.
+    /// </summary>
+    [HarmonyPatch(typeof(Il2CppLast.Battle.BattleConditionController), nameof(Il2CppLast.Battle.BattleConditionController.BattleEndRecoveryCondition))]
+    public static class BattleConditionController_BattleEndRecoveryCondition_Patch
+    {
+        [HarmonyPrefix]
+        public static void Prefix()
+        {
+            BattleConditionController_RemoveFunction_Patch.BattleEnding = true;
         }
     }
 
@@ -759,6 +780,7 @@ namespace FFIV_ScreenReader.Patches
                     AnnouncementContexts.BATTLE_SET_COMMAND_MESSAGE);
                 BattleCommandMessageManualPatches.ResetState();
                 BattleResultState.ResetState();
+                BattleConditionController_RemoveFunction_Patch.BattleEnding = false;
             }
             catch (Exception ex)
             {
@@ -834,6 +856,9 @@ namespace FFIV_ScreenReader.Patches
             {
                 // Keep battle state active as fallback (primary hook is StartBattle)
                 BattleState.SetActive();
+
+                // A player's turn means the battle is running, even if the StartBattle hook was skipped.
+                BattleConditionController_RemoveFunction_Patch.BattleEnding = false;
 
                 // Clear flee-in-progress flag when a player's turn begins
                 // If flee succeeded, battle would have ended. If we're here, flee failed.

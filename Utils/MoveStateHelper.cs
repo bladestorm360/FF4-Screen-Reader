@@ -43,9 +43,6 @@ namespace FFIV_ScreenReader.Utils
         private static int cachedTransportType = TRANSPORT_NONE;
         private static int lastAnnouncedState = -1;
 
-        // Cached dash flag (set by SetDashFlag patch)
-        private static bool cachedDashFlag = false;
-
         /// <summary>
         /// Set vehicle state when boarding (called from GetOn patch).
         /// </summary>
@@ -126,17 +123,17 @@ namespace FFIV_ScreenReader.Utils
             // Transitioning TO a vehicle state
             if (newState == MOVE_STATE_SHIP)
             {
-                announcement = string.Format(T("On {0}"), "hovercraft");
+                announcement = string.Format(T("On {0}"), T("Hovercraft"));
                 cachedMoveState = MOVE_STATE_SHIP;
             }
             else if (newState == MOVE_STATE_CHOCOBO)
             {
-                announcement = string.Format(T("On {0}"), "chocobo");
+                announcement = string.Format(T("On {0}"), T("Chocobo"));
                 cachedMoveState = MOVE_STATE_CHOCOBO;
             }
             else if (newState == MOVE_STATE_AIRSHIP || newState == MOVE_STATE_LOWFLYING)
             {
-                announcement = string.Format(T("On {0}"), "airship");
+                announcement = string.Format(T("On {0}"), T("Airship"));
                 cachedMoveState = newState;
             }
             // Transitioning FROM vehicle TO on-foot
@@ -196,34 +193,6 @@ namespace FFIV_ScreenReader.Utils
         public static int GetCurrentTransportType()
         {
             return cachedTransportType;
-        }
-
-        /// <summary>
-        /// Called from SetDashFlag patch to cache the dash toggle state.
-        /// </summary>
-        public static void SetCachedDashFlag(bool value)
-        {
-            cachedDashFlag = value;
-        }
-
-        /// <summary>
-        /// Returns the effective running state by combining AutoDash config with F1 toggle.
-        /// AutoDash XOR dashFlag gives the actual running state.
-        /// Returns true if running, false if walking.
-        /// </summary>
-        public static bool GetDashFlag()
-        {
-            try
-            {
-                var userData = Il2CppLast.Management.UserDataManager.Instance();
-                bool autoDash = (userData?.Config?.IsAutoDash ?? 0) != 0;
-                return autoDash != cachedDashFlag;
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"Error reading dash state: {ex.Message}");
-                return false;
-            }
         }
 
         /// <summary>

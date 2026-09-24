@@ -131,27 +131,24 @@ namespace FFIV_ScreenReader.Core
         }
 
         /// <summary>
-        /// Coroutine that delays audio loop restart after scene load to let map settle.
-        /// Only starts loops if FieldPlayerController exists (valid field scene).
+        /// (Re)starts the enabled audio loops when the field player exists and no battle is running.
+        /// Event-driven (2026-09-24, replaces a 0.5 s WaitForSeconds after every scene load): called
+        /// from OnSceneLoaded (an additive load on the field, where the player already exists) and
+        /// from MainGame.set_FieldReady(true) (a map load, where the player appears later). Start*
+        /// are no-ops for a loop that is already running, and the loops stay silent for the first
+        /// second after OnSceneTransition (wallToneSuppressedUntil / beaconSuppressedUntil).
         /// </summary>
-        internal IEnumerator DelayedAudioRestart()
+        internal void RestartLoopsIfOnField()
         {
-            yield return new WaitForSeconds(0.5f);
+            if (!NeedsAudioRestart || BattleState.IsInBattle)
+                return;
 
-            // Don't restart audio loops if in battle
-            if (BattleState.IsInBattle)
-                yield break;
+            // Only start loops on a valid field (FieldPlayerController cached by OnSceneLoaded / FieldReady)
+            if (GameObjectCache.Get<FieldPlayerController>() == null)
+                return;
 
-            // Only start loops if on valid field (FieldPlayerController exists)
-            var playerController = GameObjectCache.Get<FieldPlayerController>();
-            if (playerController == null)
-                playerController = GameObjectCache.Refresh<FieldPlayerController>();
-
-            if (playerController != null)
-            {
-                if (PreferencesManager.WallTonesEnabled) StartWallToneLoop();
-                if (PreferencesManager.AudioBeaconsEnabled) StartBeaconLoop();
-            }
+            if (PreferencesManager.WallTonesEnabled) StartWallToneLoop();
+            if (PreferencesManager.AudioBeaconsEnabled) StartBeaconLoop();
         }
 
         /// <summary>

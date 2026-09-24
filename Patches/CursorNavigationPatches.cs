@@ -56,16 +56,21 @@ namespace FFIV_ScreenReader.Patches
                 if (BattleState.IsInBattle && BattlePausePatches.TryHandleCursor(instance))
                     return;
 
+                // Yes/No moves of the SavePopup-style popups (save/load/quick-save/overwrite and the
+                // game-over Load confirmation). Their SetCommandSelectCursor re-runs every frame for
+                // a single-button popup, so the move is read here instead.
+                if (SaveLoadPatches.TryReadSavePopupMove(instance))
+                    return;
+                if (PopupPatches.TryReadGameOverLoadMove(instance))
+                    return;
+
                 if (SaveLoadMenuState.IsActive)
                     return;
 
+                // KeyInput CommonPopup and GameOverSelectPopup buttons are read by their own
+                // SetCommandSelectCursor hooks (PopupPatches).
                 if (PopupState.ShouldSuppress())
-                {
-                    // KeyInput CommonPopup buttons are read by its own UpdateFocus hook
-                    if (PopupState.CurrentPopupType != "CommonPopup")
-                        PopupPatches.ReadCurrentButton(instance);
                     return;
-                }
 
                 if (CursorSuppressionCheck.ShouldSuppress())
                     return;

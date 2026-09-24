@@ -48,8 +48,8 @@ For two-part abilities: `RecordAction()`, `HasRecentActionForActor()`, `IsRedund
 | Same-name enemy attacks | Object-based deduplication with `BattleActData` |
 | Map transition polling | `GameStatePatches` hooks `ChangeState` |
 | Corps ordering mismatch | `GetCorpsListCloneWithApparentOrder()` for display-order row info |
-| Overwrite popup buttons silent | The overwrite confirmation is a KeyInput `SavePopup`, not a CommonPopup. The main-menu save's `PopupUpdate` calls `SavePopup.UpdateSelect` directly, so the old `SavePopup.UpdateCommand` hook never saw it. Buttons are now read by the `SavePopup.SetCommandSelectCursor` postfix (2026-09-23, session 2) |
-| Save overwrite silent | Open read (title + message + focused button) from `SetPopupActive(true)` / `OverwriteConfirmInit`; Yes/No moves from `SavePopup.SetCommandSelectCursor` |
+| Overwrite popup buttons silent | The overwrite confirmation is a KeyInput `SavePopup`, not a CommonPopup. The main-menu save's `PopupUpdate` calls `SavePopup.UpdateSelect` directly, so the old `SavePopup.UpdateCommand` hook never saw it. Buttons are read on `Cursor.NextIndex/PrevIndex` for the open popup's cursor (`SaveLoadPatches.TryReadSavePopupMove`, 2026-09-24; the 2026-09-23 `SetCommandSelectCursor` postfix ran every frame for single-button popups) |
+| Save overwrite silent | Open read (title + message + focused button) from `SetPopupActive(true)` / `OverwriteConfirmInit`; Yes/No moves from `TryReadSavePopupMove` |
 | Cure wrong target | `targetContents` param (display order) instead of `contentList` (data order) |
 | Opening map silent | Known issue — first-run announce causes "map 0" bugs, reverted |
 | Stale entities after events | Delta scan on every navigation key (`EnsureFieldContextAndScan` → `RefreshIfNeeded`) |
@@ -57,7 +57,7 @@ For two-part abilities: `RecordAction()`, `HasRecentActionForActor()`, `IsRedund
 | Controller never interrupted speech | `SpeakText("")` is dropped by `TolkWrapper`; use `FFIV_ScreenReaderMod.InterruptSpeech()` (`Tolk.Silence`) |
 | Wall tones on victory | Reset battle state on scene transition only |
 | Defeat message silent | Patch `BattleCommandMessageController.SetMessage` |
-| Game Over popup silent | Patch `GameOverSelectPopup/LoadPopup.UpdateCommand` |
+| Game Over popup silent | `GameOverSelectPopup.SetCommandSelectCursor` postfix; Load confirmation moves via `PopupPatches.TryReadGameOverLoadMove` (2026-09-24; the per-frame `UpdateCommand` hooks are gone) |
 | Title "Press any button" silent | Patch `SystemIndicator.Hide` with guard flag (not private `SetEnableStartObject`) |
 
 ## System Architecture
@@ -123,7 +123,7 @@ Extracted from main mod class. Dependencies: `EntityNavigator` (beacon targeting
 ### EXP Counter Sound (battle results)
 Rapid ticking beep while the EXP tally animates on the victory screen. Toggle `ExpCounter` (default **true**) + `ExpCounterVolume` (50) in `PreferencesManager`; "Battle Results" section in `ModMenu`. Ported from FF5.
 - **Audio:** `SoundPlayer.PlayExpCounter/TopUpExpCounter/StopExpCounter` on a dedicated `AudioEngine.Stream.Counter`. Beep = `ToneGenerator.GenerateLandingPing` (2000 Hz, 50 ms beep + 50 ms silence) fed to a looping SDL stream, topped up each 100 ms tick.
-- **Hooks (`Patches/BattleResultPatches.cs`):** START on `ResultMenuController.ShowPointsInit` when `ExpCounterEnabled && data.GetExp>0`. Completion via `MonitorExpCounterAnimation` coroutine walking the KeyInput result graph (identical offsets to FF5): `instance +0x20 pointController → +0x30 characterListConteroller → +0x20 contentList (count @+0x18); perormanceEndCount @+0x30`; done when `perormanceEndCount >= contentList.Count`. STOP safety nets on `ShowStatusUpInit` / `ShowGetAbilitysInit` / `ShowGetItemsInit` / `EndWaitInit` (guaranteed backstop — results always dismissed through `EndWaitInit`). `BattleResultState.ExpCounterPlaying` guards the single-fire stop. Toggle OFF = stream never touched.
+- **Hooks (`Patches/BattleResultPatches.cs`):** START on `ResultMenuController.ShowPointsInit` when `ExpCounterEnabled && data.GetExp>0`; `FeedExpCounter` tops the stream up each frame while it plays (no game state, no timer). STOP (2026-09-24, event-driven) on the KeyInput `ResultCharacterListController` (`Serial.FF0.UI.KeyInput`, reached as `pointController @0x20 → characterListConteroller @0x30`): its per-row completion lambda `<PlayPerformance>b__6_0` (RVA 0x40CC70, `perormanceEndCount++`) once `perormanceEndCount (@0x30) >= performanceList.Count (@0x28)` (the game's own `IsEndPerformance` test), and `ForcedEndPerformance` (RVA 0x48A4C0, the skip). It replaced `MonitorExpCounterAnimation`, which polled the count every 0.1 s with `WaitForSeconds`. STOP safety nets on `ShowStatusUpInit` / `ShowGetAbilitysInit` / `ShowGetItemsInit` / `EndWaitInit` (guaranteed backstop — results always dismissed through `EndWaitInit`). `BattleResultState.ExpCounterPlaying` guards the single-fire stop. Toggle OFF = stream never touched.
 - FF4 has fixed jobs / no ABP, so FF5's `JobExp`/ABP branches were dropped — character EXP only.
 - `ShowLevelUpAbilitysInit` is also a stop safety net (2026-09-23).
 
@@ -153,7 +153,7 @@ Each result page announces its own content when it is shown (KeyInput `ResultMen
   - Dialogue: `OnSceneLoaded` calls `DialogueTracker.Reset()` when `IsInDialogue` is stuck and `MessageWindowManager.IsOpen()` is false (IsOpen = `currentWindowController` non-null && `isPlaying` && window active, per disassembly), before `OnSceneTransition` so the loops Reset starts are stopped and restarted normally. The open-window check keeps an additive scene load mid-dialogue from wiping the pages.
   - Battle pause menu: controller cached by `SetEnablePauseMenu` (true sets, false clears; also cleared in `OnSceneLoaded`) instead of `FindObjectOfType` on every in-battle cursor move.
   - Mod menu: volume description corrected to "Enter mutes it, or sets it to 50 percent when muted." (`Toggle` sets 50%, not the previous level).
-- **Multi-hit damage (2026-09-23):** "Target: NxTotal damage" on weapon attacks now works in FF4. It never could before: the game draws its ×N (`BattleBasicFunction.CreateHitCount` → `DamageViewUIManager.CreateHitCount`) only when `SystemConfigData.GetBattleType()` is Command, and FF4's returns 0 (ATB; FF1–FF3 return 1), so the `CreateHitCount` hook never fired. The `CreateDamageView` postfix now reads the attack's own count from `__instance.ICalcResultDic[target].GetHitCount()` for weapon abilities (`Ability.TypeId` 4 — the Fight command's ability 1; the same rule the ×N display uses). `battleActData` is protected, read at offset 0x28. Default is now "With hit count", stored as `MultiHitDamage`. *Unverified in game:* that `GetHitCount` is hits landed.
+- **Multi-hit damage (2026-09-23; feature removed 2026-09-24, see "Round 2"):** "Target: NxTotal damage" on weapon attacks now works in FF4. It never could before: the game draws its ×N (`BattleBasicFunction.CreateHitCount` → `DamageViewUIManager.CreateHitCount`) only when `SystemConfigData.GetBattleType()` is Command, and FF4's returns 0 (ATB; FF1–FF3 return 1), so the `CreateHitCount` hook never fired. The `CreateDamageView` postfix now reads the attack's own count from `__instance.ICalcResultDic[target].GetHitCount()` for weapon abilities (`Ability.TypeId` 4 — the Fight command's ability 1; the same rule the ×N display uses). `battleActData` is protected, read at offset 0x28. Default is now "With hit count", stored as `MultiHitDamage`. *Unverified in game:* that `GetHitCount` is hits landed.
 - **Not done (superseded 2026-09-23, session 2):** GameToggleAnnouncer (F1/F3 from any source). Now done by `Patches/GameTogglePatches.cs`; see "Open-issues pass (2026-09-23, session 2)".
 - **Unverified in game:** everything above that depends on call order — per-turn command reset/queueing, same-actor "X's turn" reset, item/ability list re-entry reset, deferred focus reads, bestiary page changes via SetData, minimap ChangeState, pause-menu hooks, CommonPopup.UpdateFocus on open and navigation, shop state gate/empty slots, `ExtraSoundListContentInfo.playTime` units (seconds), learned-spell page.
 
@@ -203,6 +203,88 @@ Everything here is **unverified in game**. RVAs are from `dump.cs`; callers from
     - Italian uses "Eikon" for 幻獣.
   - **Where the rules live:** the rules, the full old→new list and the skipped items are in `D:\Games\Dev\Unity\FFPR\tools\official_substring\`.
 
+### Round 2 (2026-09-24)
+Everything here is **unverified in game**. RVAs from `dump.cs` (each checked unique unless noted); callers from `tools/hitscan.py ff4` and a capstone call/metadata scan.
+
+**Status removal ("X: Poison removed").**
+- **Why not `Remove`:** FF1's hook, `BattleConditionController.Remove(unit, id, isNegate)` (FF4 RVA 0x360460), is only reached from `InterruptRemoveCondition` ×2 (escape, Sword of the Sky, Rampage), `Cancellation` (conflicts) and `BattleEndRecoveryCondition`. FF4 removes conditions from `CharacterParameterBase.CurrentConditionList` (@0x88) directly in many places. A scan of `List<Condition>.Remove/RemoveAll/RemoveAt` references found:
+  - cures: `RecoveryConditionFunction/RecoveryConditionMultiFunction/UniqueFunction/DispelFunction.UpdateParameter`, `UserRecoveryConditionFunction.FixedParameter`;
+  - wear-off: `BattleConditionFunction.NaturalRemove`, and `Recovery(unit, untilType)`, which calls the function's `NaturalRecovery` and removes the condition itself;
+  - conflicts / negation: `ConditionUtility.Conflict/Negate/…`;
+  - KO: `BattleUtility.IfNeededDying/RemoveAllConditions`.
+- **Hook:** `BattleConditionController.RemoveFunction(BattleUnitData, int id)` (private, RVA 0x3602A0), prefix. It is the controller's sync: `CheckConditionFunction → RemoveConditionFunction → RemoveFunction` destroys the effect function of every condition that left the list (the mirror of `AddConditionFunction → Add`, which the existing add announcement hooks), and `Remove` tail-calls it. Body: `LastOrDefault` function in `BattleUnitDataInfo.BattleConditionFunction` (@0x28) whose `condition.Id == id`; nothing when there is none; else its virtual `Remove()`, then `List.Remove`.
+- **Prefix logic:**
+  - the function being removed must exist, so the add was announced;
+  - the name comes from that function's `condition` via the add patch's own lookup (`TryGetConditionName`: `MesIdName` → `MessageManager`; unnamed = hidden, "Status {id}" fallback);
+  - `CurrentConditionList` is already in its after-removal state on both paths, so the prefix skips a condition still present (a stacked instance) and statuses cleared by KO (the list holds a `ConditionType == 5` UnableFight condition, ids 5/69) unless the removed one is KO itself (revive → "X: KO removed", in the game's word for KO);
+  - one announcement per (unit, id) per frame;
+  - `interrupt: false`.
+  - After speaking it resets `BATTLE_CONDITION_ADD`, so re-poisoning the same unit is announced again (the add's duplicate guard used to swallow it).
+- **Silent at battle end:** a prefix on `BattleEndRecoveryCondition` (RVA 0x35C990; callers `BattleController.StartWinResult`, `EndWinFadeOutCallback`, `EndEscapeFadeOut`) sets `BattleEnding`; the `StartBattle` prefix and the `SetCommandSelectTarget` postfix clear it.
+- **isNegate:** false at all five `Remove` call sites in FF4 (`xor r9d, r9d`). Negated or immune conditions leave the list before `CheckConditionFunction` creates a function, so neither `Add` nor `RemoveFunction` runs for them.
+- **Unnamed conditions:** Defend (1), Escaping (2), Escape (3), Dying (4) and the unnamed system conditions have no `mes_id_name` (master `condition.csv`), so they stay silent both ways.
+- **Removed:** the `HitType.RecoveryCondition` → "{0}: cured" branch and key (never written by FF4's calc) and the `[Battle] value-0 view:` log line. Value-0 views: Zero still says "{0}: 0 damage"; every other value-0 view is silent.
+
+**Multi-hit Damage removed (user decision).** FF4's calc results always carry hit count 0 (`CalcControllerProvider.GetFightStatus` 0x429080 drops `PhysicalExecution`'s landed count), and the game's ×N display (`CreateHitCount`) only runs in Command battles, never in ATB. Removed:
+- the mod-menu item and its description;
+- the `MultiHitDamage` preference (an old line in MelonPreferences.cfg is ignored);
+- the `DamageViewUIManager.CreateHitCount` capture;
+- `ReadWeaponHitCount` (the `GetHitCount` fallback);
+- the "{0}: {1}x{2} damage" branch;
+- the keys "Multi-hit Damage", "Total only", "With hit count", "{0}: {1}x{2} damage" and the description.
+
+Damage always reads "{0}: {1} damage".
+
+**Per-frame / polling / timer sweep.**
+- **Per-frame hooks replaced:**
+  - `CommonPopup.UpdateFocus` (called from `UpdateSelect` every frame via `UpdateCommand`, which 11 per-frame `*Update` methods call) → `CommonPopup.SetCommandSelectCursor` (RVA 0x735270; callers `Open`, `ResetCursor`, the up/down index callback `<UpdateSelect>b__2/b__4` (one body), mouse). Calls made while the popup is hidden stay quiet. Shop popups (no message read) get a button-only open read, as the first per-frame call used to give.
+  - `GameOverSelectPopup.UpdateCommand` → `GameOverSelectPopup.SetCommandSelectCursor` (RVA 0x4D58E0; `Open`, `ResetCursor`, `<UpdateSelect>b__12_2`, mouse). The open read now says "Game Over. {button}".
+  - `GameOverLoadPopup.UpdateCommand` (← `GameOverPopupController.UpdateSaveLoadPopup`) → the `Cursor.NextIndex/PrevIndex` postfixes, matched on the popup's `selectCursor` (@0x58; the popup is registered by `InitSaveLoadPopup`). Its `SetCommandSelectCursor` (0x731CE0) is per frame for a single-button popup, like SavePopup's.
+  - `SavePopup.SetCommandSelectCursor` (brief item) → `TryReadSavePopupMove` (see "Save/Load Popup Button Navigation"). Single-button popups have nothing to move to, so their only read is the open read, which now picks the button the game forces (index 1).
+  - `ConfigCommandController.SetFocus`: the config menu's per-frame `ConfigActualDetailsControllerBase.UpdateController` calls `UpdateFocus`, which calls `SetFocus` on every row every frame (colours), and the postfix ran `GetComponentInParent<Canvas>` for the focused row each frame. Replaced by KeyInput `ConfigActualDetailsControllerBase.SelectCommand(Cursor, WithinRangeType)` (private, RVA 0x73A1D0; callers `Initialize`, `ResetCursor`, `SetDefaultSelect`, mouse, the up/down callbacks `<UpdateController>b__1/b__7`). It stores the row in `SelectedCommand` (@0x20). Same reader and duplicate guard. If the menu isn't on screen yet when the focus is placed (open), one retry the next frame.
+  - `FieldPlayerKeyController.OnTouchPadCallback` (the per-frame input callback) + `WaitForSeconds(0.08)` for footsteps → `FieldController.OnPlayerMoveFinished(FieldEntity)` (RVA 0x289400, registered by `SetControlPlayer` via `FieldEntity.AddDelegateMoveFinished`; its body runs the per-step logic: foot monitors, hidden passages, `UpdateStateSwitchLandable`). Same tile-change test and cooldown. It is gated on `SubSceneManagerMainGame` state Player (3), because the old hook only ran on player input: scripted moves in events don't click.
+- **Polling loops replaced:**
+  - Bestiary formation view (3 s per-frame `FindObjectOfType<ArBattleTopController>`) → `ArBattleTopController.SetActive(bool)` postfix (RVA 0x498200; called by `ExtraArBattleTopUi`'s state process; `SetActive(true)` fills `monsterPartyList` via `InitMonsterPartyList`). Whichever of it and `ChangeState(5)` comes second reads. The "Formation view" timeout fallback is gone.
+  - Gallery entry and Music Player entry (2 s per-frame polls of the cached focus): title, then one frame later the cached focus if there is one, else the list's first `SetFocusContent` / `SetFocus` schedules a one-frame-deferred read (the last focus of that frame).
+  - EXP counter end (0.1 s `WaitForSeconds` poll) → see "EXP Counter Sound".
+- **Timers removed:**
+  - `DelayedAudioRestart` (0.5 s after every scene load) → `AudioLoopManager.RestartLoopsIfOnField`, from `OnSceneLoaded` when the field player already exists and from `MainGame.set_FieldReady(true)` (which now also caches `FieldPlayerController`). The loops' own one-second post-transition suppression is unchanged, so nothing sounds earlier.
+  - `ConfirmationDialog` 0.1 s ×2 and `TextInputWindow` 0.3 s ×2: see Waypoint System, "Dialog Close Pattern".
+- **Kept:**
+  - `Timer.Update` prefix: the Shift+T freeze has to stop the game's own per-frame timer update. `Timer.Suspend/Resume` exist but the game calls them too, so its own `Resume` would undo a freeze.
+  - `FieldPlayer.ChangeMoveState` postfix: called only from the movement input callbacks, int compare, speaks only on a vehicle ↔ on-foot change.
+  - `FieldController.OnPlayerHitCollider` + 0.3 s bump cooldown (a collision callback; the cooldown only rate-limits the sound).
+  - The audio loops (wall tones, beacons, EXP-counter feed) and their `Time.time` cadence, `MapTransitionPatches.IsScreenFading` (polled from the wall-tone loop), `InputManager` / `GamepadManager` / `ControllerRouter` / `InputPassthroughPatches` (input core), and `IsOnValidMap`'s 30-frame cache-miss refresh (input context).
+  - One-frame deferrals started by an Init / cursor event (menu focus reads, popup open reads, shop, status, bestiary list/map, controls pop-up, `WaitAndReadCursor`), and `ModMenu`'s two-frame first-item read (the mod's own menu; queues after "Mod menu").
+
+**Double-path audit of ed850a0.**
+- Game-over Load/Title moves were spoken twice (per-frame `UpdateCommand` postfix + the generic cursor handler's `ReadCurrentButton`). Now only `SetCommandSelectCursor`, and `ReadCurrentButton` is gone.
+- `FieldKeyController.SetDashFlag` hook + `MoveStateHelper.GetDashFlag` / `cachedDashFlag`: leftovers of the removed F1 keypress path (the class is the extras map viewer, and nothing read the flag). Removed.
+- The `OverwriteConfirmInit` prefix only held the removed focus postfix quiet. Removed; the postfix stays.
+- SavePopup open read vs. the per-frame single-button `SetCommandSelectCursor` call: the open read could claim index 0 (the hidden button) and the next frame's forced index 1 then spoke again. Fixed by the single-button rule.
+- Checked, no overlap:
+  - F1/F3: `GameTogglePatches` is the only speaker. `MoveStateHelper.AnnounceStateChange` never speaks walk ↔ dash, and the config rows speak through their own row hooks while the game state is Menu.
+  - U: one dispatcher (shop or item menu).
+  - "X attacks": one classifier.
+  - The CommonPopup open read vs. its focus hook: pending flag + index guard.
+  - The main-menu save (`KeyInput.SaveWindowController`) has only a SavePopup; the `SaveConfirm` CommonPopup belongs to `Save.KeyInput.SaveWindowController`. They are read by different hooks, one popup each.
+
+**Follow-up (same day).**
+- **Config row on every open.** The `CONFIG_COMMAND` guard was never reset, so reopening Config on the same row was silent. On open the game focuses the first row again: `ConfigController.SetActive(false)` changes to state None, whose `InitializeNone` calls `ResetCursor` while the view is already hidden. The guard is now cleared whenever a config list gains focus, by prefixes on:
+  - in game (KeyInput `ConfigController`): `InitializeSelect` (0x45B090) and `InitializeGameBoosterSetting` (0x45AF40). `SetActive(true)` queues the Select state, so `InitializeSelect` is the entry on open and on return from Setting / GameBoosterSetting, and its `SetDefaultSelect → SelectCommand` reads the row.
+  - title options (`OptionController`): `InitConfig` (0x50B6D0; `ShowConfig` changes to Config = 16), `InitSelectLanguage` (0x50C6C0), `InitSelectScreenSetting` (0x50CE00) and `InitSelectSoundSettings` (0x50D820). These enable a list's cursor (`SetEnableCursor`), and the page Inits never call `SelectCommand`. A postfix reads, one frame later, the focused row of the list whose `selectCursor` (@0xE0) is shown, through the same guard, so a read already made in the Init body isn't repeated.
+  - `OptionController.SetActive` runs `ResetCursor` on every page's list (`configControllerList` @0x38), so `SelectCommand` reads are suppressed during it.
+  - Not hooked: `SetEnableCursor` (0x73E9E0). Its body is shared with `<Initialize>b__91_0`, the scroll-range callback that hides and shows the cursor while scrolling.
+- **English literals through `T()`:**
+  - `MoveStateHelper` "On {0}" now uses the existing keys "Hovercraft", "Chocobo" and "Airship".
+  - New keys (12 languages): "Press a button.", "Press a key." (config remap prompts) and "Press any button" (the title fallback when `MENU_TITLE_PRESS_TEXT` can't be read).
+- **EXP-counter hook type confirmed from the game's assets.** A UnityPy scan of the `key_*` / `touch_*` bundles found the scripts only in `key_battle`:
+  - `result_menu` → `Last.UI.KeyInput.ResultMenuController`;
+  - `point_root` → `Serial.FF0.UI.KeyInput.ResultPointController`;
+  - `character_list` and `character_view` → `Serial.FF0.UI.KeyInput.ResultCharacterListController`.
+
+  The Touch twins (`Serial.FF4.UI.Touch`) appear in none of those bundles. Because two list objects exist, `ShowPointsInit` records the one the page tallies on (`pointController @0x20 → characterListConteroller @0x30`), and the completion postfix ignores the other.
+
 ### Vehicle Names
 `TransportationInfo.MessageId` → `MessageManager.GetMessage()` for specific names. Falls back to type-based generic.
 
@@ -230,11 +312,11 @@ User-defined map markers independent of entity scanner. Ported from FF5.
 
 **Dialog Input Flow:** `InputManager.Update()` checks the modals first (`ConfirmationDialog`/`TextInputWindow`/`ModMenu`, each consuming all input when open) before the window-focus gate, so the virtual dialogs keep working even when the game window isn't foreground. Keys are read via `GamepadManager` (SDL3 + GetAsyncKeyState); game input is suppressed via `ControllerRouter.SuppressGameInput` + `InputPassthroughPatches` + `Input.ResetInputAxes` (no window focus stealing).
 
-**Dialog Close Pattern:** Uses `CloseWithDelayedAnnouncement()` to restore focus first, then announce after 0.3s delay (lets NVDA finish window title), then invoke callback after 0.15s pause. Prevents speech interruption from window focus change.
+**Dialog Close Pattern (2026-09-24):** No timed delays (FF4 rule 3; the dialogs no longer change window focus, so there is no NVDA window title to wait for). Prompts are spoken on open. `TextInputWindow` closes, speaks "Confirmed: X" / "Cancelled" and runs the callback at once. `ConfirmationDialog` waits one frame before speaking "Yes"/"No" and running the callback, so the dialog (and `SuppressGameInput`) stays up through the frame of the confirming key press.
 
 ### Game Over Popup
 Flow: Defeat message → Load/Title → Yes/No confirmation
-Patches: `BattleCommandMessageController.SetMessage`, `GameOverSelectPopup.UpdateCommand`, `GameOverLoadPopup.UpdateCommand`
+Patches: `BattleCommandMessageController.SetMessage`; `Popup.Open` (open read "Game Over. {focused button}") + `GameOverSelectPopup.SetCommandSelectCursor` (moves); `GameOverPopupController.InitSaveLoadPopup` (open read "message. {focused button}") + `PopupPatches.TryReadGameOverLoadMove` from the `Cursor.NextIndex/PrevIndex` postfixes (moves). 2026-09-24: replaced the per-frame `UpdateCommand` postfixes; the select popup's moves were also read by the generic cursor handler, so each was spoken twice.
 
 ### Title Screen
 Two-phase approach: `SplashController.InitializeTitle` captures text + sets `isTitleScreenTextPending`, `SystemIndicator.Hide` announces when loading completes.
@@ -251,11 +333,11 @@ GameOverLoadPopup: messageText=0x40, selectCursor=0x58, commandList=0x60
 GameOverPopupController: view=0x30 | GameOverPopupView: loadPopup=0x18
 
 ### Save/Load Popup Button Navigation
-`SavePopup.SetCommandSelectCursor` postfix (private, unique RVA 0x99BFA0) reads the cursor index from `selectCursor` (0x58), deduplicates via `AnnouncementDeduplicator.ShouldAnnounce("SaveLoadPopupButton", index)`, and reads the button text from `commandList` (0x60) → `CommonCommand.text` (0x18). Every SavePopup focus change goes through that method: `UpdateSelect`'s up/down lambdas pass it to `Cursor.NextIndex/PrevIndex` as the index callback (always invoked), and `ResetCursor`, the mouse handler and the main-menu save's `PopupInit` call it directly. It replaced the per-frame `SavePopup.UpdateCommand` hook (2026-09-23, session 2), which the main-menu save never calls: `KeyInput.SaveWindowController.PopupUpdate` calls `SavePopup.UpdateSelect` directly, so the save overwrite Yes/No was silent (BugReports FF4 #1). `CursorNavigationPatches` has an early `SaveLoadMenuState.IsActive` return before `PopupState.ShouldSuppress()` so the generic reader never double-reads the buttons.
+Yes/No moves (2026-09-24): `SaveLoadPatches.TryReadSavePopupMove`, called first thing from the `Cursor.NextIndex/PrevIndex` postfixes (`CursorNavigationHandler`). `SavePopup.UpdateSelect` moves its `selectCursor` (0x58) only through `Cursor.NextIndex/PrevIndex` (inside `<UpdateSelect>b__32_0`), which update the index before invoking the move callback. When the moved cursor is the open popup's (`activeSavePopup`, set by the open read), it deduplicates via `AnnouncementDeduplicator.ShouldAnnounce("SaveLoadPopupButton", index)` and reads `commandList` (0x60) → `CommonCommand.text` (0x18). History: the per-frame `SavePopup.UpdateCommand` hook never ran for the main-menu save (`KeyInput.SaveWindowController.PopupUpdate` calls `UpdateSelect` directly — BugReports FF4 #1); its 2026-09-23 replacement, a `SavePopup.SetCommandSelectCursor` postfix (RVA 0x99BFA0), was itself per frame for a single-button popup: `UpdateSelect` sees `commandList[0]` inactive, forces `selectCursor.index = 1` and calls `SetCommandSelectCursor` every frame. `CursorNavigationPatches` still returns early on `SaveLoadMenuState.IsActive`, so the generic reader never reads these buttons.
 
-The open read (`ReadSavePopupAt`, from every `SetPopupActive(true)` / `SetEnablePopup(true)` and from `OverwriteConfirmInit`) sets `savePopupOpenReadPending` (the focus postfix stays quiet), resets the button guard, and two frames later speaks "title. message. focused button" and claims the guard for that index.
+The open read (`ReadSavePopupAt`, from every `SetPopupActive(true)` / `SetEnablePopup(true)` and from `OverwriteConfirmInit`) registers the popup, sets `savePopupOpenReadPending` (moves stay quiet), resets the button guard, and two frames later speaks "title. message. focused button" and claims the guard for that index. The focused index follows the game's single-button rule (`PopupPatches.FocusedSaveStyleIndex`: first command hidden → 1).
 
-**Overwrite confirmation** (`Last.UI.Save.KeyInput.SaveWindowController.OverwriteConfirmInit`) drives the view's `SavePopup` (view @0x30 → `SaveWindowView.savePopup` @0x28; every popup call in the body goes through it). The controller's `CommonPopup` @0x38 belongs to `SaveConfirm`; the old postfix read its message by mistake. A prefix sets the pending flag because the body's `ResetCursor` fires the focus postfix. Other KeyInput CommonPopups: `PopupOpen_Postfix` reads message + focused button, and `CommonPopup.UpdateFocus` reads their moves.
+**Overwrite confirmation** (`Last.UI.Save.KeyInput.SaveWindowController.OverwriteConfirmInit`) drives the view's `SavePopup` (view @0x30 → `SaveWindowView.savePopup` @0x28; every popup call in the body goes through it). The controller's `CommonPopup` @0x38 belongs to `SaveConfirm`; the old postfix read its message by mistake. Other KeyInput CommonPopups: `PopupOpen_Postfix` reads message + focused button, and `CommonPopup.SetCommandSelectCursor` (RVA 0x735270) reads their moves.
 
 ### Utility Classes
 

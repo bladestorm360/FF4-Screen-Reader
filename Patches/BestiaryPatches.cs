@@ -85,6 +85,7 @@ namespace FFIV_ScreenReader.Patches
             FullMapIndex = 0;
             CachedEntryName = null;
             CachedHabitatNames = null;
+            SubSceneManagerExtraLibrary_ChangeState_Patch.ActiveFormationController = null;
             MenuStateRegistry.Reset(
                 MenuStateRegistry.BESTIARY_LIST,
                 MenuStateRegistry.BESTIARY_DETAIL,
@@ -186,7 +187,7 @@ namespace FFIV_ScreenReader.Patches
                     case 5: // ArTop (Formation)
                         MenuStateRegistry.SetActive(MenuStateRegistry.BESTIARY_FORMATION, true);
                         AnnouncementDeduplicator.Reset(AnnouncementContexts.BESTIARY_FORMATION);
-                        CoroutineManager.StartManaged(AnnounceFormation());
+                        AnnounceFormation();
                         break;
 
                     case 7: // GotoTitle — leaving bestiary
@@ -282,37 +283,28 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        private static IEnumerator AnnounceFormation()
+        // The formation view's controller while it is shown: set by ArBattleTopController.SetActive(true)
+        // (which fills monsterPartyList through InitMonsterPartyList), cleared by SetActive(false).
+        internal static ArBattleTopController ActiveFormationController;
+
+        /// <summary>
+        /// Entering the formation view (state 5). Event-driven since 2026-09-24 (was a 3 s per-frame
+        /// FindObjectOfType poll): whichever of this and ArBattleTopController.SetActive(true) comes
+        /// second reads the formation.
+        /// </summary>
+        private static void AnnounceFormation()
         {
-            float elapsed = 0f;
+            var controller = ActiveFormationController;
+            if (controller != null)
+                ReadCurrentFormation(controller);
+        }
 
-            while (elapsed < 3f)
-            {
-                yield return null;
-                elapsed += Time.deltaTime;
-
-                try
-                {
-                    var controller = UnityEngine.Object.FindObjectOfType<ArBattleTopController>();
-                    if (controller != null)
-                    {
-                        var partyList = controller.monsterPartyList;
-                        if (partyList != null && partyList.Count > 0)
-                        {
-                            ReadCurrentFormation(controller);
-                            yield break;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Warning($"[Bestiary] Error polling formation: {ex.Message}");
-                    break;
-                }
-            }
-
-            // Timeout — announce generic fallback
-            FFIV_ScreenReaderMod.SpeakText(T("Formation view"), true);
+        /// <summary>ArBattleTopController.SetActive postfix (see ArBattleTopController_SetActive_Patch).</summary>
+        internal static void OnFormationViewActive(ArBattleTopController controller, bool active)
+        {
+            ActiveFormationController = active ? controller : null;
+            if (active && controller != null && BestiaryStateTracker.IsInFormation)
+                ReadCurrentFormation(controller);
         }
 
         private static void ReadCurrentFormation(ArBattleTopController controller)
@@ -556,6 +548,28 @@ namespace FFIV_ScreenReader.Patches
     // ─────────────────────────────────────────────────────────────────────────
     // Patch 7: Formation rearrange — announce new formation after Q key
     // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ArBattleTopController.SetActive(bool) (RVA 0x498200, unique; called by ExtraArBattleTopUi's
+    /// scene-state process when the formation view opens and closes). SetActive(true) fills
+    /// monsterPartyList (InitMonsterPartyList), so this is the moment the formation can be read.
+    /// </summary>
+    [HarmonyPatch(typeof(ArBattleTopController), nameof(ArBattleTopController.SetActive))]
+    public static class ArBattleTopController_SetActive_Patch
+    {
+        [HarmonyPostfix]
+        public static void Postfix(ArBattleTopController __instance, bool __0)
+        {
+            try
+            {
+                SubSceneManagerExtraLibrary_ChangeState_Patch.OnFormationViewActive(__instance, __0);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Bestiary] Error in ArBattleTopController.SetActive patch: {ex.Message}");
+            }
+        }
+    }
 
     [HarmonyPatch(typeof(ArBattleTopController), nameof(ArBattleTopController.ChangeMonsterParty))]
     public static class ArBattleTopController_ChangeMonsterParty_Patch

@@ -25,14 +25,65 @@ namespace FFIV_ScreenReader.Patches
         // ExtraSoundListController field offsets
         public const int OFFSET_CURRENT_LIST_TYPE = 0xC0;  // currentListType (AudioManager.BgmType)
 
+        // Entry read waiting for the list's first focus (SetFocus schedules it).
+        public static bool EntryReadPending { get; set; } = false;
+        private static bool entryReadScheduled = false;
+
         public static void ClearState()
         {
             IsInMusicPlayer = false;
             SuppressContentChange = false;
             CachedFocusedPtr = IntPtr.Zero;
+            EntryReadPending = false;
+            entryReadScheduled = false;
             MenuStateRegistry.Reset(MenuStateRegistry.MUSIC_PLAYER);
             AnnouncementDeduplicator.Reset(AnnouncementContexts.MUSIC_LIST_ENTRY);
             AnnouncementDeduplicator.Reset(AnnouncementContexts.TITLE_MENU_COMMAND);
+        }
+
+        /// <summary>
+        /// Speaks the cached focused song after "Music Player" and ends the entry suppression.
+        /// Returns false when nothing readable is cached yet.
+        /// </summary>
+        public static bool TryReadCachedEntry()
+        {
+            IntPtr focusedPtr = CachedFocusedPtr;
+            if (focusedPtr == IntPtr.Zero ||
+                !MusicPlayerReader.ReadContentFromPointer(focusedPtr, out string name, out int bgmId, out int idx, out float playTime))
+                return false;
+
+            string entry = MusicPlayerReader.ReadSongEntry(name, bgmId, idx, playTime);
+            if (!string.IsNullOrEmpty(entry))
+                FFIV_ScreenReaderMod.SpeakText(entry, false);
+            EntryReadPending = false;
+            SuppressContentChange = false;
+            return true;
+        }
+
+        /// <summary>
+        /// The list's first focus arrived after "Music Player" was spoken: read it one frame later,
+        /// so the last focus set in this frame (list construction) is the one read.
+        /// </summary>
+        public static void ScheduleEntryRead()
+        {
+            if (entryReadScheduled) return;
+            entryReadScheduled = true;
+            CoroutineManager.StartManaged(ReadEntryNextFrame());
+        }
+
+        private static IEnumerator ReadEntryNextFrame()
+        {
+            yield return null;
+            entryReadScheduled = false;
+            try
+            {
+                if (EntryReadPending && IsInMusicPlayer)
+                    TryReadCachedEntry();
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[MusicPlayer] Error announcing entry song: {ex.Message}");
+            }
         }
     }
 
@@ -74,38 +125,23 @@ namespace FFIV_ScreenReader.Patches
             yield return null;
             FFIV_ScreenReaderMod.SpeakText(T("Music Player"), true);
 
-            // Poll CachedFocusedPtr — SetFocus fires during entry with correct pointer,
-            // cached by the suppression path in the SetFocus patch.
-            float elapsed = 0f;
+            // SetFocus fires during entry with the correct pointer, cached by the suppression path
+            // in the SetFocus patch. Read it one frame later if it is already cached (the moment the
+            // old 2 s poll first checked); otherwise the list's first SetFocus schedules the read.
+            // Event-driven since 2026-09-24.
+            yield return null;
 
-            while (elapsed < 2f)
+            try
             {
-                yield return null;
-                elapsed += Time.deltaTime;
-
-                try
-                {
-                    IntPtr focusedPtr = MusicPlayerStateTracker.CachedFocusedPtr;
-                    if (focusedPtr != IntPtr.Zero &&
-                        MusicPlayerReader.ReadContentFromPointer(focusedPtr, out string name, out int bgmId, out int idx, out float playTime))
-                    {
-                        string entry = MusicPlayerReader.ReadSongEntry(name, bgmId, idx, playTime);
-                        if (!string.IsNullOrEmpty(entry))
-                            FFIV_ScreenReaderMod.SpeakText(entry, false);
-                        // Success — clear suppression and exit
-                        MusicPlayerStateTracker.SuppressContentChange = false;
-                        yield break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Warning($"[MusicPlayer] Error announcing entry song: {ex.Message}");
-                    break;
-                }
+                if (!MusicPlayerStateTracker.IsInMusicPlayer) yield break;
+                if (!MusicPlayerStateTracker.TryReadCachedEntry())
+                    MusicPlayerStateTracker.EntryReadPending = true;
             }
-
-            // Timeout or error — still clear suppression
-            MusicPlayerStateTracker.SuppressContentChange = false;
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[MusicPlayer] Error announcing entry song: {ex.Message}");
+                MusicPlayerStateTracker.SuppressContentChange = false;
+            }
         }
     }
 
@@ -133,6 +169,8 @@ namespace FFIV_ScreenReader.Patches
                             MusicPlayerStateTracker.CachedFocusedPtr = __instance.Pointer;
                     }
                     catch { }
+                    if (MusicPlayerStateTracker.EntryReadPending)
+                        MusicPlayerStateTracker.ScheduleEntryRead();
                     return;
                 }
 
@@ -235,6 +273,7 @@ namespace FFIV_ScreenReader.Patches
             finally
             {
                 MusicPlayerStateTracker.SuppressContentChange = false;
+                MusicPlayerStateTracker.EntryReadPending = false; // the toggle read the current song
             }
         }
     }

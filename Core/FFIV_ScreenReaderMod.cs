@@ -150,8 +150,8 @@ namespace FFIV_ScreenReader.Core
             MapTransitionPatches.Initialize(harmony);
 
             // NOTE: Audio loops (wall tones, beacons) are NOT started here.
-            // They are started in DelayedAudioRestart after FieldPlayerController exists
-            // to avoid lag during game load.
+            // AudioLoopManager.RestartLoopsIfOnField starts them once a FieldPlayerController
+            // exists (scene load on the field, or MainGame.set_FieldReady) to avoid lag during game load.
         }
 
         public override void OnDeinitializeMelon()
@@ -178,7 +178,9 @@ namespace FFIV_ScreenReader.Core
 
         /// <summary>
         /// Called when the field is ready (via MainGame.set_FieldReady hook).
-        /// Triggers entity scan so entities are available immediately when user presses navigation keys.
+        /// Triggers entity scan so entities are available immediately when user presses navigation keys,
+        /// and (re)starts the enabled audio loops: the field player exists from this moment, which is
+        /// what the old 0.5 s DelayedAudioRestart after every scene load waited for.
         /// </summary>
         private void OnFieldReadyCallback()
         {
@@ -189,6 +191,17 @@ namespace FFIV_ScreenReader.Core
             catch (Exception ex)
             {
                 LoggerInstance.Warning($"[FieldReady] Error during entity scan: {ex.Message}");
+            }
+
+            try
+            {
+                if (Utils.GameObjectCache.Get<Il2CppLast.Map.FieldPlayerController>() == null)
+                    Utils.GameObjectCache.Refresh<Il2CppLast.Map.FieldPlayerController>();
+                audioManager?.RestartLoopsIfOnField();
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Warning($"[FieldReady] Error restarting audio loops: {ex.Message}");
             }
         }
 
@@ -230,6 +243,10 @@ namespace FFIV_ScreenReader.Core
                 // Drop the cached battle pause controller (it belongs to the old scene)
                 BattlePausePatches.Reset();
 
+                // Drop the popups whose Yes/No moves are matched by cursor (they belong to the old scene)
+                SaveLoadPatches.ResetSceneState();
+                PopupPatches.ResetSceneState();
+
                 // If we were in battle and are now loading a non-battle scene, reset battle state
                 // This restores navigation settings (wall tones, footsteps, etc.) at the correct time
                 if (BattleState.IsInBattle && !scene.name.Contains("Battle"))
@@ -251,17 +268,16 @@ namespace FFIV_ScreenReader.Core
                     Utils.GameObjectCache.Register(fieldMap);
                 }
 
-                // Skip audio restart for battle scenes (belt-and-suspenders with DelayedAudioRestart check)
+                // Skip audio restart for battle scenes (RestartLoopsIfOnField also checks)
                 if (BattleState.IsInBattle || scene.name.Contains("Battle"))
                 {
                     return;
                 }
 
-                // Restart audio loops after scene has settled (if enabled)
-                if (audioManager.NeedsAudioRestart)
-                {
-                    CoroutineManager.StartManaged(audioManager.DelayedAudioRestart());
-                }
+                // Restart audio loops now if the field player already exists (an additive load on the
+                // field); otherwise MainGame.set_FieldReady(true) restarts them (OnFieldReadyCallback).
+                // The loops stay silent for the first second after OnSceneTransition either way.
+                audioManager.RestartLoopsIfOnField();
             }
             catch (System.Exception ex)
             {

@@ -514,17 +514,7 @@ namespace FFIV_ScreenReader.Patches
         }
     }
 
-    /// <summary>
-    /// Patches FieldKeyController.SetDashFlag to cache the dash toggle state.
-    /// The game calls this when player presses F1 to toggle walk/run.
-    /// </summary>
-    [HarmonyPatch(typeof(Il2CppLast.OutGame.Library.FieldKeyController), nameof(Il2CppLast.OutGame.Library.FieldKeyController.SetDashFlag))]
-    public static class SetDashFlagPatch
-    {
-        [HarmonyPostfix]
-        public static void Postfix(bool dashFlag)
-        {
-            MoveStateHelper.SetCachedDashFlag(dashFlag);
-        }
-    }
+    // FieldKeyController.SetDashFlag patch removed 2026-09-24: that class is Last.OutGame.Library (the
+    // extras map viewer), the hook had no direct callers, and its only reader (MoveStateHelper.GetDashFlag,
+    // the old F1 keypress path) went when GameTogglePatches took over F1/F3 on 2026-09-23.
 }

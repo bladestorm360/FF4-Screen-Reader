@@ -100,10 +100,15 @@ namespace FFIV_ScreenReader.Patches
             try
             {
                 TryPatchBasePopup(harmony);
-                PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputCommonPopup), "UpdateFocus",
-                    typeof(PopupPatches), nameof(CommonPopup_UpdateFocus_Postfix), "[Popup]");
+                // CommonPopup.SetCommandSelectCursor (private, RVA 0x735270, unique): the popup's own
+                // focus placement. Callers: Open, ResetCursor, the up/down index callback that
+                // UpdateSelect passes to Cursor.NextIndex/PrevIndex (<UpdateSelect>b__2/b__4, one
+                // body), and the mouse handler. Not per frame: the per-frame UpdateSelect calls
+                // UpdateFocus (colours only), which is why that hook was replaced (2026-09-24).
+                PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputCommonPopup), "SetCommandSelectCursor",
+                    typeof(PopupPatches), nameof(CommonPopup_SetCommandSelectCursor_Postfix), "[Popup]");
                 TryPatchTitleScreen(harmony);
-                TryPatchGameOverSelectPopupUpdateCommand(harmony);
+                TryPatchGameOverSelectPopupFocus(harmony);
                 TryPatchGameOverLoadPopup(harmony);
                 isPatched = true;
             }
@@ -246,20 +251,24 @@ namespace FFIV_ScreenReader.Patches
         #region Button Reading
 
         // Set while a CommonPopup's open read (message + focused button) is pending, so the
-        // UpdateFocus fired by the popup's own cursor setup doesn't speak the button first.
+        // SetCommandSelectCursor call in the popup's own Open doesn't speak the button first.
         private static bool commonPopupOpenReadPending;
 
         /// <summary>
-        /// Postfix for CommonPopup.UpdateFocus — the popup's own focus change, fired on open and on
-        /// every Yes/No move (the game never calls UpdateCommand). Reads the focused button for
-        /// every KeyInput CommonPopup. (The save-overwrite confirmation is a SavePopup, not a
-        /// CommonPopup: SaveLoadPatches.SavePopupFocus_Postfix reads its Yes/No.)
+        /// Postfix for CommonPopup.SetCommandSelectCursor — the popup's own focus change (open,
+        /// reset, every Yes/No move). Reads the focused button for every KeyInput CommonPopup.
+        /// (The save-overwrite confirmation is a SavePopup, not a CommonPopup: SaveLoadPatches
+        /// reads its Yes/No.) Calls made while the popup is hidden (setup) don't speak.
         /// </summary>
-        public static void CommonPopup_UpdateFocus_Postfix(KeyInputCommonPopup __instance)
+        public static void CommonPopup_SetCommandSelectCursor_Postfix(KeyInputCommonPopup __instance)
         {
             try
             {
                 if (__instance == null || commonPopupOpenReadPending)
+                    return;
+
+                var go = __instance.gameObject;
+                if (go == null || !go.activeInHierarchy)
                     return;
 
                 int index = __instance.selectCursor?.Index ?? -1;
@@ -272,18 +281,20 @@ namespace FFIV_ScreenReader.Patches
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[Popup] Error in CommonPopup.UpdateFocus postfix: {ex.Message}");
+                MelonLogger.Warning($"[Popup] Error in CommonPopup.SetCommandSelectCursor postfix: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Open read for a CommonPopup: title/message followed by the initially focused button.
+        /// In a shop (whose own patches read the popup's context) only the focused button is read,
+        /// as the per-frame focus hook this replaced used to do.
         /// </summary>
-        private static string ReadCommonPopupWithFocus(KeyInputCommonPopup popup)
+        private static string ReadCommonPopupWithFocus(KeyInputCommonPopup popup, bool buttonOnly = false)
         {
             commonPopupOpenReadPending = false;
 
-            string announcement = ReadCommonPopup(popup.Pointer);
+            string announcement = buttonOnly ? null : ReadCommonPopup(popup.Pointer);
             int index = popup.selectCursor?.Index ?? -1;
             string buttonText = ReadButtonFromCommandList(popup.Pointer, COMMON_CMDLIST_OFFSET, index);
             if (string.IsNullOrWhiteSpace(buttonText) ||
@@ -292,30 +303,6 @@ namespace FFIV_ScreenReader.Patches
 
             buttonText = TextUtils.StripIconMarkup(buttonText);
             return string.IsNullOrEmpty(announcement) ? buttonText : $"{announcement}. {buttonText}";
-        }
-
-        public static void ReadCurrentButton(GameCursor cursor)
-        {
-            try
-            {
-                if (PopupState.ActivePopupPtr == IntPtr.Zero || PopupState.CommandListOffset < 0)
-                    return;
-
-                string buttonText = ReadButtonFromCommandList(
-                    PopupState.ActivePopupPtr,
-                    PopupState.CommandListOffset,
-                    cursor.Index);
-
-                if (!string.IsNullOrWhiteSpace(buttonText))
-                {
-                    buttonText = TextUtils.StripIconMarkup(buttonText);
-                    FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[Popup] Error reading button: {ex.Message}");
-            }
         }
 
         private static string ReadButtonFromCommandList(IntPtr popupPtr, int cmdListOffset, int index)
@@ -352,8 +339,23 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                if (__instance == null || IsShopActive())
+                if (__instance == null)
                     return;
+
+                if (IsShopActive())
+                {
+                    // Shop popups get no message read here, only their focused button (the shop
+                    // patches speak the context); moves are read by the SetCommandSelectCursor hook.
+                    var shopPopup = __instance.TryCast<KeyInputCommonPopup>();
+                    if (shopPopup != null)
+                    {
+                        AnnouncementDeduplicator.Reset(AnnouncementContexts.COMMON_POPUP_BUTTON);
+                        commonPopupOpenReadPending = true;
+                        CoroutineManager.StartManaged(DelayedPopupRead(shopPopup.Pointer, "CommonPopup",
+                            () => ReadCommonPopupWithFocus(shopPopup, buttonOnly: true)));
+                    }
+                    return;
+                }
 
                 // KeyInput types first
                 var commonPopup = __instance.TryCast<KeyInputCommonPopup>();
@@ -369,8 +371,10 @@ namespace FFIV_ScreenReader.Patches
                 var gameOver = __instance.TryCast<KeyInputGameOverSelectPopup>();
                 if (gameOver != null)
                 {
+                    AnnouncementDeduplicator.Reset(DEDUP_GAMEOVER_SELECT);
+                    gameOverSelectOpenReadPending = true;
                     HandlePopupDetected("GameOverSelectPopup", gameOver.Pointer, GAMEOVER_CMDLIST_OFFSET,
-                        () => ReadGameOverSelectPopup(gameOver.Pointer));
+                        () => ReadGameOverSelectPopupWithFocus(gameOver));
                     return;
                 }
 
@@ -435,8 +439,9 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                // The next popup starts fresh, including ones that skip the open read (shops)
+                // The next popup starts fresh
                 commonPopupOpenReadPending = false;
+                gameOverSelectOpenReadPending = false;
                 AnnouncementDeduplicator.Reset(AnnouncementContexts.COMMON_POPUP_BUTTON);
                 if (PopupState.IsConfirmationPopupActive)
                 {
@@ -453,95 +458,78 @@ namespace FFIV_ScreenReader.Patches
 
         #region GameOver Popup Patches
 
-        /// <summary>
-        /// Patch GameOverSelectPopup.UpdateCommand to announce button navigation (Load/Title options).
-        /// </summary>
-        private static void TryPatchGameOverSelectPopupUpdateCommand(HarmonyLib.Harmony harmony) =>
-            PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverSelectPopup), "UpdateCommand",
-                typeof(PopupPatches), nameof(GameOverSelectPopup_UpdateCommand_Postfix), "[Popup]");
+        // Both game-over popups used to be read from their per-frame UpdateCommand (2026-09-24:
+        // replaced). GameOverSelectPopup (Load / Title) moves were ALSO read by the generic cursor
+        // handler, so each move was spoken twice.
 
         /// <summary>
-        /// Patch GameOverLoadPopup.UpdateCommand for Yes/No button navigation
-        /// and GameOverPopupController.InitSaveLoadPopup to announce the popup message.
+        /// GameOverSelectPopup.SetCommandSelectCursor (private, RVA 0x4D58E0, unique): callers Open,
+        /// ResetCursor, the up/down index callback UpdateSelect passes to Cursor.NextIndex/PrevIndex
+        /// (&lt;UpdateSelect&gt;b__12_2) and the mouse handler. Not per frame.
         /// </summary>
-        private static void TryPatchGameOverLoadPopup(HarmonyLib.Harmony harmony)
-        {
-            PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverLoadPopup), "UpdateCommand",
-                typeof(PopupPatches), nameof(GameOverLoadPopup_UpdateCommand_Postfix), "[Popup]");
+        private static void TryPatchGameOverSelectPopupFocus(HarmonyLib.Harmony harmony) =>
+            PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverSelectPopup), "SetCommandSelectCursor",
+                typeof(PopupPatches), nameof(GameOverSelectPopup_SetCommandSelectCursor_Postfix), "[Popup]");
 
+        /// <summary>
+        /// GameOverPopupController.InitSaveLoadPopup announces the Load confirmation. Its Yes/No
+        /// moves are read from the generic Cursor.NextIndex/PrevIndex hooks (TryReadGameOverLoadMove):
+        /// GameOverLoadPopup.SetCommandSelectCursor can't be used because UpdateSelect re-runs it
+        /// every frame for a single-button popup, like SavePopup's.
+        /// </summary>
+        private static void TryPatchGameOverLoadPopup(HarmonyLib.Harmony harmony) =>
             PatchHelper.TryPatchPostfix(harmony, typeof(KeyInputGameOverPopupController), "InitSaveLoadPopup",
                 typeof(PopupPatches), nameof(GameOverPopupController_InitSaveLoadPopup_Postfix), "[Popup]");
-        }
 
         private const string DEDUP_GAMEOVER_SELECT = AnnouncementContexts.GAMEOVER_SELECT;
 
-        public static void GameOverSelectPopup_UpdateCommand_Postfix(KeyInputGameOverSelectPopup __instance)
+        // Set while the game-over popup's open read ("Game Over" + focused button) is pending, so the
+        // SetCommandSelectCursor call inside its Open doesn't speak the button first.
+        private static bool gameOverSelectOpenReadPending;
+
+        /// <summary>Open read: "Game Over. {focused button}", claiming the button guard.</summary>
+        private static string ReadGameOverSelectPopupWithFocus(KeyInputGameOverSelectPopup popup)
+        {
+            gameOverSelectOpenReadPending = false;
+            string announcement = ReadGameOverSelectPopup(popup.Pointer);
+            int index = ReadCursorIndexAt(popup.Pointer, GAMEOVER_SELECT_CURSOR_OFFSET);
+            string buttonText = ReadButtonFromCommandList(popup.Pointer, GAMEOVER_CMDLIST_OFFSET, index);
+            if (string.IsNullOrWhiteSpace(buttonText) ||
+                !AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_SELECT, index))
+                return announcement;
+            return $"{announcement}. {TextUtils.StripIconMarkup(buttonText)}";
+        }
+
+        public static void GameOverSelectPopup_SetCommandSelectCursor_Postfix(KeyInputGameOverSelectPopup __instance)
         {
             try
             {
-                if (__instance == null) return;
+                if (__instance == null || gameOverSelectOpenReadPending) return;
+
+                var go = __instance.gameObject;
+                if (go == null || !go.activeInHierarchy) return;
 
                 IntPtr ptr = __instance.Pointer;
-                if (ptr == IntPtr.Zero) return;
-
-                // Read cursor index from offset 0x38
-                IntPtr cursorPtr = Marshal.ReadIntPtr(ptr + GAMEOVER_SELECT_CURSOR_OFFSET);
-                if (cursorPtr == IntPtr.Zero) return;
-
-                var cursor = new GameCursor(cursorPtr);
-                int index = cursor.Index;
-
-                // Deduplicate by index
+                int index = ReadCursorIndexAt(ptr, GAMEOVER_SELECT_CURSOR_OFFSET);
+                if (index < 0) return;
                 if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_SELECT, index)) return;
 
-                // Read button text from commandList at offset 0x40
                 string buttonText = ReadButtonFromCommandList(ptr, GAMEOVER_CMDLIST_OFFSET, index);
                 if (!string.IsNullOrWhiteSpace(buttonText))
-                {
-                    buttonText = TextUtils.StripIconMarkup(buttonText);
-                    FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: true);
-                }
+                    FFIV_ScreenReaderMod.SpeakText(TextUtils.StripIconMarkup(buttonText), interrupt: true);
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"[Popup] Error in GameOverSelectPopup.UpdateCommand: {ex.Message}");
+                MelonLogger.Warning($"[Popup] Error in GameOverSelectPopup.SetCommandSelectCursor: {ex.Message}");
             }
         }
 
         private const string DEDUP_GAMEOVER_LOAD = AnnouncementContexts.GAMEOVER_LOAD;
 
-        public static void GameOverLoadPopup_UpdateCommand_Postfix(KeyInputGameOverLoadPopup __instance)
-        {
-            try
-            {
-                if (__instance == null) return;
-
-                IntPtr ptr = __instance.Pointer;
-                if (ptr == IntPtr.Zero) return;
-
-                // Read cursor index from offset 0x58
-                IntPtr cursorPtr = Marshal.ReadIntPtr(ptr + GAMEOVERLOAD_SELECT_CURSOR_OFFSET);
-                if (cursorPtr == IntPtr.Zero) return;
-
-                var cursor = new GameCursor(cursorPtr);
-                int index = cursor.Index;
-
-                // Deduplicate by index
-                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_LOAD, index)) return;
-
-                // Read button text from commandList at offset 0x60
-                string buttonText = ReadButtonFromCommandList(ptr, GAMEOVERLOAD_CMDLIST_OFFSET, index);
-                if (!string.IsNullOrWhiteSpace(buttonText))
-                {
-                    buttonText = TextUtils.StripIconMarkup(buttonText);
-                    FFIV_ScreenReaderMod.SpeakText(buttonText, interrupt: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                MelonLogger.Warning($"[Popup] Error in GameOverLoadPopup.UpdateCommand: {ex.Message}");
-            }
-        }
+        // The game-over Load confirmation whose Yes/No moves are read (set by InitSaveLoadPopup).
+        // Holding the wrapper keeps the object alive while its cursor pointer is compared.
+        private static KeyInputGameOverLoadPopup activeGameOverLoadPopup;
+        private static bool gameOverLoadOpenReadPending;
 
         public static void GameOverPopupController_InitSaveLoadPopup_Postfix(KeyInputGameOverPopupController __instance)
         {
@@ -549,11 +537,19 @@ namespace FFIV_ScreenReader.Patches
             {
                 if (__instance == null) return;
 
+                // Navigate: controller->view(0x30)->loadPopup(0x18)
+                IntPtr viewPtr = Marshal.ReadIntPtr(__instance.Pointer + GAMEOVERPOPUPCTRL_VIEW_OFFSET);
+                IntPtr loadPopupPtr = viewPtr == IntPtr.Zero ? IntPtr.Zero
+                    : Marshal.ReadIntPtr(viewPtr + GAMEOVERPOPUPVIEW_LOADPOPUP_OFFSET);
+                if (loadPopupPtr == IntPtr.Zero) return;
+
                 // Reset button tracking for fresh state
                 AnnouncementDeduplicator.Reset(DEDUP_GAMEOVER_LOAD);
+                activeGameOverLoadPopup = new KeyInputGameOverLoadPopup(loadPopupPtr);
+                gameOverLoadOpenReadPending = true;
 
                 // Use coroutine to delay reading until UI has populated
-                CoroutineManager.StartManaged(DelayedGameOverLoadPopupRead(__instance.Pointer));
+                CoroutineManager.StartManaged(DelayedGameOverLoadPopupRead(loadPopupPtr));
             }
             catch (Exception ex)
             {
@@ -561,34 +557,101 @@ namespace FFIV_ScreenReader.Patches
             }
         }
 
-        private static IEnumerator DelayedGameOverLoadPopupRead(IntPtr controllerPtr)
+        private static IEnumerator DelayedGameOverLoadPopupRead(IntPtr loadPopupPtr)
         {
             yield return null; // Wait one frame
 
+            gameOverLoadOpenReadPending = false;
             try
             {
-                if (controllerPtr == IntPtr.Zero) yield break;
-
-                // Navigate: controller->view(0x30)->loadPopup(0x18)->messageText(0x40)
-                IntPtr viewPtr = Marshal.ReadIntPtr(controllerPtr + GAMEOVERPOPUPCTRL_VIEW_OFFSET);
-                if (viewPtr == IntPtr.Zero) yield break;
-
-                IntPtr loadPopupPtr = Marshal.ReadIntPtr(viewPtr + GAMEOVERPOPUPVIEW_LOADPOPUP_OFFSET);
-                if (loadPopupPtr == IntPtr.Zero) yield break;
-
                 IntPtr messageTextPtr = Marshal.ReadIntPtr(loadPopupPtr + GAMEOVERLOAD_MESSAGE_OFFSET);
                 string message = ReadTextFromPointer(messageTextPtr);
+                message = string.IsNullOrWhiteSpace(message) ? null : TextUtils.StripIconMarkup(message.Trim());
 
-                if (!string.IsNullOrWhiteSpace(message))
+                // Focused button, claiming the guard so the first move away is the next thing read.
+                int index = FocusedSaveStyleIndex(loadPopupPtr, GAMEOVERLOAD_SELECT_CURSOR_OFFSET, GAMEOVERLOAD_CMDLIST_OFFSET);
+                string buttonText = ReadButtonFromCommandList(loadPopupPtr, GAMEOVERLOAD_CMDLIST_OFFSET, index);
+                if (!string.IsNullOrWhiteSpace(buttonText) && AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_LOAD, index))
                 {
-                    message = TextUtils.StripIconMarkup(message.Trim());
-                    FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
+                    buttonText = TextUtils.StripIconMarkup(buttonText);
+                    message = message == null ? buttonText : $"{message}. {buttonText}";
                 }
+
+                if (!string.IsNullOrEmpty(message))
+                    FFIV_ScreenReaderMod.SpeakText(message, interrupt: false);
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[Popup] Error in DelayedGameOverLoadPopupRead: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Called from the Cursor.NextIndex/PrevIndex postfixes: when the moved cursor is the
+        /// game-over Load confirmation's (selectCursor @0x58), reads the newly focused button.
+        /// Cursor.NextIndex/PrevIndex update the index before invoking the move callback, so it
+        /// is current here. Returns true when the cursor was that popup's.
+        /// </summary>
+        public static bool TryReadGameOverLoadMove(GameCursor cursor)
+        {
+            try
+            {
+                var popup = activeGameOverLoadPopup;
+                if (popup == null || cursor == null) return false;
+                IntPtr popupPtr = popup.Pointer;
+                if (popupPtr == IntPtr.Zero || Marshal.ReadIntPtr(popupPtr + GAMEOVERLOAD_SELECT_CURSOR_OFFSET) != cursor.Pointer)
+                    return false;
+
+                if (gameOverLoadOpenReadPending) return true;
+                int index = cursor.Index;
+                if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_GAMEOVER_LOAD, index)) return true;
+
+                string buttonText = ReadButtonFromCommandList(popupPtr, GAMEOVERLOAD_CMDLIST_OFFSET, index);
+                if (!string.IsNullOrWhiteSpace(buttonText))
+                    FFIV_ScreenReaderMod.SpeakText(TextUtils.StripIconMarkup(buttonText), interrupt: true);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Popup] Error reading game-over load popup move: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>Drops the game-over popup registration (scene change).</summary>
+        public static void ResetSceneState()
+        {
+            activeGameOverLoadPopup = null;
+            gameOverLoadOpenReadPending = false;
+        }
+
+        private static int ReadCursorIndexAt(IntPtr popupPtr, int cursorOffset)
+        {
+            if (popupPtr == IntPtr.Zero) return -1;
+            IntPtr cursorPtr = Marshal.ReadIntPtr(popupPtr + cursorOffset);
+            return cursorPtr == IntPtr.Zero ? -1 : new GameCursor(cursorPtr).Index;
+        }
+
+        /// <summary>
+        /// The focused index of a SavePopup-style popup (GameOverLoadPopup, SavePopup). When its
+        /// first command is hidden (a single-button popup), the game's UpdateSelect forces the
+        /// cursor to index 1 every frame, so that is the focused button whatever the index says yet.
+        /// </summary>
+        internal static int FocusedSaveStyleIndex(IntPtr popupPtr, int cursorOffset, int cmdListOffset)
+        {
+            int index = ReadCursorIndexAt(popupPtr, cursorOffset);
+            try
+            {
+                IntPtr listPtr = Marshal.ReadIntPtr(popupPtr + cmdListOffset);
+                if (listPtr == IntPtr.Zero || Marshal.ReadInt32(listPtr + 0x18) < 2) return index;
+                IntPtr itemsPtr = Marshal.ReadIntPtr(listPtr + 0x10);
+                IntPtr firstPtr = itemsPtr == IntPtr.Zero ? IntPtr.Zero : Marshal.ReadIntPtr(itemsPtr + 0x20);
+                if (firstPtr == IntPtr.Zero) return index;
+                var first = new UnityEngine.Component(firstPtr).gameObject;
+                if (first != null && !first.activeSelf) return 1;
+            }
+            catch { }
+            return index;
         }
 
         #endregion
@@ -625,13 +688,13 @@ namespace FFIV_ScreenReader.Patches
 
                 pendingTitleText = !string.IsNullOrWhiteSpace(pressText)
                     ? TextUtils.StripIconMarkup(pressText.Trim())
-                    : "Press any button";
+                    : T("Press any button");
                 isTitleScreenTextPending = true;
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[Popup] Error in InitializeTitle postfix: {ex.Message}");
-                pendingTitleText = "Press any button";
+                pendingTitleText = T("Press any button");
                 isTitleScreenTextPending = true;
             }
         }

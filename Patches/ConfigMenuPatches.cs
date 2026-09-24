@@ -57,13 +57,53 @@ namespace FFIV_ScreenReader.Patches
                 var optionSetActive = AccessTools.Method(typeof(OptionController), "SetActive", new Type[] { typeof(bool) });
                 if (optionSetActive != null)
                 {
-                    harmony.Patch(optionSetActive, postfix: new HarmonyMethod(
-                        AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(OptionController_SetActive_Postfix))));
+                    harmony.Patch(optionSetActive,
+                        prefix: new HarmonyMethod(AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(OptionController_SetActive_Prefix))),
+                        postfix: new HarmonyMethod(AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(OptionController_SetActive_Postfix))));
                 }
                 else
                 {
                     MelonLogger.Warning("[ConfigMenu] OptionController.SetActive not found");
                 }
+
+                // Focused config row on every open and on return from a sub-screen (the row guard
+                // is cleared when a list gains focus; see ConfigActualDetails_SelectCommand_Patch).
+                //   In game: KeyInput ConfigController.InitializeSelect (RVA 0x45B090) is the Select
+                //   state's entry, reached on open (SetActive(true) queues Select) and on return from
+                //   Setting / GameBoosterSetting; its SetDefaultSelect → SelectCommand reads the row.
+                //   InitializeGameBoosterSetting (0x45AF40) enters the booster sub-screen the same way.
+                //   Title options: OptionController.InitConfig (0x50B6D0; ShowConfig changes to the
+                //   Config state) and the page Inits InitSelectLanguage / InitSelectScreenSetting /
+                //   InitSelectSoundSettings (0x50C6C0 / 0x50CE00 / 0x50D820) enable a list's cursor;
+                //   a postfix reads that list's focused row one frame later.
+                void PatchFocusEntry(Type type, string method, bool readAfter)
+                {
+                    try
+                    {
+                        var m = AccessTools.Method(type, method);
+                        if (m == null)
+                        {
+                            MelonLogger.Warning($"[ConfigMenu] {type.Name}.{method} not found");
+                            return;
+                        }
+                        harmony.Patch(m,
+                            prefix: new HarmonyMethod(AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(ConfigListFocus_Prefix))),
+                            postfix: readAfter
+                                ? new HarmonyMethod(AccessTools.Method(typeof(ConfigMenuStatePatches), nameof(OptionPageInit_Postfix)))
+                                : null);
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Warning($"[ConfigMenu] Error patching {type.Name}.{method}: {ex.Message}");
+                    }
+                }
+
+                PatchFocusEntry(controllerType, "InitializeSelect", readAfter: false);
+                PatchFocusEntry(controllerType, "InitializeGameBoosterSetting", readAfter: false);
+                PatchFocusEntry(typeof(OptionController), "InitConfig", readAfter: true);
+                PatchFocusEntry(typeof(OptionController), "InitSelectLanguage", readAfter: true);
+                PatchFocusEntry(typeof(OptionController), "InitSelectScreenSetting", readAfter: true);
+                PatchFocusEntry(typeof(OptionController), "InitSelectSoundSettings", readAfter: true);
 
                 // Title-screen Language dropdown (keyboard/gamepad uses a Unity Dropdown driven by the
                 // KeyInput OptionController). SetDropDownItemFocus is the discrete, event-driven hook —
@@ -159,8 +199,33 @@ namespace FFIV_ScreenReader.Patches
         /// Mirror of the in-game ConfigController.SetActive driver for the title-screen options menu.
         /// Drives Config state so the Language-dropdown announce can gate on the menu being open.
         /// </summary>
+        public static void OptionController_SetActive_Prefix()
+        {
+            ConfigActualDetails_SelectCommand_Patch.SuppressReads = true;
+        }
+
+        /// <summary>A config list gains focus (open, sub-screen entry or return): clear the row guard.</summary>
+        public static void ConfigListFocus_Prefix()
+        {
+            ConfigActualDetails_SelectCommand_Patch.ResetRowGuard();
+        }
+
+        /// <summary>Title-options page Init: read the focused list's row next frame.</summary>
+        public static void OptionPageInit_Postfix(OptionController __instance)
+        {
+            try
+            {
+                ConfigActualDetails_SelectCommand_Patch.ScheduleFocusedRowRead(__instance);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ConfigMenu] Error scheduling config row read: {ex.Message}");
+            }
+        }
+
         public static void OptionController_SetActive_Postfix(bool isActive)
         {
+            ConfigActualDetails_SelectCommand_Patch.SuppressReads = false;
             if (isActive)
             {
                 MenuStates.Config.SetActive();
@@ -233,7 +298,7 @@ namespace FFIV_ScreenReader.Patches
         {
             try
             {
-                FFIV_ScreenReaderMod.SpeakText(gamepad ? "Press a button." : "Press a key.", interrupt: true);
+                FFIV_ScreenReaderMod.SpeakText(gamepad ? ModTextTranslator.T("Press a button.") : ModTextTranslator.T("Press a key."), interrupt: true);
             }
             catch (Exception ex)
             {
@@ -311,56 +376,158 @@ namespace FFIV_ScreenReader.Patches
     /// <summary>
     /// Controller-based patches for config menus (both title and in-game).
     /// Announces menu items directly from ConfigCommandController instead of hierarchy walking.
+    ///
+    /// Hook (2026-09-24): KeyInput ConfigActualDetailsControllerBase.SelectCommand(Cursor, WithinRangeType)
+    /// (private, RVA 0x73A1D0, unique). It stores the focused row in SelectedCommand (@0x20) and is
+    /// called by Initialize, ResetCursor, SetDefaultSelect, the mouse handler and the up/down move
+    /// callbacks (&lt;UpdateController&gt;b__1 / b__7). It replaces a ConfigCommandController.SetFocus
+    /// postfix that ran for every row every frame: the menu's per-frame UpdateController calls
+    /// UpdateFocus, which calls SetFocus on each row to set its colours.
     /// </summary>
-
-    [HarmonyPatch(typeof(ConfigCommandController), nameof(ConfigCommandController.SetFocus))]
-    public static class ConfigCommandController_SetFocus_Patch
+    [HarmonyPatch(typeof(Il2CppLast.UI.KeyInput.ConfigActualDetailsControllerBase), "SelectCommand")]
+    public static class ConfigActualDetails_SelectCommand_Patch
     {
         private const string DEDUP_CONTEXT = AnnouncementContexts.CONFIG_COMMAND;
+        private static bool retryScheduled;
+        private static bool focusedRowReadScheduled;
+
+        /// <summary>
+        /// Set while the title OptionController.SetActive runs: its body calls ResetCursor (→
+        /// SelectCommand) on every page's list, visible or not. The page Init that follows reads the
+        /// focused list instead.
+        /// </summary>
+        internal static bool SuppressReads;
+
+        /// <summary>
+        /// The row guard only drops repeats while a list keeps focus. It is cleared whenever a list
+        /// (re)gains focus, so the focused row is always read on open and on return from a sub-screen.
+        /// </summary>
+        internal static void ResetRowGuard() => AnnouncementDeduplicator.Reset(DEDUP_CONTEXT);
+
+        /// <summary>
+        /// One frame after a title-options page Init, reads the focused row of the list whose cursor is
+        /// shown (the page Inits enable the page's cursor with SetEnableCursor but don't call
+        /// SelectCommand). Goes through the same guard, so a SelectCommand read in the Init body
+        /// isn't repeated.
+        /// </summary>
+        internal static void ScheduleFocusedRowRead(OptionController option)
+        {
+            if (option == null || focusedRowReadScheduled) return;
+            focusedRowReadScheduled = true;
+            CoroutineManager.StartManaged(ReadFocusedRowNextFrame(option));
+        }
+
+        private static System.Collections.IEnumerator ReadFocusedRowNextFrame(OptionController option)
+        {
+            yield return null;
+            focusedRowReadScheduled = false;
+            try
+            {
+                if (TryAnnounceFocusedList(option.configActualDetailsController)) yield break;
+                var lists = option.configControllerList;
+                if (lists == null) yield break;
+                foreach (var list in lists)
+                {
+                    if (TryAnnounceFocusedList(list)) yield break;
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in config focused-row read: {ex.Message}");
+            }
+        }
+
+        /// <summary>Reads the list's focused row if its cursor is shown. True when the list had focus.</summary>
+        private static bool TryAnnounceFocusedList(Il2CppLast.UI.KeyInput.ConfigActualDetailsControllerBase list)
+        {
+            var cursorObject = list?.selectCursor?.gameObject;
+            if (cursorObject == null || !cursorObject.activeInHierarchy) return false;
+            var command = list.SelectedCommand;
+            if (command == null) return false;
+            Announce(command);
+            return true;
+        }
 
         [HarmonyPostfix]
-        public static void Postfix(ConfigCommandController __instance, bool isFocus, bool isSelectable)
+        public static void Postfix(Il2CppLast.UI.KeyInput.ConfigActualDetailsControllerBase __instance)
         {
             try
             {
-                // Only announce when gaining focus (not losing it)
-                if (!isFocus)
-                {
-                    return;
-                }
+                if (SuppressReads) return;
 
+                var command = __instance?.SelectedCommand;
+                if (command == null) return;
+
+                // Focus placed while the menu is still being shown (open): read it once the menu is
+                // on screen, one frame later (the old per-frame hook read it on its first visible frame).
+                if (!Announce(command) && !retryScheduled)
+                {
+                    retryScheduled = true;
+                    CoroutineManager.StartManaged(RetryNextFrame(__instance));
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in ConfigActualDetailsControllerBase.SelectCommand patch: {ex.Message}");
+            }
+        }
+
+        private static System.Collections.IEnumerator RetryNextFrame(Il2CppLast.UI.KeyInput.ConfigActualDetailsControllerBase controller)
+        {
+            yield return null;
+            retryScheduled = false;
+            try
+            {
+                var command = controller?.SelectedCommand;
+                if (command != null)
+                    Announce(command);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Error in config focus retry: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Speaks the focused row (name and value). Returns false only when the menu isn't on
+        /// screen yet.
+        /// </summary>
+        private static bool Announce(ConfigCommandController __instance)
+        {
+            try
+            {
                 // Safety checks
                 if (__instance == null)
                 {
-                    return;
+                    return true;
                 }
 
                 // IMPORTANT: Check if the config menu is actually visible
                 // This prevents announcements during initialization/map load
                 if (__instance.gameObject == null || !__instance.gameObject.activeInHierarchy)
                 {
-                    return;
+                    return false;
                 }
 
                 // Check for a visible canvas parent (menu must be on screen)
                 var canvas = __instance.GetComponentInParent<UnityEngine.Canvas>();
                 if (canvas == null || !canvas.enabled)
                 {
-                    return;
+                    return false;
                 }
 
                 // Get the view which contains the localized text
                 var view = __instance.view;
                 if (view == null)
                 {
-                    return;
+                    return true;
                 }
 
                 // Get the name text (localized)
                 var nameText = view.nameText;
                 if (nameText == null || string.IsNullOrWhiteSpace(nameText.text))
                 {
-                    return;
+                    return true;
                 }
 
                 string menuText = nameText.text.Trim();
@@ -368,7 +535,7 @@ namespace FFIV_ScreenReader.Patches
                 // Skip duplicate announcements
                 if (!AnnouncementDeduplicator.ShouldAnnounce(DEDUP_CONTEXT, menuText))
                 {
-                    return;
+                    return true;
                 }
 
                 // Set config menu state active
@@ -387,8 +554,9 @@ namespace FFIV_ScreenReader.Patches
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"Error in ConfigCommandController.SetFocus patch: {ex.Message}");
+                MelonLogger.Warning($"Error announcing config row: {ex.Message}");
             }
+            return true;
         }
     }
 
