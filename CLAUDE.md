@@ -49,6 +49,7 @@ powershell -Command "& cmd /c 'D:\Games\Dev\Unity\FFPR\FF4\ff4-screen-reader\bui
 - Reference FF6 mod source (`ff6/ff6ScreenReader/FFVI_MOD`) for patterns
 - Never edit game or reference mod folders
 - Prefix all game classes with `Il2Cpp`
+- **Git: commit and push allowed** — it is OK for Claude to commit and push to this repo's remote (`ff4-screen-reader`, github.com/bladestorm360/FF4-Screen-Reader, branch `master`) without asking first (user, 2026-09-24)
 
 ## CRITICAL RULES
 
