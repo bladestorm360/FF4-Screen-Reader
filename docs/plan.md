@@ -59,7 +59,8 @@ Field Navigation, Pathfinding, Moon Pathfinding, Wall Bump | Menu System (focus 
 | D-pad | Waypoints (field); status / bestiary / controls-pop-up navigation |
 | Right stick | Entities (field); off-field up = details (I), down = controls (Shift+I), left = usable by (U) |
 | LT | Pathfind to / restart beacon at the last target |
-| L3 / R3 | Beacon navigation / pathfinding filter (in mod mode when Stick Click Normalization is on) |
+| L3 / R3 | Beacon navigation / pathfinding filter (in mod mode when Stick Click Normalization is on); on the field a lone click acts on release |
+| L3 + R3 | Stick Click Normalization on/off (field, either setting) |
 
 ### Game Hotkeys (mod announces state)
 | Key | Game Function | Mod Announcement |
