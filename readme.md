@@ -94,6 +94,18 @@ Ctrl+/: remove current waypoint
 Ctrl+Shift+/: clear all waypoints for current map
 Ctrl+.: rename current waypoint
 
+### Game controller
+
+#### Stick clicks (L3 and R3)
+
+Stick Click Normalization in the mod menu decides what the stick clicks do. It is off by default.
+
+- L3 + R3 together, on the field: turn Stick Click Normalization on or off, whichever way it is set. Press both sticks in at once. You hear "Stick click normalization on" or "off", and nothing else happens.
+- On the field, a single stick click acts when you let go of it, so that it can be part of the L3 + R3 chord.
+- Normalization off: L3 toggles beacon navigation and R3 toggles the pathfinding filter.
+- Normalization on: L3 and R3 go to the game. L3 toggles walk/run and R3 toggles random encounters. The mod toggles move to mod mode: press Back/Select, then L3 for beacon navigation or R3 for the pathfinding filter.
+- Off the field, a stick click goes straight to the game.
+
 ## Credits
 
 Stirlock and Unexplained Entity for testing.
