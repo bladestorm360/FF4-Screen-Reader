@@ -279,58 +279,16 @@ namespace FFIV_ScreenReader.Field
                     // Use player's actual collision state for pathfinding
                     bool useCollision = player.IsOnCollision;
 
-                    // Try multiple destination layers (FF5/FF6 pattern)
-                    // Start from highest layer down — first success wins
-                    for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
+                    pathPoints = SearchTargetAndNeighbours(mapHandle, startCell, destCell, targetWorldPos,
+                        mapWidth, mapHeight, useCollision, pathInfo);
+
+                    // Secret passages are closed on the game's route grid but open to the player:
+                    // retry once with them open (no-op on maps without hidden passages).
+                    if ((pathPoints == null || pathPoints.Count == 0) && useCollision)
                     {
-                        destCell.z = tryDestZ;
-                        pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, destCell, useCollision);
-                        if (pathPoints != null && pathPoints.Count > 0)
-                        {
-                            pathInfo.DestinationZ = tryDestZ;
-                            break;
-                        }
-                    }
-
-                    // If direct path failed, try adjacent tiles with multi-layer search
-                    if (pathPoints == null || pathPoints.Count == 0)
-                    {
-                        Vector3[] adjacentOffsets = new Vector3[] {
-                            new Vector3(0, 16, 0),    // north
-                            new Vector3(16, 0, 0),    // east
-                            new Vector3(0, -16, 0),   // south
-                            new Vector3(-16, 0, 0),   // west
-                            new Vector3(16, 16, 0),   // northeast
-                            new Vector3(16, -16, 0),  // southeast
-                            new Vector3(-16, -16, 0), // southwest
-                            new Vector3(-16, 16, 0)   // northwest
-                        };
-
-                        bool found = false;
-                        foreach (var offset in adjacentOffsets)
-                        {
-                            Vector3 adjacentTargetWorld = targetWorldPos + offset;
-                            Vector3 adjacentDestCell = new Vector3(
-                                Mathf.FloorToInt(mapWidth * 0.5f + adjacentTargetWorld.x * 0.0625f),
-                                Mathf.FloorToInt(mapHeight * 0.5f - adjacentTargetWorld.y * 0.0625f),
-                                0
-                            );
-
-                            for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
-                            {
-                                adjacentDestCell.z = tryDestZ;
-                                pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, adjacentDestCell, useCollision);
-                                if (pathPoints != null && pathPoints.Count > 0)
-                                {
-                                    pathInfo.DestinationZ = tryDestZ;
-                                    found = true;
-                                    break;
-                                }
-                            }
-
-                            if (found)
-                                break;
-                        }
+                        pathPoints = HiddenPassageRouting.SearchWithPassagesOpen(mapHandle,
+                            () => SearchTargetAndNeighbours(mapHandle, startCell, destCell, targetWorldPos,
+                                mapWidth, mapHeight, useCollision, pathInfo));
                     }
                 }
                 else
@@ -380,6 +338,65 @@ namespace FFIV_ScreenReader.Field
                 pathInfo.ErrorMessage = $"Pathfinding error: {ex.Message}";
                 return pathInfo;
             }
+        }
+
+        /// <summary>
+        /// The target cell on each destination layer, then each of its eight neighbours.
+        /// Records the layer that succeeded in pathInfo.DestinationZ.
+        /// </summary>
+        private static Il2CppSystem.Collections.Generic.List<Vector3> SearchTargetAndNeighbours(
+            IMapAccessor mapHandle, Vector3 startCell, Vector3 destCell, Vector3 targetWorldPos,
+            int mapWidth, int mapHeight, bool useCollision, PathInfo pathInfo)
+        {
+            Il2CppSystem.Collections.Generic.List<Vector3> pathPoints = null;
+
+            // Try multiple destination layers (FF5/FF6 pattern)
+            // Start from highest layer down — first success wins
+            for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
+            {
+                destCell.z = tryDestZ;
+                pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, destCell, useCollision);
+                if (pathPoints != null && pathPoints.Count > 0)
+                {
+                    pathInfo.DestinationZ = tryDestZ;
+                    return pathPoints;
+                }
+            }
+
+            // If direct path failed, try adjacent tiles with multi-layer search
+            Vector3[] adjacentOffsets = new Vector3[] {
+                new Vector3(0, 16, 0),    // north
+                new Vector3(16, 0, 0),    // east
+                new Vector3(0, -16, 0),   // south
+                new Vector3(-16, 0, 0),   // west
+                new Vector3(16, 16, 0),   // northeast
+                new Vector3(16, -16, 0),  // southeast
+                new Vector3(-16, -16, 0), // southwest
+                new Vector3(-16, 16, 0)   // northwest
+            };
+
+            foreach (var offset in adjacentOffsets)
+            {
+                Vector3 adjacentTargetWorld = targetWorldPos + offset;
+                Vector3 adjacentDestCell = new Vector3(
+                    Mathf.FloorToInt(mapWidth * 0.5f + adjacentTargetWorld.x * 0.0625f),
+                    Mathf.FloorToInt(mapHeight * 0.5f - adjacentTargetWorld.y * 0.0625f),
+                    0
+                );
+
+                for (int tryDestZ = 2; tryDestZ >= 0; tryDestZ--)
+                {
+                    adjacentDestCell.z = tryDestZ;
+                    pathPoints = Il2Cpp.MapRouteSearcher.Search(mapHandle, startCell, adjacentDestCell, useCollision);
+                    if (pathPoints != null && pathPoints.Count > 0)
+                    {
+                        pathInfo.DestinationZ = tryDestZ;
+                        return pathPoints;
+                    }
+                }
+            }
+
+            return pathPoints;
         }
 
         /// <summary>

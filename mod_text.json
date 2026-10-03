@@ -4716,5 +4716,19 @@
     "ru": "Закрывает меню мода и возвращает в игру.",
     "th": "ปิดเมนูม็อดและกลับไปที่เกม",
     "pt": "Fecha o menu do mod e volta ao jogo."
+  },
+  "Interactive Object": {
+    "en": "Interactive Object",
+    "ja": "調べられるもの",
+    "fr": "Objet interactif",
+    "it": "Oggetto interattivo",
+    "de": "Interaktives Objekt",
+    "es": "Objeto interactivo",
+    "ko": "조사할 수 있는 물체",
+    "zht": "可調查的物品",
+    "zhc": "可调查的物品",
+    "ru": "Интерактивный объект",
+    "th": "วัตถุที่ตรวจสอบได้",
+    "pt": "Objeto interativo"
   }
 }

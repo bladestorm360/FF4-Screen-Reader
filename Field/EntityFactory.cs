@@ -23,10 +23,11 @@ namespace FFIV_ScreenReader.Field
             if (fieldEntity == null || fieldEntity.transform == null)
                 return null;
 
-            // Skip entities with inactive GameObjects
+            // Skip entities with inactive GameObjects, except vehicle-only triggers the game
+            // hides while the player is in another vehicle (FieldEntityState.IsHiddenByVehicle)
             try
             {
-                if (fieldEntity.gameObject == null || !fieldEntity.gameObject.activeInHierarchy)
+                if (fieldEntity.gameObject == null || !FieldEntityState.IsPresent(fieldEntity))
                     return null;
             }
             catch
@@ -73,6 +74,10 @@ namespace FFIV_ScreenReader.Field
 
             // Filter out non-interactive types
             if (IsNonInteractiveType(objectType))
+                return null;
+
+            // Scenery: events and map objects with no action, script or message
+            if (FieldEntityState.IsScenery(fieldEntity))
                 return null;
 
             // Create appropriate entity type based on ObjectType
@@ -292,10 +297,39 @@ namespace FFIV_ScreenReader.Field
                 default:
                     // CONSERVATIVE filter for unknown types
                     string defaultName = fieldEntity.Property?.Name;
-                    if (IsPlaceholderEntity(defaultName))
+                    if (IsPlaceholderEntity(defaultName) && !IsUnnamedInteractive(fieldEntity, defaultName))
                         return null;
                     return new EventEntity { GameEntity = fieldEntity };
             }
+        }
+
+        // PropertyEvent.ActionId values in the map data (Tiled action_id)
+        private const int ActionRunScript = 2;
+        private const int ActionShowMessage = 4;
+
+        /// <summary>
+        /// An object with no developer label that still does something when checked: it runs a
+        /// script (action 2) or shows a message (action 4). The empty name used to filter these
+        /// as placeholders, which dropped a scene object in the Agart Observation Room, the
+        /// observatory bookshelves and the Land of Summons library books. EventEntity names them
+        /// "Interactive Object".
+        /// </summary>
+        private static bool IsUnnamedInteractive(FieldEntity fieldEntity, string entityName)
+        {
+            if (!string.IsNullOrWhiteSpace(entityName))
+                return false;
+            try
+            {
+                var ev = fieldEntity.Property?.TryCast<Il2CppLast.Map.PropertyEvent>();
+                if (ev == null)
+                    return false;
+                if (ev.ActionId == ActionRunScript)
+                    return ev.ScriptId != 0;
+                if (ev.ActionId == ActionShowMessage)
+                    return !string.IsNullOrEmpty(ev.TryCast<Il2Cpp.PropertyTalk>()?.MessageKey);
+            }
+            catch { } // IL2CPP cast can fail on a destroyed entity
+            return false;
         }
 
     }

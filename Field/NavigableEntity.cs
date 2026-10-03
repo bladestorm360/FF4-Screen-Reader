@@ -77,13 +77,8 @@ namespace FFIV_ScreenReader.Field
             get
             {
                 if (GameEntity == null) return false;
-                try
-                {
-                    var go = GameEntity.gameObject;
-                    if (go == null) return false;
-                    return go.activeInHierarchy;
-                }
-                catch { return false; }
+                // Vehicle-only triggers stay listed while the game hides them for another vehicle
+                return FieldEntityState.IsPresent(GameEntity);
             }
         }
 
@@ -256,6 +251,13 @@ namespace FFIV_ScreenReader.Field
         public override int Priority => 8;
 
         public override bool BlocksPathing => EventType == Il2Cpp.MapConstants.ObjectType.TelepoPoint;
+
+        /// <summary>
+        /// Objects without a developer label reach the list only when they can be checked
+        /// (EntityFactory.IsUnnamedInteractive); they are named generically.
+        /// </summary>
+        public override string Name =>
+            string.IsNullOrWhiteSpace(GameEntity?.Property?.Name) ? T("Interactive Object") : base.Name;
 
         protected override string GetDisplayName()
         {

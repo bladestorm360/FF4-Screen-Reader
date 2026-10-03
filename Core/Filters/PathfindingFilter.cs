@@ -18,6 +18,11 @@ namespace FFIV_ScreenReader.Core.Filters
             if (!IsEntityValid(entity))
                 return false;
 
+            // A vehicle-only trigger hidden for the current vehicle is not a walking target:
+            // it is reached by boarding its vehicle, so the walking path test does not apply.
+            if (FieldEntityState.IsHiddenByVehicle(entity.GameEntity))
+                return true;
+
             if (context.PlayerController?.fieldPlayer == null)
                 return false;
 
@@ -41,7 +46,7 @@ namespace FFIV_ScreenReader.Core.Filters
 
             try
             {
-                if (entity.GameEntity.gameObject == null || !entity.GameEntity.gameObject.activeInHierarchy)
+                if (entity.GameEntity.gameObject == null || !FieldEntityState.IsPresent(entity.GameEntity))
                     return false;
 
                 if (entity.GameEntity.transform == null)
